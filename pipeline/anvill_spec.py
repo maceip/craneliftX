@@ -2,10 +2,10 @@
 """Build and read Anvill specification protobufs.
 
 Anvill (vendor/anvill) lifts a function from a specification, not from a raw
-binary. The 2023 C++ frontend does not build against LLVM 18, so this module
-is the spec producer the pipeline actually runs. `remill-lift` then consumes
-the address, bytes, architecture, and register ABI stored in the spec — the
-same inputs Anvill's lifter would hand to Remill.
+binary. The C++ decompiler stays unbuilt on purpose, so this module is the
+spec producer the pipeline actually runs. `remill-lift` then consumes the
+address, bytes, architecture, and register ABI stored in the spec — the same
+inputs Anvill's lifter would hand to Remill.
 """
 from __future__ import annotations
 

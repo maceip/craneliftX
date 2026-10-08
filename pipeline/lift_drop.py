@@ -46,11 +46,12 @@ TRIPLES = {
 
 
 def llvm_tool(base: str) -> str:
-    for name in (f"{base}-18", base):
-        path = shutil.which(name)
-        if path:
-            return path
-    raise SystemExit(f"required LLVM tool not found: {base} (or {base}-18)")
+    """The drop uses the same LLVM 20 major that remill-lift is linked to."""
+    name = f"{base}-20"
+    path = shutil.which(name)
+    if path:
+        return path
+    raise SystemExit(f"required LLVM tool not found: {name}")
 
 
 def find_remill() -> str:
@@ -118,11 +119,15 @@ def devariadic_flags(ir: str) -> str:
         prefix = match.group(1).replace("(i1, ...)", "(i1)")
         return f"{prefix}{match.group(2)}(i1 {match.group(3)})"
 
+    # LLVM 20 prints operand attributes such as range(i64 lo, hi) inside the
+    # vararg tail. Those parentheses are not the end of the call.
     ir = re.sub(
         rf"(call [^@\n]*?)(@__remill_flag_computation_(?:{names}))"
-        r"\(i1(?: noundef)?(?: zeroext)? (%[\w.]+|true|false)(?:, [^)]*)?\)",
+        r"\(i1(?: noundef)?(?: zeroext)? (%[\w.]+|true|false)\b.*?\)"
+        r"(?=\s*(?:#\d+)?\s*$)",
         repl_call,
         ir,
+        flags=re.MULTILINE,
     )
     return ir
 
