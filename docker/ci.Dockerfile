@@ -63,4 +63,10 @@ RUN curl -fsSL -o /tmp/syft.tar.gz \
 
 COPY cargo-config.toml /usr/local/cargo/config.toml
 
+# The checkout is bind-mounted and owned by the runner, while this image runs
+# as root. Remill's version step runs git status and otherwise dies with
+# "dubious ownership".
+RUN git config --global --add safe.directory '*' \
+    && git config --global --add safe.directory /src
+
 WORKDIR /src

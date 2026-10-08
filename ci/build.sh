@@ -136,6 +136,10 @@ if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
     exit 1
   fi
   echo "==> pipeline/build_lifters.sh"
+  # The workspace is bind-mounted from the runner. Remill's git watcher runs
+  # git status and rejects the tree unless this directory is marked safe.
+  git config --global --add safe.directory '*' || true
+  git config --global --add safe.directory "$ROOT" || true
   JOBS="${LIFTER_JOBS:-$(nproc)}" pipeline/build_lifters.sh
   shopt -s nullglob
   lifters=("${ROOT}/build/remill-install/bin/"remill-lift*)
