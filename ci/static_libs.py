@@ -67,6 +67,7 @@ _SUFFIX_NAMED = re.compile(
 )
 _SUFFIX_BARE = re.compile(r"^(?P<ver>\d+\.\d+\.\d+[A-Za-z0-9]*)$")
 _DEFINE = re.compile(r"^\s*#\s*define\s+([A-Z0-9_]+)\s+(\d+)\b", re.M)
+_API_VERSION_NUM = re.compile(r"^\s*#\s*define\s+API_VERSION_NUM\s+(\d+\.\d+\.\d+)\b", re.M)
 _ARCHIVE_CRATE = re.compile(r"[/\\]build[/\\](.+)-([0-9a-f]{16})[/\\]")
 
 MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
@@ -103,6 +104,9 @@ class StaticLib:
 class Discovery:
     libraries: list[StaticLib] = field(default_factory=list)
     unversioned_static_archives: list[dict[str, str]] = field(default_factory=list)
+    # .a files produced from a crate Syft already versions, with no separate
+    # upstream version of their own (for example wasmtime's helper objects).
+    crate_archives: list[dict[str, str]] = field(default_factory=list)
 
     def by_key(self) -> dict[tuple[str, str], StaticLib]:
         return {(lib.name, lib.version): lib for lib in self.libraries}
@@ -162,6 +166,7 @@ def version_from_headers(crate_dir: Path, package: Package) -> tuple[str, str] |
     expected = version_from_suffix(package)
     expected_name = expected[0] if expected else library_name_from_crate(package.name)
     triples: dict[str, dict[str, int]] = {}
+    api_versions: list[str] = []
     seen = 0
     for path in sorted(crate_dir.rglob("*")):
         if seen >= MAX_HEADER_FILES:
@@ -172,6 +177,7 @@ def version_from_headers(crate_dir: Path, package: Package) -> tuple[str, str] |
             continue
         seen += 1
         text = path.read_text(encoding="utf-8", errors="ignore")
+        api_versions.extend(_API_VERSION_NUM.findall(text))
         for macro, value in _DEFINE.findall(text):
             kind = None
             prefix = None
@@ -201,12 +207,15 @@ def version_from_headers(crate_dir: Path, package: Package) -> tuple[str, str] |
         name = NAME_ALIASES.get(prefix.lower(), prefix.lower())
         candidates.append((name, version))
 
-    if not candidates:
-        return None
     wanted = _normalize(expected_name)
     for name, version in candidates:
         if _normalize(name) == wanted or wanted in _normalize(name) or _normalize(name) in wanted:
             return name, version
+    # Intel ITT (ittapi-sys) publishes the C API as API_VERSION_NUM, not as
+    # MAJOR/MINOR/RELEASE macros. The crate version is not that number.
+    distinct = sorted(set(api_versions))
+    if len(distinct) == 1 and (not expected or distinct[0] != expected[1]):
+        return expected_name, distinct[0]
     return None
 
 
@@ -368,6 +377,7 @@ def discover(
             lib.add_evidence(f"header-confirms:{crate_dir}")
 
     unversioned: list[dict[str, str]] = []
+    crate_archives: list[dict[str, str]] = []
     for archive in _static_archives(target_dirs or []):
         crate_name = _crate_from_archive(archive)
         owners = [pkg for pkg in cc_packages if pkg.name == crate_name]
@@ -387,6 +397,15 @@ def discover(
         if sniffed is not None and owners:
             name, version = sniffed
             add(name, version, owners[0], f"static-archive:{archive}")
+            continue
+        if owners:
+            crate_archives.append(
+                {
+                    "path": str(archive),
+                    "crate": _bundled_by(owners[0]),
+                    "reason": "static archive built from this crate; no separate upstream version",
+                }
+            )
             continue
         unversioned.append(
             {
@@ -414,7 +433,11 @@ def discover(
         attach_named_archives(root, found)
 
     libraries = sorted(found.values(), key=lambda lib: (lib.name, lib.version, lib.bundled_by))
-    return Discovery(libraries=libraries, unversioned_static_archives=unversioned)
+    return Discovery(
+        libraries=libraries,
+        unversioned_static_archives=unversioned,
+        crate_archives=crate_archives,
+    )
 
 
 def _crate_source_dir(cargo_home: Path, package: Package) -> Path | None:
@@ -476,7 +499,9 @@ def _sniff_archive_version(blob: bytes, crate_name: str) -> tuple[str, str] | No
 def merge_supplements(discovery: Discovery, supplements: list[Path]) -> Discovery:
     found = discovery.by_key()
     unversioned = list(discovery.unversioned_static_archives)
+    crate_archives = list(discovery.crate_archives)
     seen_unversioned = {item["path"] for item in unversioned}
+    seen_crate = {item["path"] for item in crate_archives}
     for path in supplements:
         payload = json.loads(path.read_text(encoding="utf-8"))
         for raw in payload.get("static_libraries", []):
@@ -501,8 +526,16 @@ def merge_supplements(discovery: Discovery, supplements: list[Path]) -> Discover
             if item.get("path") not in seen_unversioned:
                 unversioned.append(item)
                 seen_unversioned.add(item.get("path", ""))
+        for item in payload.get("crate_archives", []):
+            if item.get("path") not in seen_crate:
+                crate_archives.append(item)
+                seen_crate.add(item.get("path", ""))
     libraries = sorted(found.values(), key=lambda lib: (lib.name, lib.version, lib.bundled_by))
-    return Discovery(libraries=libraries, unversioned_static_archives=unversioned)
+    return Discovery(
+        libraries=libraries,
+        unversioned_static_archives=unversioned,
+        crate_archives=crate_archives,
+    )
 
 
 def supplement_document(discovery: Discovery) -> dict:
@@ -519,6 +552,7 @@ def supplement_document(discovery: Discovery) -> dict:
             for lib in discovery.libraries
         ],
         "unversioned_static_archives": discovery.unversioned_static_archives,
+        "crate_archives": discovery.crate_archives,
     }
 
 
@@ -649,6 +683,7 @@ def version_index(document: dict, discovery: Discovery) -> dict:
         ),
         "libraries": libraries,
         "unversioned_static_archives": discovery.unversioned_static_archives,
+        "crate_archives": discovery.crate_archives,
     }
 
 
@@ -684,6 +719,13 @@ def version_text(index: dict) -> str:
         for item in index["unversioned_static_archives"]:
             lines.append(
                 "\t".join(["UNKNOWN", "", "static-library", "UNVERSIONED", item.get("crate", ""), item.get("path", "")])
+            )
+    if index.get("crate_archives"):
+        lines.append("")
+        lines.append("# Static archives that are part of a crate already versioned above.")
+        for item in index["crate_archives"]:
+            lines.append(
+                "\t".join(["", "", "static-archive", "PART-OF-CRATE", item.get("crate", ""), item.get("path", "")])
             )
     lines.append("")
     return "\n".join(lines)

@@ -252,6 +252,42 @@ class LockAndMergeTests(unittest.TestCase):
                 any("libLLVMCore.a" in item for lib in attached.libraries for item in lib.evidence)
             )
 
+    def test_api_version_num_in_bundled_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lock = root / "Cargo.lock"
+            lock.write_text(
+                "\n".join(
+                    [
+                        "version = 4",
+                        "[[package]]",
+                        'name = "ittapi-sys"',
+                        'version = "0.4.0"',
+                        'source = "registry+https://github.com/rust-lang/crates.io-index"',
+                        "dependencies = [",
+                        ' "cc",',
+                        "]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            header = root / "cargo" / "registry" / "src" / "index" / "ittapi-sys-0.4.0" / "ittnotify_config.h"
+            header.parent.mkdir(parents=True)
+            header.write_text("#define API_VERSION_NUM 3.24.2\n", encoding="utf-8")
+            archive = (
+                root / "target" / "release" / "build" / "ittapi-sys-0123456789abcdef" / "out" / "libittnotify.a"
+            )
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b"!<arch>\nITT-API-Version 3.24.2")
+            owned = root / "target" / "release" / "build" / "wasmtime-aaaaaaaaaaaaaaaa" / "out" / "libhelpers.a"
+            owned.parent.mkdir(parents=True)
+            owned.write_bytes(b"!<arch>\nwasmtime helper")
+            # wasmtime itself is not in this tiny lock, so this archive stays unversioned.
+            discovery = discover([lock], target_dirs=[root / "target"], cargo_home=root / "cargo")
+            itt = next(lib for lib in discovery.libraries if lib.name == "ittapi")
+            self.assertEqual(itt.version, "3.24.2")
+            self.assertTrue(any("libittnotify.a" in item for item in itt.evidence))
+
 
 if __name__ == "__main__":
     unittest.main()
