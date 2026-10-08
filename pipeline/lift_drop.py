@@ -107,6 +107,9 @@ def retarget(ir: str, isa: str) -> str:
         ir = re.sub(r'target triple = "[^"]*"', triple, ir, count=1)
     else:
         ir = triple + "\n" + ir
+    # Anvill names the amd64 SysV ABI on the definition. wasm32 and riscv64
+    # cannot lower that convention; the drops call the function as ordinary C.
+    ir = ir.replace(" x86_64_sysvcc", "")
     return ir
 
 

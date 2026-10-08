@@ -377,6 +377,13 @@ void FunctionLifter::VisitDirectJump(
     VisitDelayedInstruction(inst, delayed_inst, block, true);
     CallFunction(inst, block, inst.branch_taken_pc);
     InsertError(block);
+  } else if (std::holds_alternative<std::monostate>(cf)) {
+    // No control-flow redirect in the spec. Remill already decoded the target.
+    VisitDelayedInstruction(inst, delayed_inst, block, true);
+    llvm::BranchInst::Create(
+        GetOrCreateTargetBlock(inst, mapper.taken_flow.known_target,
+                               mapper.taken_flow.static_context),
+        block);
   } else {
     LOG(FATAL) << "Invalid spec for direct jump at " << std::hex << inst.pc;
   }

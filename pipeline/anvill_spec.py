@@ -71,6 +71,10 @@ def build_spec(symbol: str, code: bytes, signature: str, address: int = 0) -> by
     mem.is_writeable = False
     mem.is_executable = True
     mem.values = code
+
+    # DecodeFromPB rejects a specification that omits this message, even when
+    # there are no jumps, calls, or returns to redirect.
+    spec.overrides.SetInParent()
     return spec.SerializeToString()
 
 

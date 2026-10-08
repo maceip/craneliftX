@@ -374,14 +374,18 @@ Mechanism:
    The match stops at the mnemonic column. A greedy `\s*` used to swallow the
    `ad` in `add`, and remill then lifted that letter as `lodsd`.
 2. `anvill_spec.py` writes an amd64 SysV spec: return address at `[RSP]`,
-   parameters in the named registers, one executable memory range.
+   parameters in the named registers, one executable memory range, and an
+   empty control-flow override list. `DecodeFromPB` requires that list to be
+   present. A direct edge with no redirect uses the target remill decoded.
 3. `anvill-decompile-spec --spec <pb> --add_names --ir_out <ll>` is the stage
    between the spec and the Cranelift drop. Remill lifts each instruction.
    Anvill's passes then delete function returns, error intrinsics, and other
    scaffolding, and they recover stack slots (`!stack_offset` when a pointer
    still refers to the entry stack). The lifted symbol is the name stored in
-   the spec. Flag helpers that remain are rewritten from variadic to a single
-   `i1` because wasm varargs drop the boolean and every branch looks taken.
+   the spec. The amd64 SysV calling convention on that definition is removed
+   when the IR is retargeted, because the drops call it as ordinary C. Flag
+   helpers that remain are rewritten from variadic to a single `i1` because
+   wasm varargs drop the boolean and every branch looks taken.
 4. `remill_runtime.ll` is not rewritten. It still defines
    `__remill_read/write_memory_*` as `inttoptr` loads and stores, flag and
    compare helpers as the identity, and the control-transfer helpers as
