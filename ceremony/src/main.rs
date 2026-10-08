@@ -193,5 +193,9 @@ fn main() {
 }
 
 fn pct(n: usize) -> f64 {
-    100.0 * n as f64 / trial_count() as f64
+    let trials = trial_count();
+    if trials == 0 {
+        return 0.0;
+    }
+    100.0 * n as f64 / trials as f64
 }
