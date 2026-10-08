@@ -31,6 +31,10 @@ LLVM_PREFIX="$(llvm-config-20 --prefix)"
 LLVM_DIR="$(llvm-config-20 --cmakedir)"
 DEPS_INSTALL="$ROOT/build/remill-deps/install"
 JOBS="${JOBS:-2}"
+# Host compiler matches the one LLVM the lifter links. The default c++ on
+# this image is clang 18, which is a different major.
+export CC="${CC:-clang-20}"
+export CXX="${CXX:-clang++-20}"
 
 cmake -G Ninja -S "$SRC/dependencies" -B "$ROOT/build/remill-deps" \
   -DUSE_EXTERNAL_LLVM=ON \
