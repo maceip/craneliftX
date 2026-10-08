@@ -80,7 +80,7 @@ def main():
     # Always re-analyze so a stale lift_map.json cannot disagree with the object.
     r = subprocess.run(
         [sys.executable, os.path.join(HERE, "ingest_tracer.py"),
-         os.path.join(HERE, "sample_network"), JSON],
+         OBJ, JSON],
         capture_output=True, text=True,
     )
     if r.returncode != 0 or not os.path.exists(JSON):

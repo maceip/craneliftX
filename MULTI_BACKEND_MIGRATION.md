@@ -694,6 +694,6 @@ On `sample_network` the split is:
 | `tcp_window_scaled` | LIFT | network, pure compute; `(100, 50) = 150` |
 | `ip_id_hash` | LIFT | network, pure compute; `(100, 50) = 51156` |
 | `parse_packet` | LIFT | network, memory, no callees; sum 89, outs 4 and 20 |
-| `crc32_tight` | KEEP NATIVE | tight loop, loop_density about 0.52 |
+| `crc32_tight` | KEEP NATIVE | tight loop, loop_density 0.577 at `-O1` |
 | `handle_connection` | KEEP NATIVE | orchestration, four callees |
 | `main` | KEEP NATIVE | entry |
