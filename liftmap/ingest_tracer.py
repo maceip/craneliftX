@@ -47,7 +47,7 @@ NET_KEYWORDS = [
 # x86-64 System V integer argument registers, in order.
 ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
 STACK_REGS = {"rsp", "rbp", "esp", "ebp", "sp", "bp"}
-ENTRY_NAMES = ["main", "_main", "start", "_start", "handle_connection",
+ENTRY_NAMES = ["main", "_main", "start", "_start",
                "event_loop", "run", "serve", "loop", "worker"]
 
 LOOP_DENSITY_REJECT = 0.45   # above this -> tight loop -> keep native
@@ -91,7 +91,11 @@ def parse_objdump_disasm(obj):
     symbols = []
     insns = []
     sym_re = re.compile(r"^([0-9a-fA-F]+)\s+<(.+)>:\s*$")
-    ins_re = re.compile(r"^\s*([0-9a-fA-F]+):\s*((?:[0-9a-f]{2}\s*)+)(.*)$")
+    # Same boundary as extract_bytes.py: stop before the mnemonic, or the
+    # "da" in "data16" is parsed as another opcode byte.
+    ins_re = re.compile(
+        r"^\s*([0-9a-fA-F]+):\s+((?:[0-9a-fA-F]{2}[ \t])*[0-9a-fA-F]{2})\b(.*)$"
+    )
     for line in out.splitlines():
         m = sym_re.match(line.strip())
         if m:
@@ -101,18 +105,57 @@ def parse_objdump_disasm(obj):
         if m:
             addr = int(m.group(1), 16)
             raw = m.group(2).split()
-            size = len(raw)
-            b = bytes(int(x, 16) for x in raw)
             rest = m.group(3).strip()
+            # objdump wraps a long instruction onto a second line that has
+            # bytes and an address but no mnemonic. Those bytes belong to the
+            # previous instruction; decoding them alone invents `add [rax], al`.
+            if not rest and insns:
+                extra = bytes(int(x, 16) for x in raw)
+                insns[-1]["bytes"] += extra
+                insns[-1]["size"] += len(extra)
+                continue
             if "\t" in rest:
                 mnem, op = rest.split("\t", 1)
             else:
                 parts = rest.split(None, 1)
                 mnem = parts[0] if parts else ""
                 op = parts[1] if len(parts) > 1 else ""
-            insns.append({"addr": addr, "size": size, "bytes": b,
+            insns.append({"addr": addr, "size": len(raw), "bytes": bytes(int(x, 16) for x in raw),
                           "mnem": mnem, "op": op.strip()})
     return symbols, insns
+
+
+def parse_text_relocs(obj):
+    """Map a .text offset to the symbol a relocation names.
+
+    An unlinked object encodes `call parse_packet` as `e8 00 00 00 00` plus
+    an R_X86_64_PLT32. Without this map every callee looks unresolved and the
+    call graph has no edges.
+    """
+    try:
+        out = run(["objdump", "-r", obj])
+    except Exception:
+        return {}
+    relocs = {}
+    in_text = False
+    for line in out.splitlines():
+        if line.startswith("RELOCATION RECORDS FOR"):
+            in_text = ".text" in line
+            continue
+        if not in_text:
+            continue
+        m = re.match(r"^([0-9a-fA-F]+)\s+\S+\s+(\S+)", line.strip())
+        if not m:
+            continue
+        sym = re.split(r"[+-]", m.group(2), maxsplit=1)[0]
+        if sym:
+            relocs[int(m.group(1), 16)] = sym
+    return relocs
+
+
+def is_padding(mnem):
+    words = set(re.split(r"[\s,]+", mnem.lower()))
+    return bool(words & {"nop", "nopl", "nopw", "endbr64", "pause"})
 
 
 def disasm_function(code, start_addr):
@@ -158,13 +201,13 @@ def ensure_sample(path):
         return False
 
 
-def analyze_function(name, insns, symbols_sorted):
+def analyze_function(name, insns, symbols_sorted, relocs=None):
     if not insns:
         return None
     # Sort by address; trim trailing alignment NOPs that objdump attributes to
     # the preceding function (boundary bleed between functions).
     raw = sorted(insns, key=lambda i: i["addr"])
-    while raw and raw[-1]["mnem"] in ("nop", "nopl", "nopw", "endbr64", "pause"):
+    while raw and is_padding(raw[-1]["mnem"]):
         raw.pop()
     if not raw:
         return None
@@ -191,10 +234,15 @@ def analyze_function(name, insns, symbols_sorted):
     calls = []            # resolved callee names
     data_mem = False      # touches real (non-stack) data memory
     arg_regs_used = set()
+    written_regs = set()
     writes_rax = False
     n_call = 0
     n_jump = 0
     n_ret = 0
+
+    def note_read(rname):
+        if rname in ARG_REGS and rname not in written_regs:
+            arg_regs_used.add(rname)
 
     for ins in cs:
         groups = ins.groups
@@ -215,27 +263,43 @@ def analyze_function(name, insns, symbols_sorted):
                 idx = normalize(ins.reg_name(op.mem.index)) if op.mem.index != X86_REG_INVALID else ""
                 # a pointer argument used as a base/index still counts as an
                 # argument for signature inference
-                if base in ARG_REGS:
-                    arg_regs_used.add(base)
-                if idx in ARG_REGS:
-                    arg_regs_used.add(idx)
-                if ins.mnemonic == "lea":
-                    continue  # LEA computes an address; no real memory access
+                note_read(base)
+                note_read(idx)
+                if ins.mnemonic in ("lea", "nop", "nopl", "nopw") or is_padding(ins.mnemonic):
+                    continue  # address math or padding, not a data access
                 if base in STACK_REGS or idx in STACK_REGS:
                     continue  # stack slot, not data memory
                 data_mem = True
             elif op.type == X86_OP_REG:
                 rname = normalize(ins.reg_name(op.reg))
-                if op.access & CS_AC_READ and rname in ARG_REGS:
-                    arg_regs_used.add(rname)
-                if op.access & CS_AC_WRITE and rname == "rax":
-                    writes_rax = True
+                # xor/sub of a register with itself writes zero. Capstone still
+                # marks the register read, which would invent a fake argument.
+                self_zero = (
+                    ins.mnemonic in ("xor", "sub")
+                    and len(ins.operands) == 2
+                    and ins.operands[0].type == X86_OP_REG
+                    and ins.operands[1].type == X86_OP_REG
+                    and ins.operands[0].reg == ins.operands[1].reg
+                )
+                if op.access & CS_AC_READ and not self_zero:
+                    note_read(rname)
+                if op.access & CS_AC_WRITE or self_zero:
+                    written_regs.add(rname)
+                    if rname == "rax":
+                        writes_rax = True
         if target is not None and target in addr_set:
             adj[ins.address].add(target)
         if is_call:
             n_call += 1
-            callee = symbol_at(symbols_sorted, target) if target is not None else None
-            if callee:
+            callee = None
+            if relocs:
+                for off in range(ins.address, ins.address + ins.size):
+                    if off in relocs:
+                        callee = relocs[off]
+                        break
+            if callee is None and target is not None:
+                callee = symbol_at(symbols_sorted, target)
+            if callee and callee.lstrip("_") != name.lstrip("_"):
                 calls.append(callee)
         elif is_jump and target is not None:
             # tail call: a direct jump to another function's address
@@ -349,6 +413,7 @@ def main():
 
     print(f"[ingest_tracer] binary : {binary}")
     symbols, insns = parse_objdump_disasm(binary)
+    relocs = parse_text_relocs(binary)
     print(f"[ingest_tracer] symbols: {len(symbols)}   instructions: {len(insns)}")
 
     # function boundaries from sorted text symbols
@@ -366,7 +431,7 @@ def main():
         # skip the Mach-O header pseudo-symbol
         if name == "__mh_execute_header":
             continue
-        finfo = analyze_function(name, body, text_syms)
+        finfo = analyze_function(name, body, text_syms, relocs)
         if finfo:
             funcs.append(finfo)
 
@@ -408,7 +473,11 @@ def main():
                  - 0.6 * f["loop_density"]
                  + (0.2 if f["pure_compute"] else 0.0))
         f["lift_score"] = round(score, 3)
-        f["liftable_now"] = f["pure_compute"]  # stub-safe to lift with our pipeline
+        # A single remill trace can execute a function that touches memory.
+        # It cannot follow calls out of the lifted bytes, so those stay native.
+        # Count call instructions, not only resolved names: an unlinked .o
+        # has call relocations whose targets are still zero.
+        f["liftable_now"] = f["n_call"] == 0 and len(set(f["calls"])) == 0
         reasons = []
         decision = "KEEP_NATIVE"
         if not f["reachable"]:
@@ -417,16 +486,19 @@ def main():
             reasons.append("program entry point")
         elif f["loop_density"] > LOOP_DENSITY_REJECT:
             reasons.append(f"tight loop (loop_density={f['loop_density']})")
-        elif len(set(f["calls"])) >= 3:
-            reasons.append(f"orchestration fan-out ({len(set(f['calls']))} callees)")
+        elif f["n_call"] >= 3 or len(set(f["calls"])) >= 3:
+            ncal = max(f["n_call"], len(set(f["calls"])))
+            reasons.append(f"orchestration fan-out ({ncal} callees)")
         elif f["network_score"] >= 0.25 or f["frequency_score"] >= 0.5:
             decision = "LIFT"
             reasons.append(f"network_score={f['network_score']}")
             reasons.append(f"loop_density={f['loop_density']} (not tight)")
-            if f["pure_compute"]:
-                reasons.append("pure-compute -> stub-safe to lift now")
+            if not f["liftable_now"]:
+                reasons.append("has callees -> not a single remill trace")
+            elif f["pure_compute"]:
+                reasons.append("pure-compute -> anvill spec + remill lift")
             else:
-                reasons.append("memory-dependent -> needs real memory semantics (anvill) to lift correctly")
+                reasons.append("memory-dependent -> anvill spec + remill memory semantics")
         else:
             reasons.append(f"low network/freq signal (net={f['network_score']}, freq={f['frequency_score']})")
         f["decision"] = decision

@@ -21,3 +21,6 @@ __pycache__/
 /liftmap/sample_network
 /liftmap/sample_network.o
 /liftmap/lift_map.json
+
+# Vendored-lifter build tree (pipeline/build_lifters.sh)
+/build/

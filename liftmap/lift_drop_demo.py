@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-lift_drop_demo.py -- the "multi lift-and-drop" demonstration.
+lift_drop_demo.py -- lift every function the ingest tracer selects.
 
-Consumes lift_map.json (produced by ingest_tracer.py) and performs the actual
-lift: it selects the best PERFORMANCE lift candidate that our pipeline can lift
-correctly today (pure-compute, two-arg, RAX(RDI,RSI)), then drives the existing
-ceremony/o2pulley.sh pipeline to lift that native function to a Pulley-executable
-wasm and run it on Cranelift/Pulley.
+Reads lift_map.json and, for each LIFT decision that is a single remill trace
+(no callees), builds an Anvill spec, lifts with remill, and checks the result
+on the Pulley interpreter and on qemu-riscv64.
 
-This proves both halves of the story:
-  * ingest_tracer  -> decides WHERE to lift/drop (static analysis of the binary)
-  * o2pulley      -> performs the lift+dro p (native -> remill -> wasm -> Pulley)
+  * ingest_tracer  -> decides WHERE to lift or keep native
+  * pipeline/lift_drop.py -> anvill spec -> remill -> Cranelift/Pulley and qemu
 """
 import os
 import sys
@@ -23,11 +20,32 @@ OBJ = os.path.join(HERE, "sample_network.o")
 O2PULLEY = os.path.join(REPO, "ceremony", "o2pulley.sh")
 JSON = os.path.join(HERE, "lift_map.json")
 
-# Reference semantics for the sample's known functions, so the demo can assert
-# the lifted-on-Pulley result is CORRECT (not just "it ran").
-REF = {
-    "_tcp_window_scaled": lambda a, b: (a + b) & 0xFFFFFFFF,
-    "_ip_id_hash": lambda a, b: ((a ^ b) * 2654435761) & 0xFFFFFFFF,
+# Reference semantics for the sample. Names are compared with the leading
+# underscore stripped so the same cases work for ELF and Mach-O symbols.
+def _ip_id_hash(a, b):
+    h = ((a ^ b) * 2654435761) & 0xFFFFFFFF
+    return ((h >> 16) ^ (h & 0xFFFF)) & 0xFFFFFFFF
+
+
+CASES = {
+    "tcp_window_scaled": {
+        "arguments": [100, 50],
+        "expected": 150,
+    },
+    "ip_id_hash": {
+        "arguments": [100, 50],
+        "expected": _ip_id_hash(100, 50),
+    },
+    "parse_packet": {
+        "arguments": [
+            ("mem", bytes([0x45, 0, 0, 0x14] + [0] * 16)),
+            20,
+            ("out", "u32"),
+            ("out", "u32"),
+        ],
+        "expected": 89,
+        "expected_outs": [4, 20],
+    },
 }
 
 
@@ -54,35 +72,21 @@ def ensure_sample(path):
         return False
 
 
-def pick_candidate(report):
-    """Best LIFT candidate that our pipeline can lift correctly today:
-    pure-compute, exactly 2 integer args, RAX(RDI,RSI) signature."""
-    cands = [
-        f for f in report["functions"]
-        if f["decision"] == "LIFT"
-        and f.get("liftable_now")
-        and f["n_args"] == 2
-        and f["signature"].startswith("RAX(")
-    ]
-    if not cands:
-        return None
-    cands.sort(key=lambda f: -f["lift_score"])
-    return cands[0]
+def norm_name(name):
+    return name.lstrip("_")
 
 
 def main():
-    # Reproducible: if the lift map is missing, run the analyzer (which also
-    # builds the sample binary from source), then ensure the object exists.
-    if not os.path.exists(JSON):
-        r = subprocess.run(
-            [sys.executable, os.path.join(HERE, "ingest_tracer.py"),
-             os.path.join(HERE, "sample_network"), JSON],
-            capture_output=True, text=True,
-        )
-        if r.returncode != 0 or not os.path.exists(JSON):
-            print("failed to run ingest_tracer.py:", file=sys.stderr)
-            print(r.stderr.strip(), file=sys.stderr)
-            return 2
+    # Always re-analyze so a stale lift_map.json cannot disagree with the object.
+    r = subprocess.run(
+        [sys.executable, os.path.join(HERE, "ingest_tracer.py"),
+         OBJ, JSON],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0 or not os.path.exists(JSON):
+        print("failed to run ingest_tracer.py:", file=sys.stderr)
+        print(r.stderr.strip(), file=sys.stderr)
+        return 2
     if not os.path.exists(OBJ):
         ensure_sample(OBJ)
     report = json.load(open(JSON))
@@ -107,57 +111,50 @@ def main():
     for f in report["functions"]:
         print(f"    - {f['name']:22} -> {f['decision']}: {f['reason']}")
 
-    cand = pick_candidate(report)
-    if cand is None:
-        print("\n[dem@] no stub-safe 2-arg LIFT candidate available to demonstrate.")
-        return 0
+    sys.path.insert(0, os.path.join(REPO, "pipeline"))
+    from lift_drop import lift_and_drop
 
-    print()
-    print("=" * 74)
-    print(f" LIFT+RUN DEMO  --  lifting {cand['name']} to Pulley")
-    print("=" * 74)
-    print(f"  chosen because: lift_score={cand['lift_score']}, pure-compute, "
-          f"2-arg {cand['signature']}, network-eligible")
-    a, b = 100, 50
-    expected = REF.get(cand["name"], lambda a, b: None)(a, b)
+    lifted = []
+    for f in sorted(report["functions"], key=lambda x: -x["lift_score"]):
+        if f["decision"] != "LIFT" or not f.get("liftable_now"):
+            continue
+        key = norm_name(f["name"])
+        case = CASES.get(key)
+        if case is None:
+            print(f"\n  ERROR: no validation case for lift candidate {f['name']}",
+                  file=sys.stderr)
+            return 1
+        print()
+        print("=" * 74)
+        print(f" LIFT+RUN  --  {f['name']}  {f['signature']}")
+        print("=" * 74)
+        print(f"  {f['reason']}")
+        try:
+            lift_and_drop(
+                obj=OBJ,
+                hexbytes=None,
+                symbol=f["name"],
+                signature=f["signature"],
+                arguments=case["arguments"],
+                expected=case["expected"],
+                expected_outs=case.get("expected_outs"),
+                qemu=True,
+            )
+        except SystemExit as exc:
+            print(f"  VALIDATION : FAIL  ({f['name']})", file=sys.stderr)
+            return int(exc.code or 1)
+        print(f"  VALIDATION : PASS  ({f['name']} == {case['expected']})")
+        lifted.append(f["name"])
 
-    print(f"  test inputs    : a={a}, b={b}"
-          + (f"  (expected on Pulley = {expected})" if expected is not None else ""))
-    print()
-    print("  $ bash o2pulley.sh", os.path.basename(OBJ), cand["name"], a, b)
-    print("-" * 74)
+    if not lifted:
+        print("\n  ERROR: ingest tracer selected nothing to lift", file=sys.stderr)
+        return 1
 
-    if not os.path.exists(O2PULLEY):
-        print(f"  ERROR: o2pulley.sh not found at {O2PULLEY}", file=sys.stderr)
-        return 2
-    if not os.path.exists(OBJ):
-        print(f"  ERROR: object not found at {OBJ}", file=sys.stderr)
-        return 2
-
-    p = subprocess.run(
-        ["bash", O2PULLEY, OBJ, cand["name"], str(a), str(b), str(expected)],
-        capture_output=True, text=True,
-    )
-    print(p.stdout.strip())
-    if p.returncode != 0:
-        print(p.stderr.strip(), file=sys.stderr)
-        return p.returncode
-
-    # Validate the Pulley result against the reference semantics.
-    ok = "OK" in p.stdout and (expected is None or f"= {expected}" in p.stdout)
-    print("-" * 74)
-    if expected is not None:
-        print(f"  VALIDATION : {'PASS' if ok else 'CHECK'}  "
-              f"(Pulley result matches native reference {expected})")
-    else:
-        print(f"  VALIDATION : result printed above (no reference for {cand['name']})")
     print()
     print("  MULTI LIFT-AND-DROP SUMMARY:")
-    print(f"    * lifted to Pulley (demonstrated) : {cand['name']}")
-    print(f"    * lift-eligible (network, not tight): "
-          f"{[f['name'] for f in report['functions'] if f['decision']=='LIFT']}")
-    print(f"    * kept NATIVE (tight loop / glue / entry): "
-          f"{report['keep_native']}")
+    print(f"    * lifted and validated : {lifted}")
+    print(f"    * lift-eligible        : {report['lift']}")
+    print(f"    * kept NATIVE          : {report['keep_native']}")
     return 0
 
 
