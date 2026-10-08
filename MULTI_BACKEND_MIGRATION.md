@@ -333,20 +333,26 @@ DROP (Cranelift → Pulley + randomized opcode map + abort-on-trap executor).
   - `llc -mtriple=wasm32` → `wasm-ld` → Cranelift (`pulley64`) → Pulley interpreter
   - `clang --target=riscv64-linux-gnu` → qemu-user
 - **Vendored sources** (`vendor/LOCK`): remill `56918a8` (2026-08-27), anvill
-  `9948d26` (2023-07-05). `pipeline/build_lifters.sh` builds remill against
-  system LLVM 18 into `build/remill-install`.
+  `9948d26` (2023-07-05). Upstream `lifting-bits/remill` master has no commit
+  newer than `56918a8` (checked 2026-10-08); that pin already carries
+  `LLVM_VERSION_MAJOR` guards through 21, and `pipeline/build_lifters.sh`
+  builds it against **system LLVM 20** (`llvm-config-20`, the LLVM 20 already
+  on this machine) into `build/remill-install`, producing `remill-lift-20`.
 - **Strength:** this is the lift Cranelift cannot do. Cranelift has no
   machine-code decoder; remill is the lifter.
 - **anvill, precisely:** anvill does not accept a raw binary. Its C++ frontend
   consumes a protobuf `specification` (see `vendor/anvill/docs/SpecificationFormat.md`)
   produced by a Ghidra or Binary Ninja plugin, then refines a remill lift.
-  That C++ frontend uses `llvm::Optional` / `llvm::None`, removed in LLVM 16,
-  so it does not build against LLVM 18. The pipeline therefore **emits the
-  Anvill spec itself** (`pipeline/anvill_spec.py`, generated
-  `pipeline/specification_pb2.py`) and lifts with remill. The spec is checked
-  before the lift: signature, executable bytes, and symbol must round-trip.
-  The runtime linked afterwards is the remill test-runner contract (real
-  memory, identity flags), not a pure-compute stub.
+  `specification.proto` does not depend on LLVM. The Anvill decompiler stays
+  **unbuilt on purpose**: `pipeline/build_lifters.sh` does not configure
+  `vendor/anvill`, `bin/Decompile`, the passes, or the Ghidra/Binary Ninja
+  plugins, and it does not follow that tree's CMake `find_package(remill)`
+  pin to submodule `a8ead7b`. The pipeline **emits the Anvill spec itself**
+  (`pipeline/anvill_spec.py`, generated `pipeline/specification_pb2.py`) and
+  lifts with remill. The spec is checked before the lift: signature,
+  executable bytes, and symbol must round-trip. The runtime linked afterwards
+  is the remill test-runner contract (real memory, identity flags), not a
+  pure-compute stub.
 
 ### The single entry point — `ceremony/o2pulley.sh`
 Feeds a native object and gets a Pulley result, then the same IR under qemu:
@@ -377,7 +383,7 @@ Mechanism:
    control-transfer helpers as memory-token returns. A guest stack of 64KiB
    is split so data passed by the emulator sits above the stack top.
 5. Pulley: `llc -O0 -mtriple=wasm32` and `wasm-ld --export-all --export-memory`.
-   qemu: the same bitcode compiled with `clang-18 --target=riscv64-linux-gnu`
+   qemu: the same bitcode compiled with `clang-20 --target=riscv64-linux-gnu`
    and linked with `riscv64-linux-gnu-gcc`.
 
 **What runs today:** pure-compute functions and memory functions with no
@@ -406,18 +412,19 @@ extractor was injecting mnemonic bytes.
   ["pulley"]`, `Config::target("pulley64")`) drops `ceremony/sign.wasm`
   (`clang --target=wasm32`) onto Pulley and runs `ceremony_op(3,4) = 15` → OK.
   (Note: versions 0.30 / 0.40 do **not** expose the `pulley` feature; 36.x does.)
-- **Edge 2 — LIFT and both drops: WORKING on LLVM 18.** Vendored remill lifts
-  the bytes named by an Anvill spec. The same IR runs on Pulley and on
-  qemu-riscv64. `make demo` lifts every ingest-tracer LIFT candidate:
+- **Edge 2 — LIFT and both drops: WORKING on LLVM 20.** Vendored remill
+  (`56918a8`, linked to system LLVM 20 as `remill-lift-20`) lifts the bytes
+  named by an Anvill spec. The same IR runs on Pulley and on qemu-riscv64.
+  `make demo` lifts every ingest-tracer LIFT candidate:
   `tcp_window_scaled(100, 50) = 150`, `ip_id_hash(100, 50) = 51156`, and
   `parse_packet` on `{0x45,0,0,0x14}` with length 20 returns 89 and writes
   version 4 and length 20. Cranelift still has no machine-code decoder; remill
   is what performs that lift.
-- **anvill spec: INTEGRATED. anvill's C++ frontend: not built.** The spec
-  format is vendored and is the input to the lift. The decompiler binary is
-  not, because it does not compile on LLVM 18. Real memory and flag semantics
-  come from `pipeline/remill_runtime.ll`, which replaces the old
-  `ceremony/remill_runtime_stub.ll` no-op stub.
+- **anvill spec: INTEGRATED. The Anvill decompiler stays unbuilt on purpose.**
+  The spec format is vendored and is the input to the lift. `bin/Decompile`,
+  the passes, and the Ghidra/Binary Ninja plugins are not configured or built.
+  Real memory and flag semantics come from `pipeline/remill_runtime.ll`, which
+  replaces the old `ceremony/remill_runtime_stub.ll` no-op stub.
 
 ---
 

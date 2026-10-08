@@ -46,11 +46,12 @@ TRIPLES = {
 
 
 def llvm_tool(base: str) -> str:
-    for name in (f"{base}-18", base):
-        path = shutil.which(name)
-        if path:
-            return path
-    raise SystemExit(f"required LLVM tool not found: {base} (or {base}-18)")
+    """The drop uses the same LLVM 20 major that remill-lift is linked to."""
+    name = f"{base}-20"
+    path = shutil.which(name)
+    if path:
+        return path
+    raise SystemExit(f"required LLVM tool not found: {name}")
 
 
 def find_remill() -> str:
