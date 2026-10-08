@@ -267,7 +267,7 @@ X86_64_SysV::BindReturnValues(llvm::Function &function, bool &injected_sret,
         AllocationState alloc_ret(return_register_constraints, arch, this);
         auto mapping = alloc_ret.TryRegisterAllocate(*ret_type);
         if (mapping) {
-          mapping.getValue().swap(ret_values);
+          mapping.value().swap(ret_values);
           return llvm::Error::success();
 
         } else {
@@ -321,7 +321,7 @@ X86_64_SysV::BindReturnValues(llvm::Function &function, bool &injected_sret,
 
       // There is a valid split over registers, so add the mapping
       if (mapping) {
-        return alloc_ret.CoalescePacking(mapping.getValue(), ret_values);
+        return alloc_ret.CoalescePacking(mapping.value(), ret_values);
 
       // Composite type splitting didn't work so do RVO. Assume that the
       // pointer to the return value resides in RAX.
@@ -388,7 +388,7 @@ llvm::Error X86_64_SysV::BindParameters(
     if (auto allocation = alloc_param.TryRegisterAllocate(*param_type)) {
       auto prev_size = parameter_declarations.size();
 
-      for (const auto &param_decl : allocation.getValue()) {
+      for (const auto &param_decl : allocation.value()) {
         auto &declaration = parameter_declarations.emplace_back();
         declaration.type = param_decl.type;
         if (param_decl.reg) {

@@ -2,7 +2,7 @@
 #
 # o2pulley.sh -- one entry point for the lift/drop pipeline.
 #
-#   native .o -> anvill spec -> remill-lift -> LLVM IR
+#   native .o -> anvill spec -> anvill-decompile-spec -> LLVM IR
 #             -> Cranelift (wasm) -> Pulley interpreter
 #             -> riscv64 -> qemu-user
 #

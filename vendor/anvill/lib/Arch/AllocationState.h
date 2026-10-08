@@ -11,6 +11,7 @@
 #include <llvm/IR/Attributes.h>
 #include <remill/BC/Util.h>
 
+#include <optional>
 #include <vector>
 
 #include "Arch.h"
@@ -42,22 +43,22 @@ struct AllocationState {
 
   SizeAndType AssignSizeAndType(llvm::Type &type);
 
-  llvm::Optional<std::vector<ValueDecl>> TryRegisterAllocate(llvm::Type &type);
+  std::optional<std::vector<ValueDecl>> TryRegisterAllocate(llvm::Type &type);
 
-  llvm::Optional<std::vector<anvill::ValueDecl>>
+  std::optional<std::vector<anvill::ValueDecl>>
   TryCompositeRegisterAllocate(llvm::Type &type);
 
-  llvm::Optional<std::vector<ValueDecl>>
-  TryBasicRegisterAllocate(llvm::Type &type, llvm::Optional<SizeAndType> hint);
+  std::optional<std::vector<ValueDecl>>
+  TryBasicRegisterAllocate(llvm::Type &type, std::optional<SizeAndType> hint);
 
-  llvm::Optional<std::vector<anvill::ValueDecl>>
+  std::optional<std::vector<anvill::ValueDecl>>
   TryVectorRegisterAllocate(llvm::FixedVectorType &type);
 
   bool IsFilled(size_t i);
 
   uint64_t RemainingSpace(size_t i);
 
-  llvm::Optional<std::vector<anvill::ValueDecl>>
+  std::optional<std::vector<anvill::ValueDecl>>
   ProcessIntVecX86_64SysV(llvm::Type *elem_type, unsigned int vec_size,
                           unsigned int bit_width);
 

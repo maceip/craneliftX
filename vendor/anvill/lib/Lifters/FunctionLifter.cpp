@@ -22,15 +22,20 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
-#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/Analysis/CGSCCPassManager.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
-#include <llvm/Pass.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
-#include <llvm/Transforms/Scalar.h>
-#include <llvm/Transforms/Utils.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Scalar/DeadStoreElimination.h>
+#include <llvm/Transforms/Scalar/Reassociate.h>
+#include <llvm/Transforms/Scalar/SROA.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/Mem2Reg.h>
 #include <remill/Arch/Arch.h>
 #include <remill/Arch/Instruction.h>
 #include <remill/BC/Error.h>
@@ -1463,18 +1468,29 @@ void FunctionLifter::RecursivelyInlineLiftedFunctionIntoNativeFunction(void) {
                << remill::LLVMThingToString(native_func->getType());
   }
 
-  llvm::legacy::FunctionPassManager fpm(semantics_module.get());
-  fpm.add(llvm::createCFGSimplificationPass());
-  fpm.add(llvm::createPromoteMemoryToRegisterPass());
-  fpm.add(llvm::createReassociatePass());
-  fpm.add(llvm::createDeadStoreEliminationPass());
-  fpm.add(llvm::createDeadCodeEliminationPass());
-  fpm.add(llvm::createSROAPass());
-  fpm.add(llvm::createDeadCodeEliminationPass());
-  fpm.add(llvm::createInstructionCombiningPass());
-  fpm.doInitialization();
-  fpm.run(*native_func);
-  fpm.doFinalization();
+  // The legacy function pass manager was removed after LLVM 15. These are the
+  // same cleanups, run through the new pass manager on this one function.
+  llvm::LoopAnalysisManager lam;
+  llvm::FunctionAnalysisManager fam;
+  llvm::CGSCCAnalysisManager cgam;
+  llvm::ModuleAnalysisManager mam;
+  llvm::PassBuilder pb;
+  pb.registerModuleAnalyses(mam);
+  pb.registerCGSCCAnalyses(cgam);
+  pb.registerFunctionAnalyses(fam);
+  pb.registerLoopAnalyses(lam);
+  pb.crossRegisterProxies(lam, fam, cgam, mam);
+
+  llvm::FunctionPassManager fpm;
+  fpm.addPass(llvm::SimplifyCFGPass());
+  fpm.addPass(llvm::PromotePass());
+  fpm.addPass(llvm::ReassociatePass());
+  fpm.addPass(llvm::DSEPass());
+  fpm.addPass(llvm::DCEPass());
+  fpm.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
+  fpm.addPass(llvm::DCEPass());
+  fpm.addPass(llvm::InstCombinePass());
+  fpm.run(*native_func, fam);
 
   ClearVariableNames(native_func);
 }

@@ -103,7 +103,7 @@ ConvertXorsToCmps::run(llvm::Function &func,
 
           // ensure that the constant int is 'true', or an i1 with the value 1
           // this (currently) the only supported value
-          if (cnst_int->getType()->getBitWidth() == 1 &&
+          if (cnst_int->getIntegerType()->getBitWidth() == 1 &&
               cnst_int->isAllOnesValue()) {
             xors.emplace_back(binop);
           }
@@ -115,7 +115,7 @@ ConvertXorsToCmps::run(llvm::Function &func,
 
           // ensure that the constant int is 'true', or an i1 with the value 1
           // this (currently) the only supported value
-          if (cnst_int->getType()->getBitWidth() == 1 &&
+          if (cnst_int->getIntegerType()->getBitWidth() == 1 &&
               cnst_int->isAllOnesValue()) {
             noncmp_xors.emplace_back(binop);
           }

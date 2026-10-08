@@ -9,7 +9,7 @@
 #include "Utils.h"
 
 #include <glog/logging.h>
-#include <llvm/ADT/Triple.h>
+#include <llvm/TargetParser/Triple.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -62,10 +62,11 @@ llvm::Value *ConvertConstantToPointer(llvm::IRBuilder<> &ir,
     // Cast an integer to a pointer type.
   } else if (auto int_ty = llvm::dyn_cast<llvm::IntegerType>(type)) {
     const auto pointer_width = dl.getPointerTypeSizeInBits(dest_ptr_ty);
-    if (int_ty->getPrimitiveSizeInBits().getKnownMinSize() < pointer_width) {
+    if (int_ty->getPrimitiveSizeInBits().getKnownMinValue() < pointer_width) {
       int_ty =
           llvm::Type::getIntNTy(val_to_convert->getContext(), pointer_width);
-      val_to_convert = llvm::ConstantExpr::getZExt(val_to_convert, int_ty);
+      val_to_convert = llvm::ConstantExpr::getCast(
+          llvm::Instruction::ZExt, val_to_convert, int_ty);
     }
 
     return llvm::ConstantExpr::getIntToPtr(val_to_convert, dest_ptr_ty);
@@ -109,7 +110,7 @@ llvm::Value *ConvertValueToPointer(llvm::IRBuilder<> &ir,
     // Cast an integer to a pointer type.
   } else if (auto int_ty = llvm::dyn_cast<llvm::IntegerType>(type)) {
     const auto pointer_width = dl.getPointerTypeSizeInBits(dest_ptr_ty);
-    if (int_ty->getPrimitiveSizeInBits().getKnownMinSize() < pointer_width) {
+    if (int_ty->getPrimitiveSizeInBits().getKnownMinValue() < pointer_width) {
       int_ty =
           llvm::Type::getIntNTy(val_to_convert->getContext(), pointer_width);
       auto dest = ir.CreateZExt(val_to_convert, int_ty);
@@ -219,7 +220,7 @@ llvm::Function *AddressOfReturnAddressFunction(llvm::Module *module) {
     if (!func) {
       auto &context = module->getContext();
       auto fty =
-          llvm::FunctionType::get(llvm::Type::getInt8PtrTy(context, 0), false);
+          llvm::FunctionType::get(llvm::PointerType::get(context, 0), false);
       func = llvm::Function::Create(fty, llvm::GlobalValue::ExternalLinkage,
                                     func_name, module);
     }

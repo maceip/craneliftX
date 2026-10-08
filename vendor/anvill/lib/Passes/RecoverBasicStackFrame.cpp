@@ -136,20 +136,20 @@ static StackFrameAnalysis AnalyzeStackFrame(
 
     // Update the boundaries, based on the offset we have found
     std::uint64_t type_size =
-        data_layout.getTypeAllocSize(val->getType()).getFixedSize();
+        data_layout.getTypeAllocSize(val->getType()).getFixedValue();
 
     // In the case of `store` instructions, we want to record the size of the
     // stored value as the type size or updating the stack offset.
     if (auto store = llvm::dyn_cast<llvm::StoreInst>(use->getUser())) {
       if (use->getOperandNo() == 1) {
         const auto stored_type = store->getValueOperand()->getType();
-        type_size = data_layout.getTypeAllocSize(stored_type).getFixedSize();
+        type_size = data_layout.getTypeAllocSize(stored_type).getFixedValue();
       }
 
       // In the case of `load` instructions, we want to redord the size of the
       // loaded value.
     } else if (auto load = llvm::dyn_cast<llvm::LoadInst>(use->getUser())) {
-      type_size = data_layout.getTypeAllocSize(load->getType()).getFixedSize();
+      type_size = data_layout.getTypeAllocSize(load->getType()).getFixedValue();
     }
 
     output.highest_offset =
@@ -176,7 +176,7 @@ static llvm::StructType *GenerateStackFrameType(
     llvm::IntegerType *el_type) {
 
   const auto element_size = static_cast<unsigned>(
-      el_type->getPrimitiveSizeInBits().getFixedSize() / 8u);
+      el_type->getPrimitiveSizeInBits().getFixedValue() / 8u);
 
   // Generate a stack frame type with a name that matches the anvill ABI
   auto function_name = function.getName().str();
@@ -207,7 +207,7 @@ static llvm::StructType *GenerateStackFrameType(
   stack_frame_size = num_slots * slot_size;
 
   if (stack_frame_type != nullptr) {
-    assert(dl.getTypeAllocSize(stack_frame_type).getKnownMinSize() <=
+    assert(dl.getTypeAllocSize(stack_frame_type).getKnownMinValue() <=
            stack_frame_size);
     return stack_frame_type;
   }

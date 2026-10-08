@@ -184,6 +184,7 @@ target_link_libraries(anvill
     remill
   PRIVATE
     protobuf::libprotobuf
+    z3::libz3
 )
 
 add_dependencies(anvill check_git_anvill)

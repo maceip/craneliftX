@@ -3,11 +3,11 @@
 lift_drop_demo.py -- lift every function the ingest tracer selects.
 
 Reads lift_map.json and, for each LIFT decision that is a single remill trace
-(no callees), builds an Anvill spec, lifts with remill, and checks the result
-on the Pulley interpreter and on qemu-riscv64.
+(no callees), builds an Anvill spec, runs anvill-decompile-spec, and checks the
+result on the Pulley interpreter and on qemu-riscv64.
 
   * ingest_tracer  -> decides WHERE to lift or keep native
-  * pipeline/lift_drop.py -> anvill spec -> remill -> Cranelift/Pulley and qemu
+  * pipeline/lift_drop.py -> anvill spec -> anvill-decompile-spec -> Cranelift/Pulley and qemu
 """
 import os
 import sys

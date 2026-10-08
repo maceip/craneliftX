@@ -59,7 +59,7 @@ void SliceManager::insertClonedSliceIntoFunction(
                                      targetFunc);
 
   std::for_each(slice.begin(), slice.end(), [bb](llvm::Instruction *insn) {
-    bb->getInstList().push_back(insn);
+    insn->insertInto(bb, bb->end());
   });
 
 
