@@ -408,7 +408,9 @@ def main():
                  - 0.6 * f["loop_density"]
                  + (0.2 if f["pure_compute"] else 0.0))
         f["lift_score"] = round(score, 3)
-        f["liftable_now"] = f["pure_compute"]  # stub-safe to lift with our pipeline
+        # A single remill trace can execute a function that touches memory.
+        # It cannot follow calls out of the lifted bytes, so those stay native.
+        f["liftable_now"] = len(set(f["calls"])) == 0
         reasons = []
         decision = "KEEP_NATIVE"
         if not f["reachable"]:
@@ -423,10 +425,12 @@ def main():
             decision = "LIFT"
             reasons.append(f"network_score={f['network_score']}")
             reasons.append(f"loop_density={f['loop_density']} (not tight)")
-            if f["pure_compute"]:
-                reasons.append("pure-compute -> stub-safe to lift now")
+            if not f["liftable_now"]:
+                reasons.append("has callees -> not a single remill trace")
+            elif f["pure_compute"]:
+                reasons.append("pure-compute -> anvill spec + remill lift")
             else:
-                reasons.append("memory-dependent -> needs real memory semantics (anvill) to lift correctly")
+                reasons.append("memory-dependent -> anvill spec + remill memory semantics")
         else:
             reasons.append(f"low network/freq signal (net={f['network_score']}, freq={f['frequency_score']})")
         f["decision"] = decision

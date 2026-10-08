@@ -1,0 +1,753 @@
+#
+# Copyright (c) 2019-present, Trail of Bits, Inc.
+# All rights reserved.
+#
+# This source code is licensed in accordance with the terms specified in
+# the LICENSE file found in the root directory of this source tree.
+#
+
+name: Build
+
+on:
+  # Run this workflow once every 6 hours against the master branch
+  #schedule:
+  # - cron: "0 */6 * * *"
+
+  push:
+    branches:
+      - "*"
+
+    tags:
+      - "*"
+
+  pull_request:
+    branches:
+      - "*"
+
+jobs:
+  cleanup_stale_workflows:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Clone the anvill repository
+        uses: actions/checkout@v2
+
+      - name: Install Python dependencies
+        run: |
+          pip install requests
+
+      - name: Cancel old workflow runs
+
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+        run: |
+          python3 .github/scripts/abort_previous_workflows.py
+
+  build_linux:
+    needs: cleanup_stale_workflows
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: "ubuntu", tag: "20.04" }
+        binja:
+          - { channel: "headless", version: "3.1.3479" }
+        llvm: ["14", "15"]
+        cxxcommon_version: ["v0.2.16"]
+
+    runs-on: ubuntu-20.04
+    container:
+      image: docker.pkg.github.com/lifting-bits/cxx-common/vcpkg-builder-${{ matrix.image.name }}:${{ matrix.image.tag }}
+
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Setup the build paths
+        shell: bash
+        id: build_paths
+        run: |
+          rel_build_path="build"
+          rel_source_path="src"
+          rel_install_path="install"
+          rel_downloads_path="downloads"
+          rel_ccache_path="ccache"
+          rel_workspace_path="workspace"
+
+          mkdir -p ${rel_build_path} \
+                   ${rel_install_path} \
+                   ${rel_downloads_path} \
+                   ${rel_ccache_path} \
+                   ${rel_workspace_path}
+
+          echo ::set-output name=SOURCE::$(pwd)/${rel_source_path}
+          echo ::set-output name=REL_SOURCE::${rel_source_path}
+          echo ::set-output name=BUILD::$(pwd)/${rel_build_path}
+          echo ::set-output name=REL_BUILD::${rel_build_path}
+          echo ::set-output name=INSTALL::$(pwd)/${rel_install_path}
+          echo ::set-output name=DOWNLOADS::$(pwd)/${rel_downloads_path}
+          echo ::set-output name=CCACHE::$(pwd)/${rel_ccache_path}
+          echo ::set-output name=WORKSPACE::$(pwd)/${rel_workspace_path}
+
+      - name: Update the cache (downloads)
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.build_paths.outputs.DOWNLOADS }}
+
+          key: |
+            gitmodules_${{ matrix.image.name }}_${{ matrix.image.tag }}_${{ matrix.llvm }}_${{ matrix.cxxcommon_version }}_${{ github.sha }}
+
+          restore-keys: |
+            gitmodules_${{ matrix.image.name }}_${{ matrix.image.tag }}_${{ matrix.llvm }}_${{ matrix.cxxcommon_version }}
+
+      - name: Update the cache (ccache)
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.build_paths.outputs.CCACHE }}
+
+          key: |
+            gitmodules_${{ matrix.image.name }}_${{ matrix.image.tag }}_${{ matrix.llvm }}_${{ matrix.cxxcommon_version }}_${{ github.sha }}
+
+          restore-keys: |
+            gitmodules_${{ matrix.image.name }}_${{ matrix.image.tag }}_${{ matrix.llvm }}_${{ matrix.cxxcommon_version }}
+
+      # TODO(alessandro): Remove this step once the dependencies have been embedded in the container image
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y pixz \
+                             xz-utils \
+                             make \
+                             ninja-build \
+                             ccache \
+                             rpm \
+                             openssh-client
+
+      - name: Clone the anvill repository
+        uses: actions/checkout@v2
+        with:
+          path: ${{ steps.build_paths.outputs.REL_SOURCE }}/anvill
+          fetch-depth: 0
+          submodules: true
+
+      - name: Setup Git User for Applying Patches
+        # See this thread for more details https://github.community/t/github-actions-bot-email-address/17204/5
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Install stable rust
+        shell: bash
+        run: |
+          apt-get install -y cargo
+
+      - name: "Install Just"
+        shell: bash
+        run: |
+          cargo install just
+
+      - uses: actions/setup-java@v2
+        with:
+          distribution: "temurin"
+          java-version: "11"
+      - name: Clone Ghidra Spec Generation
+        uses: actions/checkout@v2
+        with:
+          path: ${{ steps.build_paths.outputs.REL_SOURCE }}/irene3
+          repository: "trailofbits/irene3"
+          fetch-depth: 0
+          submodules: false
+          ssh-key: "${{ secrets.IRENE3_DEPLOY }}"
+
+      - name: Add cargo bin to path
+        shell: bash
+        run: |
+          echo ~/.cargo/bin >>$GITHUB_PATH
+
+      - name: "Setup Ghidra"
+        run: |
+          wget https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_10.1.5_build/ghidra_10.1.5_PUBLIC_20220726.zip --output-document=ghidra.zip
+          unzip ghidra.zip
+          echo "GHIDRA_INSTALL_DIR=$(pwd)/ghidra_10.1.5_PUBLIC" >> $GITHUB_ENV
+
+      - name: Install Ghidra Spec Generation
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.REL_SOURCE }}/irene3
+        run: |
+          just install-irene3-ghidra
+
+      - name: Download the cxx-common ${{ matrix.cxxcommon_version}} package
+        shell: bash
+        id: cxxcommon_installer
+        working-directory: ${{ steps.build_paths.outputs.DOWNLOADS }}
+        run: |
+          folder_name="vcpkg_${{ matrix.image.name }}-${{ matrix.image.tag }}_llvm-${{ matrix.llvm }}_amd64"
+          archive_name="${folder_name}.tar.xz"
+
+          url="https://github.com/lifting-bits/cxx-common/releases/download/${{ matrix.cxxcommon_version}}/${archive_name}"
+          local_path="${{ steps.build_paths.outputs.DOWNLOADS }}/${archive_name}"
+
+          if [[ ! -f "${local_path}" ]] ; then
+            echo "Downloading: ${url}"
+            curl "${url}" -L -o "${local_path}"
+
+            ls -t ${{ steps.build_paths.outputs.DOWNLOADS }}/vcpkg_* | tail -n +2 | while read archive_file ; do
+              rm "${archive_file}"
+            done
+          fi
+
+          tar xf "${local_path}" \
+              -C "${{ steps.build_paths.outputs.INSTALL }}"
+
+          destination_path="${{ steps.build_paths.outputs.INSTALL }}/vcpkg"
+
+          mv "${{ steps.build_paths.outputs.INSTALL }}/${folder_name}" \
+             "${destination_path}"
+
+          echo "${destination_path}/installed/x64-linux-rel/tools/llvm-${{matrix.llvm}}" >> $GITHUB_PATH
+
+          echo ::set-output name=PATH::${destination_path}
+
+      - name: Select the build job count
+        shell: bash
+        id: build_job_count
+        run: |
+          echo ::set-output name=VALUE::$(($(nproc) + 1))
+
+      - name: Configure remill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          mkdir remill_build && cd remill_build
+
+          cmake \
+              -DCMAKE_VERBOSE_MAKEFILE=true \
+              -DCMAKE_TOOLCHAIN_FILE="${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="x64-linux-rel" \
+              -G Ninja \
+              ${{ steps.build_paths.outputs.SOURCE }}/anvill/remill
+
+      - name: Build remill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          cmake --build remill_build \
+                -j ${{ steps.build_job_count.outputs.VALUE }}
+
+      - name: Install remill
+        id: remill_installer
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          export DESTDIR=${{ steps.build_paths.outputs.INSTALL }}/remill
+
+          cmake --build remill_build \
+                --target install
+
+          echo ::set-output name=PATH::${DESTDIR}
+
+      - name: Build, configure and install remill (Presets)
+        working-directory: ${{ steps.build_paths.outputs.SOURCE }}/anvill/remill
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+          CMAKE_TOOLCHAIN_FILE: ${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake
+          INSTALL_DIR: ${{ steps.build_paths.outputs.WORKSPACE }}
+
+        run: |
+          scripts/build-preset.sh debug
+
+      - name: Configure anvill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          mkdir anvill_build && cd anvill_build
+
+          cmake \
+              -DCMAKE_VERBOSE_MAKEFILE=true \
+              -DCMAKE_TOOLCHAIN_FILE="${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="x64-linux-rel" \
+              -Dremill_DIR:PATH=${{ steps.remill_installer.outputs.PATH }}/usr/local/lib/cmake/remill \
+              -Dsleigh_DIR:PATH=${{ steps.remill_installer.outputs.PATH }}/usr/local/lib/cmake/sleigh \
+              -DANVILL_ENABLE_TESTS=true \
+              -DANVILL_ENABLE_INSTALL=true \
+              -G Ninja \
+              ${{ steps.build_paths.outputs.SOURCE }}/anvill
+
+      - name: Build anvill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          cmake --build anvill_build \
+                -j ${{ steps.build_job_count.outputs.VALUE }}
+
+      - name: Install anvill
+        id: anvill_installer
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          export DESTDIR=${{ steps.build_paths.outputs.INSTALL }}/anvill
+
+          cmake --build anvill_build \
+                --target install
+
+          echo ::set-output name=PATH::${DESTDIR}
+
+      - name: Build, configure and install anvill (Presets)
+        working-directory: ${{ steps.build_paths.outputs.SOURCE }}/anvill
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+          CMAKE_TOOLCHAIN_FILE: ${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake
+          INSTALL_DIR: ${{ steps.build_paths.outputs.WORKSPACE }}
+
+        run: |
+          scripts/build-preset.sh debug
+      - name: Run the tests
+        env:
+          BINJA_DECODE_KEY: ${{ secrets.BINJA_DECODE_KEY }}
+          CTEST_OUTPUT_ON_FAILURE: 1
+
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}/anvill_build
+        run: |
+          ctest -V
+
+      - name: Create the packages
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+        run: |
+          anvill_tag=$(cd "${{ steps.build_paths.outputs.SOURCE }}/anvill" && git describe --tags --always --abbrev=0)
+          anvill_commit=$(cd "${{ steps.build_paths.outputs.SOURCE }}/anvill" && git rev-parse HEAD | cut -c1-7)
+
+          anvill_version="${anvill_tag:1}.${anvill_commit}"
+
+          echo "Version: ${anvill_version}"
+
+          cpack -D ANVILL_DATA_PATH="${{ steps.anvill_installer.outputs.PATH }}" \
+                -R ${anvill_version} \
+                --config "${{ steps.build_paths.outputs.SOURCE }}/anvill/packaging/main.cmake"
+
+      - name: Locate the packages
+        id: package_names
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+        run: |
+          echo ::set-output name=DEB_PACKAGE_PATH::${{ steps.build_paths.outputs.REL_BUILD }}/$(ls *.deb)
+          echo ::set-output name=RPM_PACKAGE_PATH::${{ steps.build_paths.outputs.REL_BUILD }}/$(ls *.rpm)
+          echo ::set-output name=TGZ_PACKAGE_PATH::${{ steps.build_paths.outputs.REL_BUILD }}/$(ls *.tar.gz)
+
+      - name: Install the DEB package
+        run: |
+          dpkg -i ${{ steps.package_names.outputs.DEB_PACKAGE_PATH }}
+
+      - name: Run Integration Tests (AMP Challenge Binaries)
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.REL_SOURCE }}/anvill
+        run: |
+          python3 -m pip install -r libraries/lifting-tools-ci/requirements.txt
+          scripts/test-amp-challenge-bins.sh \
+          --ghidra-install-dir $GHIDRA_INSTALL_DIR \
+          --decompile-cmd "anvill-decompile-spec"
+        env:
+          TOB_AMP_PASSPHRASE: ${{secrets.TOB_AMP_PASSPHRASE}}
+
+      #      - name: Run Integration Tests (AnghaBench 1K)
+      #        shell: bash
+      #        working-directory: ${{ steps.build_paths.outputs.REL_SOURCE }}/anvill
+      #        run: |
+      #          python3 -m pip install -r libraries/lifting-tools-ci/requirements.txt
+      #          scripts/test-angha-1k.sh \
+      #            --python-cmd "python3 -m anvill" \
+      #            --decompile-cmd "anvill-decompile-json"
+
+      - name: Store the DEB package
+        uses: actions/upload-artifact@v1
+        with:
+          name: ${{ matrix.image.name }}-${{ matrix.image.tag }}_llvm${{ matrix.llvm }}_deb_package
+          path: ${{ steps.package_names.outputs.DEB_PACKAGE_PATH }}
+
+      - name: Store the RPM package
+        uses: actions/upload-artifact@v1
+        with:
+          name: ${{ matrix.image.name }}-${{ matrix.image.tag }}_llvm${{ matrix.llvm }}_rpm_package
+          path: ${{ steps.package_names.outputs.RPM_PACKAGE_PATH }}
+
+      - name: Store the TGZ package
+        uses: actions/upload-artifact@v1
+        with:
+          name: ${{ matrix.image.name }}-${{ matrix.image.tag }}_llvm${{ matrix.llvm }}_tgz_package
+          path: ${{ steps.package_names.outputs.TGZ_PACKAGE_PATH }}
+
+  # Note that we have a limit of 5 concurrent workers, org-wide.
+  # It is best to try and keep the amount of macOS jobs as low
+  # as possible.
+  build_macos:
+    needs: cleanup_stale_workflows
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-11"]
+        llvm: ["14", "15"]
+        cxxcommon_version: ["v0.2.16"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Setup the build paths
+        shell: bash
+        id: build_paths
+        run: |
+          rel_build_path="build"
+          rel_source_path="src"
+          rel_install_path="install"
+          rel_downloads_path="downloads"
+          rel_ccache_path="ccache"
+          rel_workspace_path="workspace"
+
+          mkdir -p ${rel_build_path} \
+                   ${rel_install_path} \
+                   ${rel_downloads_path} \
+                   ${rel_ccache_path} \
+                   ${rel_workspace_path}
+
+          echo ::set-output name=SOURCE::$(pwd)/${rel_source_path}
+          echo ::set-output name=REL_SOURCE::${rel_source_path}
+          echo ::set-output name=BUILD::$(pwd)/${rel_build_path}
+          echo ::set-output name=REL_BUILD::${rel_build_path}
+          echo ::set-output name=INSTALL::$(pwd)/${rel_install_path}
+          echo ::set-output name=DOWNLOADS::$(pwd)/${rel_downloads_path}
+          echo ::set-output name=CCACHE::$(pwd)/${rel_ccache_path}
+          echo ::set-output name=WORKSPACE::$(pwd)/${rel_workspace_path}
+
+      - name: Update the cache (downloads)
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.build_paths.outputs.DOWNLOADS }}
+
+          key: |
+            gitmodules_${{ matrix.os }}_${{ matrix.llvm }}_${{ matrix.cxxcommon_version }}_${{ github.sha }}
+
+          restore-keys: |
+            gitmodules_${{ matrix.os }}_${{ matrix.llvm }}_${{ matrix.cxxcommon_version }}
+
+      - name: Update the cache (ccache)
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.build_paths.outputs.CCACHE }}
+
+          key: |
+            gitmodules_${{ matrix.os }}_${{ matrix.llvm }}_${{ github.sha }}
+
+          restore-keys: |
+            gitmodules_${{ matrix.os }}_${{ matrix.llvm }}
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          brew install ccache \
+                       ninja
+
+      - name: Clone the anvill repository
+        uses: actions/checkout@v2
+        with:
+          path: ${{ steps.build_paths.outputs.REL_SOURCE }}/anvill
+          fetch-depth: 0
+          submodules: true
+
+      - name: Setup Git User for Applying Patches
+        # See this thread for more details https://github.community/t/github-actions-bot-email-address/17204/5
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Download the cxx-common ${{ matrix.cxxcommon_version}} package
+        shell: bash
+        id: cxxcommon_installer
+        working-directory: ${{ steps.build_paths.outputs.DOWNLOADS }}
+        run: |
+          folder_name="vcpkg_${{ matrix.os }}_llvm-${{ matrix.llvm }}_xcode-13.0_amd64"
+          archive_name="${folder_name}.tar.xz"
+
+          url="https://github.com/lifting-bits/cxx-common/releases/download/${{ matrix.cxxcommon_version}}/${archive_name}"
+          local_path="${{ steps.build_paths.outputs.DOWNLOADS }}/${archive_name}"
+
+          if [[ ! -f "${local_path}" ]] ; then
+            echo "Downloading: ${url}"
+            curl "${url}" -L -o "${local_path}"
+
+            ls -t ${{ steps.build_paths.outputs.DOWNLOADS }}/vcpkg_* | tail -n +2 | while read archive_file ; do
+              rm "${archive_file}"
+            done
+          fi
+
+          tar xf "${local_path}" \
+              -C "${{ steps.build_paths.outputs.INSTALL }}"
+
+          destination_path="${{ steps.build_paths.outputs.INSTALL }}/vcpkg"
+
+          mv "${{ steps.build_paths.outputs.INSTALL }}/${folder_name}" \
+             "${destination_path}"
+
+          echo "${destination_path}/installed/x64-osx-rel/bin" >> $GITHUB_PATH
+
+          echo ::set-output name=PATH::${destination_path}
+
+      - name: Select the build job count
+        shell: bash
+        id: build_job_count
+        run: |
+          echo ::set-output name=VALUE::$(($(sysctl -n hw.logicalcpu) + 1))
+
+      - name: Configure remill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          mkdir remill_build && cd remill_build
+
+          cmake \
+              -DCMAKE_VERBOSE_MAKEFILE=true \
+              -DCMAKE_TOOLCHAIN_FILE="${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="x64-osx-rel" \
+              -G Ninja \
+              ${{ steps.build_paths.outputs.SOURCE }}/anvill/remill
+
+      - name: Build remill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          cmake --build remill_build \
+                -j ${{ steps.build_job_count.outputs.VALUE }}
+
+      - name: Install remill
+        id: remill_installer
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          export DESTDIR=${{ steps.build_paths.outputs.INSTALL }}/remill
+
+          cmake --build remill_build \
+                --target install
+
+          echo ::set-output name=PATH::${DESTDIR}
+
+      - name: Build, configure and install remill (Presets)
+        working-directory: ${{ steps.build_paths.outputs.SOURCE }}/anvill/remill
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+          CMAKE_TOOLCHAIN_FILE: ${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake
+          INSTALL_DIR: ${{ steps.build_paths.outputs.WORKSPACE }}
+
+        run: |
+          scripts/build-preset.sh debug
+
+      - name: Configure anvill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          mkdir anvill_build && cd anvill_build
+
+          cmake \
+              -DCMAKE_VERBOSE_MAKEFILE=true \
+              -DCMAKE_TOOLCHAIN_FILE="${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="x64-osx-rel" \
+              -Dremill_DIR:PATH=${{ steps.remill_installer.outputs.PATH }}/usr/local/lib/cmake/remill \
+              -Dsleigh_DIR:PATH=${{ steps.remill_installer.outputs.PATH }}/usr/local/lib/cmake/sleigh \
+              -DANVILL_ENABLE_TESTS=true \
+              -DANVILL_ENABLE_INSTALL=true \
+              -G Ninja \
+              ${{ steps.build_paths.outputs.SOURCE }}/anvill
+
+      - name: Build anvill
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          cmake --build anvill_build \
+                -j ${{ steps.build_job_count.outputs.VALUE }}
+
+      - name: Install anvill
+        id: anvill_installer
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+
+        run: |
+          export DESTDIR=${{ steps.build_paths.outputs.INSTALL }}/anvill
+
+          cmake --build anvill_build \
+                --target install
+
+          echo ::set-output name=PATH::${DESTDIR}
+
+      - name: Build, configure and install anvill (Presets)
+        working-directory: ${{ steps.build_paths.outputs.SOURCE }}/anvill
+
+        env:
+          CCACHE_DIR: ${{ steps.build_paths.outputs.CCACHE }}
+          CMAKE_TOOLCHAIN_FILE: ${{ steps.cxxcommon_installer.outputs.PATH }}/scripts/buildsystems/vcpkg.cmake
+          INSTALL_DIR: ${{ steps.build_paths.outputs.WORKSPACE }}
+
+        run: |
+          scripts/build-preset.sh debug
+
+      - name: Run the tests not requiring Binary Ninja
+
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}/anvill_build
+        run: |
+          ctest -V
+
+      - name: Create the packages
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+        run: |
+          anvill_tag=$(cd "${{ steps.build_paths.outputs.SOURCE }}/anvill" && git describe --tags --always --abbrev=0)
+          anvill_commit=$(cd "${{ steps.build_paths.outputs.SOURCE }}/anvill" && git rev-parse HEAD | cut -c1-7)
+
+          anvill_version="${anvill_tag:1}.${anvill_commit}"
+
+          echo "Version: ${anvill_version}"
+
+          cpack -D ANVILL_DATA_PATH="${{ steps.anvill_installer.outputs.PATH }}" \
+                -R ${anvill_version} \
+                --config "${{ steps.build_paths.outputs.SOURCE }}/anvill/packaging/main.cmake"
+
+      - name: Locate the packages
+        id: package_names
+        shell: bash
+        working-directory: ${{ steps.build_paths.outputs.BUILD }}
+        run: |
+          echo ::set-output name=TGZ_PACKAGE_PATH::${{ steps.build_paths.outputs.REL_BUILD }}/$(ls *.tar.gz)
+
+      - name: Store the TGZ package
+        uses: actions/upload-artifact@v1
+        with:
+          name: ${{ matrix.os }}_llvm${{ matrix.llvm }}_tgz_package
+          path: ${{ steps.package_names.outputs.TGZ_PACKAGE_PATH }}
+
+  release_packages:
+    # Do not run the release procedure if any of the builds has failed
+    needs: [build_linux, build_macos]
+    runs-on: ubuntu-20.04
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+
+    steps:
+      - name: Clone the anvill repository
+        uses: actions/checkout@v2
+        with:
+          path: anvill
+          fetch-depth: 0
+
+      - name: Generate the changelog
+        shell: bash
+        working-directory: anvill
+        run: |
+          ./scripts/generate_changelog.sh changelog.md
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v2
+
+      - name: Draft the new release
+        id: create_release
+        uses: actions/create-release@v1
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Version ${{ github.ref }}
+          body_path: anvill/changelog.md
+          draft: true
+          prerelease: true
+
+      - name: Group the packages by platform
+        run: |
+          zip -r9 anvill_ubuntu-20.04_packages.zip \
+                  ubuntu-20.04*
+
+          zip -r9 anvill_macos-11_packages.zip \
+                  macos-11*
+
+      - name: Upload the Ubuntu 20.04 packages
+        uses: actions/upload-release-asset@v1
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: anvill_ubuntu-20.04_packages.zip
+          asset_name: anvill_ubuntu-20.04_packages.zip
+          asset_content_type: application/gzip
+
+      - name: Upload the macOS 11 packages
+        uses: actions/upload-release-asset@v1
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: anvill_macos-11_packages.zip
+          asset_name: anvill_macos-11_packages.zip
+          asset_content_type: application/gzip
+
+  Docker_Linux:
+    needs: cleanup_stale_workflows
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        llvm: ["14", "15"]
+        ubuntu: ["20.04"]
+        binja:
+          - { channel: "headless", version: "3.1.3479" }
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - name: Build LLVM ${{ matrix.llvm }} on ${{ matrix.ubuntu }}
+        run: |
+          docker build . -t docker.pkg.github.com/lifting-bits/anvill/anvill-llvm${{ matrix.llvm }}-ubuntu${{ matrix.ubuntu }}-amd64:latest -f Dockerfile --target=dist --build-arg UBUNTU_VERSION=${{ matrix.ubuntu }} --build-arg ARCH=amd64 --build-arg LLVM_VERSION=${{ matrix.llvm }}

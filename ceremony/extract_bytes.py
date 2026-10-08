@@ -37,7 +37,13 @@ def main() -> int:
                 break  # reached the next symbol -> stop
             continue
         if collecting:
-            m = re.match(r"^\s*[0-9a-fA-F]+:\s*((?:[0-9a-fA-F]{2}\s*)+)", line)
+            # Stop at the mnemonic. A trailing `\s*` would swallow hex letters
+            # from the text, e.g. the "ad" in "add %ebx,%eax", and remill would
+            # lift those letters as real opcodes.
+            m = re.match(
+                r"^\s*[0-9a-fA-F]+:\s+((?:[0-9a-fA-F]{2}[ \t])*[0-9a-fA-F]{2})\b",
+                line,
+            )
             if m:
                 out.extend(m.group(1).split())
 

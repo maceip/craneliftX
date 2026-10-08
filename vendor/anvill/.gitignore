@@ -1,0 +1,69 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Python
+.idea
+*.pyc
+anvill.egg-info/*
+dist/*
+build/*
+anvill/python/anvill.egg-info/*
+anvill/python/build/*
+anvill/python/dist/*
+python/anvill.egg-info/*
+python/dist/*
+python/build/*
+
+#ignore vscode dir
+.vscode
+
+#ignore generated version files
+VERSION
+
+#do not commit decrypted binja/license
+ci/license.txt
+ci/BinaryNinja-headless.zip
+
+# Ignore z3 run info
+.z3-trace
+
+#build logs
+anvill-build.log
+anvill-configure.log
+
+# build artifacts
+anvill-build
+.cache
+
+# compile commands
+compile_commands.json

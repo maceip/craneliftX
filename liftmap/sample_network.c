@@ -16,8 +16,8 @@
  *      (mostly calls; ideal native dispatch point, nothing to gain by lifting)
  *
  * Functions are marked noinline so each survives as its own symbol for the
- * static analysis. Compiled with -O2 -fno-inline so pure helpers stay in
- * registers (stub-safe for the lift demo) while loops are preserved.
+ * static analysis. Compiled with -O1 -fno-inline so the bounded header loop
+ * in parse_packet stays a real backward branch remill can lift.
  */
 #include <stdint.h>
 #include <stddef.h>
@@ -35,23 +35,22 @@ uint32_t crc32_tight(const uint8_t *p, uint32_t n) {
     return ~crc;
 }
 
-/* (2a) NETWORK, NOT tight, pure-compute (stub-safe): scaled window value. */
+/* (2a) NETWORK, NOT tight, pure-compute: scaled window value. */
 __attribute__((noinline))
 uint32_t tcp_window_scaled(uint32_t seq, uint32_t win) {
     uint64_t v = (uint64_t)seq + (uint64_t)win;
     return (uint32_t)(v & 0xFFFFFFFFu);
 }
 
-/* (2b) NETWORK, NOT tight, pure-compute (stub-safe): IP-id hash. */
+/* (2b) NETWORK, NOT tight, pure-compute: IP-id hash. */
 __attribute__((noinline))
 uint32_t ip_id_hash(uint32_t dst, uint32_t src) {
     uint32_t h = (dst ^ src) * 2654435761u;
     return (h >> 16) ^ (h & 0xFFFF);
 }
 
-/* (2c) NETWORK, NOT tight, but MEMORY-DEPENDENT: packet header parse.
- * Lift-eligible by the heuristic, but not stub-safe, so the demo lifts the
- * pure helpers instead. */
+/* (2c) NETWORK, NOT tight, MEMORY-DEPENDENT: packet header parse.
+ * Lifted with remill memory semantics (real loads and stores), not a stub. */
 __attribute__((noinline))
 uint32_t parse_packet(const uint8_t *buf, uint32_t len,
                       uint32_t *out_ver, uint32_t *out_len) {
