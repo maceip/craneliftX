@@ -16,3 +16,8 @@ __pycache__/
 
 # Large transient analysis artifacts
 *.bc.tmp
+
+# liftmap generated artifacts (reproducible from sample_network.c via `make`)
+/liftmap/sample_network
+/liftmap/sample_network.o
+/liftmap/lift_map.json

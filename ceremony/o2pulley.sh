@@ -37,10 +37,11 @@ BYTES=""
 SYMBOL=""
 A=3
 B=4
+EXPECTED=""
 if [ "${1:-}" = "--bytes" ]; then
-  BYTES="$2"; SYMBOL="${3:-call_sub_0}"; A="${4:-3}"; B="${5:-4}"
+  BYTES="$2"; SYMBOL="${3:-call_sub_0}"; A="${4:-3}"; B="${5:-4}"; EXPECTED="${6:-}"
 else
-  OBJ="$1"; SYMBOL="${2:-ceremony_op}"; A="${3:-3}"; B="${4:-4}"
+  OBJ="$1"; SYMBOL="${2:-ceremony_op}"; A="${3:-3}"; B="${4:-4}"; EXPECTED="${5:-}"
 fi
 
 WORK="$(mktemp -d)"
@@ -94,4 +95,4 @@ echo
 echo "==================================================================="
 echo " [RUN]   wasmtime (Cranelift -> Pulley interpreter)"
 echo "==================================================================="
-"$RUNNER" "$CEREMONY_DIR/lifted_out.wasm" "$SYMBOL" "$A" "$B"
+"$RUNNER" "$CEREMONY_DIR/lifted_out.wasm" "$SYMBOL" "$A" "$B" ${EXPECTED:+"$EXPECTED"}

@@ -14,7 +14,13 @@
 
 use wasmtime::{Config, Engine, Instance, Module, Store, TypedFunc};
 
-fn run(wasm_path: &str, func: &str, a: i64, b: i64) -> Result<(), Box<dyn std::error::Error>> {
+fn run(
+    wasm_path: &str,
+    func: &str,
+    a: i64,
+    b: i64,
+    expected: Option<i64>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let wasm = std::fs::read(wasm_path)?;
 
     // DROP: force Cranelift to emit Pulley bytecode (the portable representation)
@@ -31,12 +37,20 @@ fn run(wasm_path: &str, func: &str, a: i64, b: i64) -> Result<(), Box<dyn std::e
 
     let r = op.call(&mut store, (a, b))?;
 
-    // ceremony_op(a, b) = (a * b) + a  ->  (3 * 4) + 3 = 15
-    let expected = a * b + a;
+    // The runner is function-agnostic: it does not assume any function's
+    // semantics. If the caller supplies an expected value (5th arg) it compares;
+    // otherwise it just reports the result for the caller to validate.
     println!("  artifact : {wasm_path}");
     println!("  target   : pulley64 (Cranelift's portable interpreter)");
-    println!("  {func}({a}, {b}) = {r}  (expected {expected})");
-    println!("  RESULT   : {}", if r == expected { "OK" } else { "WRONG" });
+    match expected {
+        Some(e) => {
+            println!("  {func}({a}, {b}) = {r}  (expected {e})");
+            println!("  RESULT   : {}", if r == e { "OK" } else { "WRONG" });
+        }
+        None => {
+            println!("  {func}({a}, {b}) = {r}");
+        }
+    }
     Ok(())
 }
 
@@ -47,9 +61,12 @@ fn main() {
     let func = std::env::args().nth(2).unwrap_or_else(|| "ceremony_op".to_string());
     let a: i64 = std::env::args().nth(3).unwrap_or_else(|| "3".to_string()).parse().unwrap_or(3);
     let b: i64 = std::env::args().nth(4).unwrap_or_else(|| "4".to_string()).parse().unwrap_or(4);
+    let expected: Option<i64> = std::env::args()
+        .nth(5)
+        .and_then(|s| s.parse::<i64>().ok());
 
     println!("[DROP] wasm -> Cranelift -> Pulley : {path}  func={func}");
-    if let Err(e) = run(&path, &func, a, b) {
+    if let Err(e) = run(&path, &func, a, b, expected) {
         eprintln!("  ERROR: {e}");
         std::process::exit(1);
     }

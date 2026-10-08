@@ -634,3 +634,57 @@ and reuse code in the interpreter that is running them.
 - X. Wang, S. Yeoh, R. Lyerly, P. Olivier, S.-H. Kim, B. Ravindran. *A Framework for Software Diversification with ISA Heterogeneity.* RAID 2020. (Earlier: *A Framework to Secure Applications with ISA Heterogeneity*, SFMA 2019.)
 - Popcorn Linux, Virginia Tech SSRG — https://popcornlinux.org/
 - K. Snow, F. Monrose, L. Davi, A. Dmitrienko, C. Liebchen, A.-R. Sadeghi. *Just-in-Time Code Reuse.* IEEE S&P 2013. (The JIT-ROP threat that §5.5 targets.)
+
+---
+
+## 8. Performance-oriented lift/drop analyzer (`liftmap/`)
+
+New direction (user directive): the value of the heterogeneous core is not only
+security. We can also use it for **performance** — move frequently-executed,
+not-hot-loop code onto Pulley so the native core stays free for the tight loops
+that would pay the lift/drop boundary tax. This needs a *static* decision about
+**where to lift and where to drop** across an entire binary.
+
+### Components
+- **`liftmap/ingest_tracer.py` — the ingest tracer (analyzer).** Disassembles the
+  whole binary with **Capstone** (GitHub: `capstone-engine/capstone`), builds an
+  AST/IL per function (instruction nodes + operand trees + CFG), and scores every
+  function for a performance lift/drop decision:
+  - *loop density* (Tarjan SCC cycle fraction) → **reject super-tight hot loops**;
+  - *network signal* (symbol-name + callee-name keywords: socket/recv/send/
+    parse/packet/tcp/ip/...);
+  - *frequency* (BFS reachability from the entry, since we can't measure runtime
+    frequency statically);
+  - *orchestration* (≥3 distinct callees) and *entry points* → keep native.
+  - Emits `lift_map.json` and a human report.
+- **`liftmap/lift_drop_demo.py` — the demo half.** Reads the map, picks the best
+  pure-compute 2-arg LIFT candidate, and drives the existing
+  `ceremony/o2pulley.sh` pipeline to lift it onto Pulley and validate the result
+  (e.g. `_tcp_window_scaled(100,50)=150 → OK/PASS`).
+- `liftmap/sample_network.c` — a deliberately-shaped workload (tight CRC32 loop,
+  packet parser, pure network helpers, orchestrator) to exercise the decision.
+
+### Decision rules (performance, not security)
+`KEEP_NATIVE` if: tight loop (loop_density > 0.45) · orchestration fan-out
+(≥3 callees) · entry point · not reachable from entry. Otherwise `LIFT` if
+network-eligible or frequently executed. **Memory-dependent** lifts are flagged
+"needs real memory semantics (anvill)" — honest about the runtime-stub limitation
+from §4.8; they are lift *candidates* but not stub-safe to run today.
+
+### Implementation notes
+- Sample must be **x86_64** (`cc -arch x86_64` on Apple Silicon) because the
+  whole lift pipeline is amd64→Pulley.
+- Capstone register names are width-specific (`eax`/`edi`); normalize to the
+  64-bit base for arg/return detection. `lea` is not a memory access; `rsp`/`rbp`
+  refs are stack, not "data memory"; rip-relative constant loads are (so
+  pure-compute detection is intentionally conservative).
+- Re-disassembling a concatenated byte blob misaligns mid-function → disassemble
+  each instruction individually. Trim trailing alignment NOPs (boundary bleed).
+- `ceremony-wasm/src/main.rs` was made function-agnostic (no hardcoded expected);
+  `o2pulley.sh` forwards an optional expected value so the runner still prints OK.
+
+### Reproducibility
+Generated artifacts (`sample_network`, `sample_network.o`, `lift_map.json`) are
+gitignored; `make` (or the scripts themselves) rebuild them from
+`sample_network.c`. pypcode (Ghidra SLEIGH) is the documented IL/AST upgrade path
+vs Capstone's raw disassembly.
