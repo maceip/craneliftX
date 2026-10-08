@@ -46,7 +46,13 @@ ARCHIVE_NAMES = {
     "gtest_main": "googletest",
     "gmock": "googletest",
     "gmock_main": "googletest",
+    "sla": "sleigh",
+    "decomp": "sleigh",
 }
+
+# pipeline/build_lifters.sh passes these -D flags. Pins inside the matching
+# if() are shipped in remill-lift. Every other ENABLE_* option stays off.
+ENABLED_CMAKE_OPTIONS = {"ENABLE_SLEIGH"}
 
 _SIMPLE_GIT = re.compile(
     r"simple_git\(\s*(https://github\.com/[A-Za-z0-9_.-]+/([A-Za-z0-9_.-]+))\s+(\S+)"
@@ -237,11 +243,12 @@ def clean_tag(tag: str) -> str:
 
 
 def _inside_disabled_option(text: str, pos: int) -> bool:
-    """True when `pos` sits in an ``if(ENABLE_...)`` block.
+    """True when `pos` sits in an ``if(ENABLE_...)`` block that the lifter build leaves off.
 
-    Those dependencies are not built unless the option is turned on. The
-    lifter build leaves them off, so recording them would make later triage
-    treat an unused pin as a shipped library.
+    ``ENABLE_SLEIGH`` is turned on by ``pipeline/build_lifters.sh``, so that
+    pin is a shipped static library. Other ``ENABLE_*`` options are not
+    passed, and recording them would make later triage treat an unused pin
+    as a shipped library.
     """
     depth = 0
     enable_depth: int | None = None
@@ -255,7 +262,9 @@ def _inside_disabled_option(text: str, pos: int) -> bool:
             continue
         if text.startswith("if", index) and re.match(r"if\s*\(", text[index:]):
             depth += 1
-            if "ENABLE_" in text[index : index + 48] and enable_depth is None:
+            header = text[index : index + 64]
+            enabled = any(option in header for option in ENABLED_CMAKE_OPTIONS)
+            if "ENABLE_" in header and enable_depth is None and not enabled:
                 enable_depth = depth
             index += 2
             continue
@@ -266,10 +275,10 @@ def _inside_disabled_option(text: str, pos: int) -> bool:
 def parse_cmake_pins(path: Path) -> list[StaticLib]:
     """Recover third-party versions pinned in a CMake superbuild.
 
-    Remill builds glog, gflags, googletest, and XED as static archives. Syft
-    does not read ``simple_git`` / ``ExternalProject_Add`` tags, so those
-    versions never reach Grype. Pins inside ``if(ENABLE_...)`` are skipped
-    because that option is off in the lifter build.
+    Remill builds glog, gflags, googletest, XED, and Sleigh as static
+    archives. Syft does not read ``simple_git`` / ``ExternalProject_Add``
+    tags, so those versions never reach Grype. Pins inside an ``if(ENABLE_...)``
+    block are skipped unless ``pipeline/build_lifters.sh`` turns that option on.
     """
     text = path.read_text(encoding="utf-8", errors="ignore")
     found: list[StaticLib] = []

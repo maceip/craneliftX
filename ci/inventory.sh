@@ -38,5 +38,7 @@ if ("zstd", "1.5.7") not in libs:
     raise SystemExit(f"bundled zstd 1.5.7 was not tracked: {sorted(libs)}")
 if ("glog", "0.7.1") not in libs:
     raise SystemExit(f"pinned glog 0.7.1 was not tracked: {sorted(libs)}")
+if ("sleigh", "7c6b742") not in libs:
+    raise SystemExit(f"pinned sleigh 7c6b742 was not tracked: {sorted(libs)}")
 print("lockfile static libs:", ", ".join(f"{name} {version}" for name, version in sorted(libs)))
 PY

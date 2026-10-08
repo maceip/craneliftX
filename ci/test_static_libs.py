@@ -229,7 +229,7 @@ class LockAndMergeTests(unittest.TestCase):
         self.assertIn(("googletest", "1.17.0", "static-library"), keyed)
         self.assertIn(("xed", "2025.06.08", "static-library"), keyed)
         self.assertIn(("mbuild", "2024.11.04", "cmake-pin"), keyed)
-        self.assertNotIn("sleigh", {name for name, _version, _origin in keyed})
+        self.assertIn(("sleigh", "7c6b742", "static-library"), keyed)
         glog = next(lib for lib in discovery.libraries if lib.name == "glog")
         self.assertIn("google:glog:0.7.1", glog.cpe or "")
 

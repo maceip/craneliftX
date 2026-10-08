@@ -1,7 +1,9 @@
 # Toolchain image for the main-branch release job.
 # Cross compilers, Rust, Syft, and LLVM 18 are installed here so a run does
-# not apt-get. Source is mounted at /src; this file does not COPY the repo,
-# so the layer cache stays valid across code changes.
+# not apt-get. clang-18 is installed next to llvm-link because remill's
+# bitcode compiler search does not look on PATH. Source is mounted at /src;
+# this file does not COPY the repo, so the layer cache stays valid across
+# code changes.
 
 FROM ubuntu:24.04
 
@@ -35,11 +37,14 @@ RUN apt-get update \
         libc6-dev \
         libc6-dev-arm64-cross \
         libc6-dev-riscv64-cross \
+        clang-18 \
         llvm-18-dev \
         ninja-build \
         pkg-config \
         python3 \
         zlib1g-dev \
+    && test -x /usr/lib/llvm-18/bin/llvm-link \
+    && test -x /usr/lib/llvm-18/bin/clang++ \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \

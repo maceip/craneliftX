@@ -129,6 +129,12 @@ if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
       exit 1
     fi
   done
+  # remill's BCCompiler.cmake only searches the directory that contains
+  # llvm-link, and it looks for the names clang++ and clang.
+  if [[ ! -x /usr/lib/llvm-18/bin/clang++ ]]; then
+    echo "missing /usr/lib/llvm-18/bin/clang++ (package clang-18)" >&2
+    exit 1
+  fi
   echo "==> pipeline/build_lifters.sh"
   JOBS="${LIFTER_JOBS:-$(nproc)}" pipeline/build_lifters.sh
   shopt -s nullglob

@@ -31,8 +31,14 @@ LLVM_DIR="$(llvm-config-18 --cmakedir)"
 DEPS_INSTALL="$ROOT/build/remill-deps/install"
 JOBS="${JOBS:-2}"
 
+# Sleigh is linked into remill-lift. Build it in the dependency superbuild
+# (ENABLE_SLEIGH) and point remill at that install (REMILL_FETCH_SLEIGH=OFF),
+# which is the configuration remill's own CI uses. A previous configure can
+# cache CLANG_PATH=NOTFOUND; -UCLANG_PATH makes cmake search again once
+# clang-18 is installed next to llvm-link.
 cmake -G Ninja -S "$SRC/dependencies" -B "$ROOT/build/remill-deps" \
   -DUSE_EXTERNAL_LLVM=ON \
+  -DENABLE_SLEIGH=ON \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
   -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL" \
@@ -42,6 +48,8 @@ cmake --build "$ROOT/build/remill-deps"
 cmake -G Ninja -S "$SRC" -B "$ROOT/build/remill" \
   -DCMAKE_BUILD_TYPE=Release \
   -DREMILL_ENABLE_TESTING=OFF \
+  -DREMILL_FETCH_SLEIGH=OFF \
+  -UCLANG_PATH \
   -DCMAKE_PREFIX_PATH="$DEPS_INSTALL;$LLVM_PREFIX" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DLLVM_DIR="$LLVM_DIR"

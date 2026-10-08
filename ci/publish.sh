@@ -83,8 +83,9 @@ python3 - <<PY
 import json
 doc = json.load(open("${RELEASE}/meta/sbom.cdx.json", encoding="utf-8"))
 have = {(c.get("name"), c.get("version")) for c in doc.get("components", [])}
-if ("zstd", "1.5.7") not in have or ("glog", "0.7.1") not in have or ("xed", "2025.06.08") not in have:
-    raise SystemExit(f"merged SBOM is missing a pinned static library: {sorted(have)}")
+needed = {("zstd", "1.5.7"), ("glog", "0.7.1"), ("xed", "2025.06.08"), ("sleigh", "7c6b742")}
+if not needed <= have:
+    raise SystemExit(f"merged SBOM is missing a pinned static library: {sorted(needed - have)}")
 index = json.load(open("${RELEASE}/meta/dependency-versions.json", encoding="utf-8"))
 missed = [row for row in index["libraries"] if row.get("missed_by_syft")]
 print(f"triage index: {len(index['libraries'])} libraries, {len(missed)} static libs Syft missed")
