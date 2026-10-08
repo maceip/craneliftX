@@ -1,0 +1,13 @@
+[package]
+name = "xisa-probe"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+cranelift-codegen = { version = "0.136", features = ["all-arch"] }
+target-lexicon = "0.13"
+
+[profile.release]
+debug = false

@@ -1,0 +1,18 @@
+# Rust build artifacts
+/target
+target/
+**/target/
+
+# Nested separate git repositories (not part of this project's deliverable)
+/upstream/
+/hetersec2/
+
+# Local project memory / editor cruft
+.workbuddy-ai/
+.DS_Store
+__pycache__/
+*.pyc
+*.pdf
+
+# Large transient analysis artifacts
+*.bc.tmp

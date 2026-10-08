@@ -1,0 +1,19 @@
+
+One basic block, compiled for every backend, in a single process
+  addr = stack_addr ss32; sum = v0+v1; call ext(sum, addr); ret sum+addr
+
+target       bytes     fp_off     ss32_off   relocs    calls   blocks
+------------------------------------------------------------------
+x86_64          69         48            0        1        1        1
+aarch64         72         48            0        1        1        1
+riscv64        100         48            0        1        1        1
+s390x           58        192          160        1        1        1
+pulley64        30         48            0        1        1        1
+
+code size:             30..100 bytes, 5 distinct
+SP-to-FP distance:     2 distinct across 5 backends
+stack slot placement:  2 distinct across 5 backends
+
+Every backend accepted the same block and produced working code, so the
+compilation half is solved. What differs is where each one put things —
+and that is precisely what a migration frame has to reconcile.
