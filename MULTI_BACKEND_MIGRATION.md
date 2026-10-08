@@ -334,10 +334,13 @@ DROP (Cranelift → Pulley + randomized opcode map + abort-on-trap executor).
   - `llc -mtriple=wasm32` → `wasm-ld` → Cranelift (`pulley64`) → Pulley interpreter
   - `clang --target=riscv64-linux-gnu` → qemu-user
 - **Vendored sources** (`vendor/LOCK`): remill `56918a8` (2026-08-27), anvill
-  `9948d26` (2023-07-05). `pipeline/build_lifters.sh` builds remill against
-  system LLVM 18 into `build/remill-install`, then builds `anvill-decompile-spec`
-  against that prefix and the same LLVM. Anvill's bundled remill submodule is
-  not configured.
+  `9948d26` (2023-07-05). Upstream `lifting-bits/remill` master has no commit
+  newer than `56918a8` (checked 2026-10-08); that pin already carries
+  `LLVM_VERSION_MAJOR` guards through 21. `pipeline/build_lifters.sh` builds
+  remill against **system LLVM 20** (`llvm-config-20`) into
+  `build/remill-install`, producing `remill-lift-20`, then builds
+  `anvill-decompile-spec` against that prefix and the same LLVM. Anvill's
+  bundled remill submodule is not configured.
 - **Strength:** this is the lift Cranelift cannot do. Cranelift has no
   machine-code decoder; remill is the instruction lifter. Anvill is the stage
   between the spec and the Cranelift drop.
@@ -349,7 +352,7 @@ DROP (Cranelift → Pulley + randomized opcode map + abort-on-trap executor).
   checked before the lift: signature, executable bytes, and symbol must
   round-trip. `--add_names` names the lifted function with the symbol stored
   in the spec. The `llvm::Optional` / `llvm::None` call sites that blocked
-  LLVM 18 are `std::optional` / `std::nullopt` in the library and in this
+  this LLVM are `std::optional` / `std::nullopt` in the library and in this
   program. The runtime linked afterwards is still the remill test-runner
   contract (real memory, identity flags), and only for helpers Anvill left
   declared.
@@ -393,7 +396,7 @@ Mechanism:
    the emulator sits above the stack top. The link step includes a definition
    only when that `__remill_*` helper is still declared after Anvill's passes.
 5. Pulley: `llc -O0 -mtriple=wasm32` and `wasm-ld --export-all --export-memory`.
-   qemu: the same bitcode compiled with `clang-18 --target=riscv64-linux-gnu`
+   qemu: the same bitcode compiled with `clang-20 --target=riscv64-linux-gnu`
    and linked with `riscv64-linux-gnu-gcc`.
 
 **What runs today:** pure-compute functions and memory functions with no
@@ -422,7 +425,7 @@ extractor was injecting mnemonic bytes.
   ["pulley"]`, `Config::target("pulley64")`) drops `ceremony/sign.wasm`
   (`clang --target=wasm32`) onto Pulley and runs `ceremony_op(3,4) = 15` → OK.
   (Note: versions 0.30 / 0.40 do **not** expose the `pulley` feature; 36.x does.)
-- **Edge 2 — LIFT and both drops: WORKING on LLVM 18.** The Anvill spec names
+- **Edge 2 — LIFT and both drops: WORKING on LLVM 20.** The Anvill spec names
   the bytes. `anvill-decompile-spec` is the stage between that spec and the
   Cranelift drop: remill lifts the instructions, Anvill's passes clean the IR,
   and the same IR runs on Pulley and on qemu-riscv64. `make demo` lifts every
@@ -431,7 +434,7 @@ extractor was injecting mnemonic bytes.
   length 20 returns 89 and writes version 4 and length 20. Cranelift still has
   no machine-code decoder; remill is what performs that instruction lift.
 - **anvill spec and `anvill-decompile-spec`: INTEGRATED.** `make lifters`
-  installs `remill-lift-<major>` and `anvill-decompile-spec` side by side.
+  installs `remill-lift-20` and `anvill-decompile-spec` side by side.
   Real memory and flag semantics, for helpers the passes leave declared, come
   from `pipeline/remill_runtime.ll`, which replaces the old
   `ceremony/remill_runtime_stub.ll` no-op stub.

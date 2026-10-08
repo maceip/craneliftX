@@ -1,0 +1,158 @@
+# On push to main: inventory third-party versions, build Linux binaries for
+# x86-64 plus two other ISAs inside a prebuilt toolchain container, sign those
+# binaries with GitHub artifact attestations, and publish a release.
+# Pull requests run the same build and attestation so the check is green
+# before merge; only main creates the release.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  inventory:
+    name: Dependency versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/ci-image
+      - name: Syft SBOM and static-library supplement
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -w /src \
+            ceremony-ci:local \
+            bash ci/inventory.sh
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            ceremony-ci:local \
+            chown -R "$(id -u):$(id -g)" /src/dist
+      - name: Static-library unit tests
+        run: python3 -m unittest ci.test_static_libs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/sbom.syft.cdx.json
+            dist/static-libs-lockfile.json
+
+  build:
+    name: Build ${{ matrix.isa }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86-64, plus aarch64 and riscv64. Keep ci/publish.sh in sync.
+          # Linux x86-64 also builds the vendored remill lifter (a host tool).
+          # aarch64 and riscv64 are the two additional ISA binaries.
+          - target: x86_64-unknown-linux-gnu
+            isa: x86_64
+            file_re: x86-64
+            lifters: "1"
+          - target: aarch64-unknown-linux-gnu
+            isa: aarch64
+            file_re: ARM aarch64
+            lifters: "0"
+          - target: riscv64gc-unknown-linux-gnu
+            isa: riscv64
+            file_re: RISC-V
+            lifters: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore cargo cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ github.workspace }}/.ci-cargo/registry
+            ${{ github.workspace }}/.ci-cargo/git
+            ${{ github.workspace }}/target
+            ${{ github.workspace }}/build
+          key: cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock', 'vendor/remill/dependencies/**', 'pipeline/build_lifters.sh') }}
+          restore-keys: |
+            cargo-${{ matrix.target }}-
+      - uses: ./.github/actions/ci-image
+      - name: Build in the toolchain container
+        run: |
+          mkdir -p .ci-cargo/registry .ci-cargo/git build
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -v "$GITHUB_WORKSPACE/.ci-cargo/registry:/usr/local/cargo/registry" \
+            -v "$GITHUB_WORKSPACE/.ci-cargo/git:/usr/local/cargo/git" \
+            -w /src \
+            -e BUILD_LIFTERS=${{ matrix.lifters }} \
+            ceremony-ci:local \
+            bash ci/build.sh "${{ matrix.target }}" "${{ matrix.file_re }}"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            ceremony-ci:local \
+            chown -R "$(id -u):$(id -g)" /src/dist /src/target /src/.ci-cargo /src/build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries-${{ matrix.isa }}
+          if-no-files-found: error
+          retention-days: 14
+          path: dist/
+
+  publish:
+    name: Attest and release
+    needs: [inventory, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "*"
+          path: collected
+          merge-multiple: true
+      - name: Merge SBOM and stage binaries
+        run: bash ci/publish.sh collected release
+      - name: Attest Linux binaries
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release/bin/*
+      - name: Checksums and release notes
+        env:
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: bash ci/finalize_release.sh release
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="rel-${GITHUB_SHA}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release/bin/* release/meta/* --clobber
+          else
+            gh release create "$tag" \
+              --title "Build ${GITHUB_SHA:0:12}" \
+              --notes-file release/NOTES.md \
+              release/bin/* release/meta/*
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          if-no-files-found: error
+          retention-days: 14
+          path: release/

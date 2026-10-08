@@ -1,6 +1,6 @@
 # Top-level entry points for the remill/anvill lift and Cranelift drop.
 #
-#   make lifters   build vendored remill and anvill-decompile-spec (one LLVM)
+#   make lifters   build vendored remill (LLVM 20) and anvill-decompile-spec
 #   make runner    build the Cranelift/Pulley drop runner
 #   make demo      analyze sample_network and validate every lift on Pulley
 

@@ -24,3 +24,9 @@ __pycache__/
 
 # Vendored-lifter build tree (pipeline/build_lifters.sh)
 /build/
+
+# CI cargo cache and staged release binaries
+/.ci-cargo/
+/dist/
+/release/
+/collected/

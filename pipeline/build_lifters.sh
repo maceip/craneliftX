@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build vendored remill against the system LLVM, then anvill-decompile-spec
+# Build vendored remill against system LLVM 20, then anvill-decompile-spec
 # against that install. Remill stays the instruction lifter. Anvill reads the
 # protobuf spec this repo already writes and runs its cleanup passes.
 #
 # Anvill is configured against build/remill-install, not vendor/anvill's
-# bundled remill submodule. One LLVM major: the one remill was just built with.
+# bundled remill submodule. One LLVM major: LLVM 20, the one remill links.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,11 +22,11 @@ if [[ ! -f "$ANVILL_SRC/CMakeLists.txt" ]]; then
 fi
 
 shopt -s nullglob
-existing=("$PREFIX"/bin/remill-lift-*)
+existing=("$PREFIX"/bin/remill-lift-20)
 anvill_bin="$PREFIX/bin/anvill-decompile-spec"
 need_remill=0
 need_anvill=0
-if (( ${#existing[@]} == 0 )); then
+if [[ ! -x "${existing[0]:-}" ]]; then
   need_remill=1
 fi
 if [[ ! -x "$anvill_bin" ]]; then
@@ -38,19 +38,29 @@ if (( need_remill == 0 && need_anvill == 0 )); then
   exit 0
 fi
 
-if ! command -v llvm-config-18 >/dev/null; then
-  echo "llvm-config-18 is required (apt install llvm-18-dev)" >&2
+if ! command -v llvm-config-20 >/dev/null; then
+  echo "llvm-config-20 is required (system LLVM 20: apt install llvm-20-dev clang-20)" >&2
   exit 1
 fi
 
-LLVM_PREFIX="$(llvm-config-18 --prefix)"
-LLVM_DIR="$(llvm-config-18 --cmakedir)"
+LLVM_PREFIX="$(llvm-config-20 --prefix)"
+LLVM_DIR="$(llvm-config-20 --cmakedir)"
 DEPS_INSTALL="$ROOT/build/remill-deps/install"
 JOBS="${JOBS:-2}"
+# Host compiler matches the one LLVM the lifter links. The default c++ on
+# this image is clang 18, which is a different major.
+export CC="${CC:-clang-20}"
+export CXX="${CXX:-clang++-20}"
 
 if (( need_remill )); then
+  # Sleigh is linked into remill-lift. Build it in the dependency superbuild
+  # (ENABLE_SLEIGH) and point remill at that install (REMILL_FETCH_SLEIGH=OFF),
+  # which is the configuration remill's own CI uses. A previous configure can
+  # cache CLANG_PATH=NOTFOUND; -UCLANG_PATH makes cmake search again once
+  # clang-20 is installed next to llvm-link.
   cmake -G Ninja -S "$SRC/dependencies" -B "$ROOT/build/remill-deps" \
     -DUSE_EXTERNAL_LLVM=ON \
+    -DENABLE_SLEIGH=ON \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL" \
@@ -60,6 +70,8 @@ if (( need_remill )); then
   cmake -G Ninja -S "$SRC" -B "$ROOT/build/remill" \
     -DCMAKE_BUILD_TYPE=Release \
     -DREMILL_ENABLE_TESTING=OFF \
+    -DREMILL_FETCH_SLEIGH=OFF \
+    -UCLANG_PATH \
     -DCMAKE_PREFIX_PATH="$DEPS_INSTALL;$LLVM_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DLLVM_DIR="$LLVM_DIR"
