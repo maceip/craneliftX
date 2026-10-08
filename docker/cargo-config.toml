@@ -1,0 +1,15 @@
+# Cross linkers for the preinstalled Debian cross toolchains.
+# ci/build.sh also exports the same values so a host with the compilers
+# installed behaves the same way outside this image.
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.riscv64gc-unknown-linux-gnu]
+linker = "riscv64-linux-gnu-gcc"
+
+[net]
+retry = 5
+
+[registries.crates-io]
+protocol = "sparse"
