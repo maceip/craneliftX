@@ -67,8 +67,8 @@ const STAGE_LABEL: Record<string, string> = {
   function_row: "row",
   memory_map: "memory map",
   perf: "measurements",
-  done: "complete",
-  tracer_done: "complete",
+  tracer_complete: "tracer finished",
+  complete: "complete",
   error: "error",
 };
 
@@ -132,7 +132,7 @@ export const App: React.FC = () => {
             setPlacement(payload as Placement);
           } else if (stage === "perf") {
             setMeasuredCount(payload.measured_count ?? 0);
-          } else if (stage === "done" || stage === "tracer_done") {
+          } else if (stage === "complete") {
             setMeasuredCount(payload.measured_count ?? 0);
             setIsRunning(false);
             setStageLabel("complete");

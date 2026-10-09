@@ -203,7 +203,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         def emit(stage: str, payload) -> None:
-            out_stage = "tracer_done" if stage == "done" else stage
+            # Tracer's own "done" is mid-stream; keep it distinct so the UI
+            # does not treat it as job completion before function rows land.
+            out_stage = "tracer_complete" if stage == "done" else stage
             msg = json.dumps({"stage": out_stage, "payload": payload})
             self.wfile.write(f"data: {msg}\n\n".encode())
             self.wfile.flush()
@@ -308,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
             report["functions"] = mem_rows
             job["report"] = report
 
-            emit("done", {
+            emit("complete", {
                 "total_functions": report["total_functions"],
                 "lift": report["lift"],
                 "keep_native": report["keep_native"],

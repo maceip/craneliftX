@@ -180,61 +180,75 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
 
             {/* Micro Badge Under Conduit */}
             <span className="text-[10px] font-mono font-bold text-[#FC4C01] bg-[#FC4C01]/10 px-2 py-0.5 rounded-full border border-[#FC4C01]/20 -mt-8">
-              {activeSegment?.decision === "LIFT" ? "LIFTING" : "SILICON"}
+              {activeSegment?.decision === "LIFT" ? "LIFT PATH" : "NATIVE"}
             </span>
           </div>
         </div>
 
-        {/* Right Side: Cranelift Pulley VM Isolated Virtual Memory Sandbox */}
+        {/* Right Side: selected function (real fields only) */}
         <div className="md:col-span-5 flex flex-col gap-2 bg-neutral-900 text-white p-4 rounded-xl border border-neutral-800 shadow-md">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="font-bold text-white">Pulley VM Sandbox (Safe ISA)</span>
-            <span className="text-[10px] text-emerald-400 font-semibold">vm://0x1000</span>
+            <span className="font-bold text-white">Selected function</span>
+            <span className="text-[10px] text-neutral-400 font-semibold">
+              {activeSegment
+                ? `0x${activeSegment.addr.toString(16)}`
+                : "—"}
+            </span>
           </div>
 
           {/* Active Inspection Box */}
           <div className="bg-neutral-950 p-3.5 rounded-lg border border-neutral-800 flex flex-col gap-2 mt-1">
             <div className="flex items-center justify-between">
               <span className="font-mono text-xs font-bold text-white truncate">
-                {activeSegment ? activeSegment.name : "Select Spot"}
+                {activeSegment ? activeSegment.name : "Select a function"}
               </span>
               <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
                 activeSegment?.decision === "LIFT"
                   ? "bg-[#FC4C01] text-white"
                   : "bg-neutral-800 text-neutral-400"
               }`}>
-                {activeSegment?.decision === "LIFT" ? "ISA: PULLEY64" : "ISA: x86_64 HOST"}
+                {activeSegment?.decision === "LIFT" ? "LIFT → PULLEY" : "KEEP_NATIVE"}
               </span>
             </div>
 
             <div className="space-y-1 font-mono text-[11px] text-neutral-400 pt-1">
               <div className="flex justify-between">
-                <span>Transformed Size:</span>
-                <span className="text-white font-medium">{activeSegment ? `${activeSegment.size_bytes}B (${activeSegment.n_insn} insn)` : "---"}</span>
+                <span>Extent:</span>
+                <span className="text-white font-medium">
+                  {activeSegment
+                    ? `${activeSegment.size_bytes}B · ${activeSegment.n_insn} insn`
+                    : "—"}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span>Decompiler Route:</span>
-                <span className="text-neutral-300">Anvill &rarr; Pulley IR</span>
+                <span>Decision:</span>
+                <span className="text-neutral-300">
+                  {activeSegment?.decision || "—"}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span>Memory Isolation:</span>
-                <span className={activeSegment?.decision === "LIFT" ? "text-emerald-400 font-semibold" : "text-neutral-500"}>
-                  {activeSegment?.decision === "LIFT" ? "Bounds Enforced" : "Native Shared"}
+                <span>Address:</span>
+                <span className="text-neutral-300">
+                  {activeSegment
+                    ? `0x${activeSegment.addr.toString(16)}–0x${(
+                        activeSegment.addr + activeSegment.size_bytes
+                      ).toString(16)}`
+                    : "—"}
                 </span>
               </div>
             </div>
 
             <div className="pt-2 border-t border-neutral-800 text-[10px] font-mono text-neutral-400">
-              <span className="text-neutral-500">Static Decision: </span>
+              <span className="text-neutral-500">Tracer reason: </span>
               <span className="text-neutral-300 italic truncate block">
-                {activeSegment?.reason || "Static analysis pass"}
+                {activeSegment?.reason || "—"}
               </span>
             </div>
           </div>
 
-          <div className="flex justify-between text-[10px] font-mono text-neutral-400 pt-1">
-            <span className="text-emerald-400">Zero Unsafe Pointers</span>
-            <span>Memory Safe Interpreter</span>
+          <div className="flex justify-between text-[10px] font-mono text-neutral-500 pt-1">
+            <span>extents from Capstone</span>
+            <span>not a simulated sandbox</span>
           </div>
         </div>
 
