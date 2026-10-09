@@ -14,6 +14,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LLVM_MAJOR="$(cat "${ROOT}/.llvm-version" 2>/dev/null || echo 20)"
+
+# macOS: an llvm.org clang has no default sysroot, so it cannot find the Apple
+# SDK headers and every C file fails with "'string.h' file not found" (this
+# breaks remill's vendored XED build). The clang Darwin driver honours the
+# SDKROOT environment variable, so point it at the Xcode SDK.
+if [[ "$(uname)" == "Darwin" && -z "${SDKROOT:-}" ]] && command -v xcrun >/dev/null 2>&1; then
+  macos_sdk="$(xcrun --show-sdk-path 2>/dev/null || true)"
+  if [[ -n "$macos_sdk" && -d "$macos_sdk" ]]; then
+    export SDKROOT="$macos_sdk"
+    echo "SDKROOT=$SDKROOT (Xcode SDK, so the llvm.org clang finds C headers)"
+  fi
+fi
 PREFIX="${REMILL_PREFIX:-$ROOT/build/remill-install}"
 SRC="$ROOT/vendor/remill"
 ANVILL_SRC="$ROOT/vendor/anvill"
@@ -99,14 +111,35 @@ if (( need_remill )); then
   # which is the configuration remill's own CI uses. A previous configure can
   # cache CLANG_PATH=NOTFOUND; -UCLANG_PATH makes cmake search again once
   # clang-20 is installed next to llvm-link.
-  cmake -G Ninja -S "$SRC/dependencies" -B "$ROOT/build/remill-deps" \
-    -DUSE_EXTERNAL_LLVM=ON \
-    -DENABLE_SLEIGH=ON \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
-    -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL" \
-    -DLLVM_DIR="$LLVM_DIR"
-  cmake --build "$ROOT/build/remill-deps"
+  # SKIP_DEPS=1 reuses an already-built dependency prefix. Needed on macOS
+  # because XED's mfile.py returns a spurious exit 1 when driven by the cmake
+  # graph (it builds and installs correctly -- verified -- but exits non-zero),
+  # so a re-run of the superbuild aborts even though every dependency is
+  # installed under $DEPS_INSTALL.
+  if [[ "${SKIP_DEPS:-0}" != "1" ]]; then
+    cmake -G Ninja -S "$SRC/dependencies" -B "$ROOT/build/remill-deps" \
+      -DUSE_EXTERNAL_LLVM=ON \
+      -DENABLE_SLEIGH=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
+      -DCMAKE_INSTALL_PREFIX="$DEPS_INSTALL" \
+      -DLLVM_DIR="$LLVM_DIR"
+    # Serial (-j1) on purpose: XED's mfile.py is not safe to run concurrently
+    # with the other external projects. Under ninja's default parallelism it
+    # races and exits 1 right after "[REUSING BUILD DEFINES HEADER FILE]"
+    # without ever reaching "[INSTALL DIR]". remill/anvill below stay parallel.
+    cmake --build "$ROOT/build/remill-deps" -j 1
+  else
+    echo "SKIP_DEPS=1: reusing $DEPS_INSTALL"
+  fi
+
+  # macOS: the installed binaries link LLVM's libunwind via @rpath. cmake
+  # rewrites (strips) the build rpath on install unless CMAKE_INSTALL_RPATH is
+  # set, which leaves the installed tool dying with "no LC_RPATH's found".
+  remill_extra=()
+  if [[ "$(uname)" == "Darwin" ]]; then
+    remill_extra+=( -DCMAKE_INSTALL_RPATH="$LLVM_PREFIX/lib" )
+  fi
 
   cmake -G Ninja -S "$SRC" -B "$ROOT/build/remill" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -115,7 +148,8 @@ if (( need_remill )); then
     -UCLANG_PATH \
     -DCMAKE_PREFIX_PATH="$DEPS_INSTALL;$LLVM_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-    -DLLVM_DIR="$LLVM_DIR"
+    -DLLVM_DIR="$LLVM_DIR" \
+    "${remill_extra[@]}"
   cmake --build "$ROOT/build/remill" -j "$JOBS"
   cmake --install "$ROOT/build/remill"
   echo "installed remill into $PREFIX"
@@ -150,6 +184,20 @@ set(Z3_FOUND TRUE)
 EOF
   fi
 
+  # macOS specifics:
+  #  * the prebuilt llvm.org LLVM is built WITHOUT RTTI, so anvill must match
+  #    (-fno-rtti); otherwise the link emits "typeinfo for llvm::CallbackVH".
+  #  * Homebrew's libprotobuf needs abseil linked explicitly, otherwise the
+  #    link fails on absl::hash_internal::MixingHashState::kSeed.
+  anvill_extra=()
+  if [[ "$(uname)" == "Darwin" ]]; then
+    anvill_extra+=(
+      -DCMAKE_INSTALL_RPATH="$LLVM_PREFIX/lib"
+      -DCMAKE_CXX_FLAGS=-fno-rtti
+      -DCMAKE_EXE_LINKER_FLAGS="-L/opt/homebrew/lib -labsl_hash -labsl_raw_hash_set -labsl_hashtablez_sampler -labsl_city -labsl_base -labsl_strings -labsl_strings_internal -labsl_int128 -labsl_throw_delegate -labsl_synchronization -labsl_time -labsl_time_zone -labsl_raw_logging_internal"
+    )
+  fi
+
   cmake -G Ninja -S "$ANVILL_SRC" -B "$ROOT/build/anvill" \
     -DCMAKE_BUILD_TYPE=Release \
     -DANVILL_ENABLE_TESTS=OFF \
@@ -158,7 +206,8 @@ EOF
     -DCMAKE_PREFIX_PATH="$PREFIX;$DEPS_INSTALL;$LLVM_PREFIX;$Z3_CMAKE" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DLLVM_DIR="$LLVM_DIR" \
-    -Dremill_DIR="$PREFIX/lib/cmake/remill"
+    -Dremill_DIR="$PREFIX/lib/cmake/remill" \
+    "${anvill_extra[@]}"
   cmake --build "$ROOT/build/anvill" -j "$JOBS"
   cmake --install "$ROOT/build/anvill"
   echo "installed anvill-decompile-spec into $PREFIX"

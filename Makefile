@@ -8,6 +8,11 @@
 
 .PHONY: lifters runner demo sample
 
+# Prefer the local uv venv when present: on macOS the system python3 has no
+# capstone/protobuf. Create it with:
+#   uv venv .venv && uv pip install --python .venv/bin/python capstone protobuf
+PYTHON ?= $(shell [ -x .venv/bin/python3 ] && echo .venv/bin/python3 || echo python3)
+
 lifters:
 	pipeline/build_lifters.sh
 
@@ -22,4 +27,4 @@ sample:
 	$(MAKE) -C liftmap
 
 demo: sample runner
-	python3 liftmap/lift_drop_demo.py
+	$(PYTHON) liftmap/lift_drop_demo.py
