@@ -37,3 +37,6 @@ __pycache__/
 /dist/
 /release/
 /collected/
+
+# Local python venv (uv) used for capstone/protobuf on a dev machine
+/.venv/
