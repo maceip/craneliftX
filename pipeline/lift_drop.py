@@ -545,7 +545,16 @@ def lift_and_drop(
             print(" [EMU]   same LLVM IR -> riscv64 -> qemu-user")
             linked_rv = link_ir(lifted_ll, symbol, "riscv64", work)
             qemu_out = run_qemu(linked_rv, symbol, arguments, expected, expected_outs, work)
-        return {"symbol": symbol, "wasm": wasm, "pulley": proc.stdout, "qemu": qemu_out}
+        return {
+            "symbol": symbol,
+            "wasm": wasm,
+            "pulley": proc.stdout,
+            "qemu": qemu_out,
+            # The exact machine-code bytes that were lifted -- the tracer's
+            # window, as handed to remill. Kept so the visualization can show
+            # precisely which bytes moved.
+            "hexbytes": hexbytes,
+        }
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

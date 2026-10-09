@@ -24,6 +24,7 @@ OBJ = os.path.join(HERE, "sample_network.o")
 O2PULLEY = os.path.join(REPO, "ceremony", "o2pulley.sh")
 JSON = os.path.join(HERE, "lift_map.json")
 PLAN = os.path.join(HERE, "lift_plan.json")
+RESULTS = os.path.join(HERE, "lift_results.json")
 
 # Reference semantics for the sample. Names are compared with the leading
 # underscore stripped so the same cases work for ELF and Mach-O symbols.
@@ -142,6 +143,7 @@ def main():
     from lift_drop import lift_and_drop, LOOP_DENSITY_REJECT, CALL_FRACTION_REJECT
 
     lifted = []
+    results = []
     for f in sorted(report["functions"], key=lambda x: -x["lift_score"]):
         if f["decision"] != "LIFT" or not f.get("liftable_now"):
             continue
@@ -190,7 +192,7 @@ def main():
         print("=" * 74)
         print(f"  {f['reason']}")
         try:
-            lift_and_drop(
+            res = lift_and_drop(
                 obj=OBJ,
                 hexbytes=None,
                 symbol=f["name"],
@@ -208,6 +210,22 @@ def main():
             return int(exc.code or 1)
         print(f"  VALIDATION : PASS  ({f['name']} == {case['expected']})")
         lifted.append(f["name"])
+        results.append({
+            "name": f["name"],
+            "addr": f["addr"],
+            "size_bytes": f["size_bytes"],
+            "signature": f["signature"],
+            "loop_density": f["loop_density"],
+            "call_fraction": f["call_fraction"],
+            "network_score": f["network_score"],
+            "reason": f["reason"],
+            "hexbytes": res.get("hexbytes", ""),
+            "expected": case["expected"],
+            "expected_outs": case.get("expected_outs"),
+            "pulley": res.get("pulley", ""),
+            "qemu": res.get("qemu", ""),
+            "passed": True,
+        })
 
     if not lifted:
         print("\n  ERROR: ingest tracer selected nothing to lift", file=sys.stderr)
@@ -227,6 +245,20 @@ def main():
     print(f"    * lifted and validated : {lifted}")
     print(f"    * lift-eligible        : {report['lift']}")
     print(f"    * kept NATIVE          : {report['keep_native']}")
+
+    # Machine-readable outcome for liftmap/visualize.py.
+    with open(RESULTS, "w") as res_fh:
+        json.dump(
+            {
+                "binary": report.get("binary"),
+                "placement": lift_plan,
+                "results": results,
+                "keep_native": report.get("keep_native", []),
+            },
+            res_fh,
+            indent=2,
+        )
+    print(f"    * wrote {os.path.relpath(RESULTS, REPO)}")
     return 0
 
 

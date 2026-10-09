@@ -22,6 +22,8 @@ __pycache__/
 /liftmap/sample_network.o
 /liftmap/lift_map.json
 /liftmap/lift_plan.json
+/liftmap/lift_results.json
+/liftmap/pipeline_view.html
 
 # Lifted / dropped output artifact from the demo
 /ceremony/lifted_out.wasm
