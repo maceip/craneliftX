@@ -253,12 +253,14 @@ X86_C::BindReturnValues(llvm::Function &function, bool &injected_sret,
       return llvm::Error::success();
     }
 
+#if LLVM_VERSION_MAJOR < 20
     case llvm::Type::X86_MMXTyID: {
       auto &value_declaration = ret_values.emplace_back();
       value_declaration.reg = arch->RegisterByName("MM0");
       value_declaration.type = ret_type;
       return llvm::Error::success();
     }
+#endif
 
     // Try to split the composite type over registers, and fall back on RVO
     // if it's not possible.
@@ -298,7 +300,7 @@ X86_C::BindParameters(llvm::Function &function, bool injected_sret,
                       std::vector<ParameterDecl> &parameter_declarations) {
 
   auto param_names = TryRecoverParamNames(function);
-  llvm::DataLayout dl(function.getParent());
+  const llvm::DataLayout &dl = function.getParent()->getDataLayout();
 
   // stack_offset describes the position of the first stack argument on entry to
   // the callee. For X86_C, this is at [esp + 4] because the return address is

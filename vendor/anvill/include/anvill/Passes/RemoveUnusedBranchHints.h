@@ -21,8 +21,8 @@ class RemoveUnusedBranchHints
 
   static bool isTargetInstrinsic(const llvm::CallInst *callinsn) {
     if (const auto *callee = callinsn->getCalledFunction()) {
-      return callee->getName().startswith(kCompareInstrinsicPrefix) ||
-             callee->getName().startswith(kFlagIntrinsicPrefix);
+      return callee->getName().starts_with(kCompareInstrinsicPrefix) ||
+             callee->getName().starts_with(kFlagIntrinsicPrefix);
     }
 
     return false;

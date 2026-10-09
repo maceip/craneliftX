@@ -6,6 +6,7 @@
  * the LICENSE file found in the root directory of this source tree.
  */
 
+#include <llvm/Config/llvm-config.h>
 #include <anvill/Type.h>
 
 #define ANVILL_USE_WRAPPED_TYPES 0
@@ -72,7 +73,9 @@ void TypeSpecifierImpl::EncodeType(
         ss << 'D';
       }
       break;
+#if LLVM_VERSION_MAJOR < 20
     case llvm::Type::X86_MMXTyID: ss << 'M'; break;
+#endif
     case llvm::Type::IntegerTyID: {
       const auto derived = llvm::cast<llvm::IntegerType>(&type);
       constexpr auto sign = false;
@@ -366,9 +369,13 @@ TypeDictionary::TypeDictionary(llvm::LLVMContext &context) {
         return llvm::ArrayType::get(llvm::Type::getInt8Ty(context_), 12);
       });
   u.named.float128 = GetOrCreateFloat(context, "float128", 128);
+#if LLVM_VERSION_MAJOR < 20
   u.named.m64 = GetOrCreateWrapper(context, "mmx", [] (llvm::LLVMContext &context_) {
     return llvm::Type::getX86_MMXTy(context_);
   });
+#else
+  u.named.m64 = GetOrCreateInt(context, "mmx", 64);
+#endif
   u.named.void_ = GetOrCreateInt(context, "void", 8);
   u.named.padding = GetOrCreateInt(context, "padding", 8);
 #else
@@ -394,7 +401,11 @@ TypeDictionary::TypeDictionary(llvm::LLVMContext &context) {
   u.named.float80_12 = llvm::Type::getX86_FP80Ty(context);
   u.named.float80_16 = u.named.float80_12;
   u.named.float128 = llvm::Type::getFP128Ty(context);
+#if LLVM_VERSION_MAJOR < 20
   u.named.m64 = llvm::Type::getX86_MMXTy(context);
+#else
+  u.named.m64 = llvm::Type::getInt64Ty(context);
+#endif
   u.named.void_ = llvm::Type::getVoidTy(context);
   u.named.padding = u.named.char_;
 #endif

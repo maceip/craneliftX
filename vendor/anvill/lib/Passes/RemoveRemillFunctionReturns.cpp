@@ -171,7 +171,7 @@ RemoveRemillFunctionReturns::QueryReturnAddress(
 
   if (auto call = llvm::dyn_cast<llvm::CallBase>(val)) {
     if (auto func = call->getCalledFunction()) {
-      if (func->getName().startswith("__remill_read_memory_")) {
+      if (func->getName().starts_with("__remill_read_memory_")) {
         auto addr = call->getArgOperand(1);  // Address
         if (IsRelatedToStackPointer(module, addr)) {
           return kFoundSymbolicStackPointerLoad;

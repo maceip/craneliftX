@@ -29,7 +29,7 @@ namespace {
 // to call back into the lifter for more code.
 static bool isTargetInstrinsic(const llvm::CallInst *callinsn) {
   if (const auto *callee = callinsn->getCalledFunction()) {
-    return callee->getName().equals(kAnvillSwitchCompleteFunc);
+    return callee->getName() == kAnvillSwitchCompleteFunc;
   }
 
   return false;

@@ -244,7 +244,7 @@ SPARC32_C::BindParameters(llvm::Function &function, bool injected_sret,
       << "Injected struct returns are not supported on SPARC targets";
 
   const auto param_names = TryRecoverParamNames(function);
-  llvm::DataLayout dl(function.getParent());
+  const llvm::DataLayout &dl = function.getParent()->getDataLayout();
 
   // Used to keep track of which registers have been allocated
   AllocationState alloc_param(parameter_register_constraints, arch, this);

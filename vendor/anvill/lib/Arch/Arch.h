@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <llvm/Config/llvm-config.h>
 #include <remill/BC/Error.h>
 
 #include <string>

@@ -297,12 +297,14 @@ X86_64_SysV::BindReturnValues(llvm::Function &function, bool &injected_sret,
       return llvm::Error::success();
     }
 
+#if LLVM_VERSION_MAJOR < 20
     case llvm::Type::X86_MMXTyID: {
       auto &value_declaration = ret_values.emplace_back();
       value_declaration.reg = arch->RegisterByName("MM0");
       value_declaration.type = ret_type;
       return llvm::Error::success();
     }
+#endif
 
     case llvm::Type::X86_FP80TyID: {
       auto &value_declaration = ret_values.emplace_back();
@@ -355,7 +357,7 @@ llvm::Error X86_64_SysV::BindParameters(
     std::vector<ParameterDecl> &parameter_declarations) {
 
   const auto param_names = TryRecoverParamNames(function);
-  llvm::DataLayout dl(function.getParent());
+  const llvm::DataLayout &dl = function.getParent()->getDataLayout();
 
   // Used to keep track of which registers have been allocated
   AllocationState alloc_param(parameter_register_constraints, arch, this);

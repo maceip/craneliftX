@@ -42,8 +42,8 @@ static llvm::AllocaInst *FindStackFrameAlloca(llvm::Function &func) {
     }
 
     auto frame_name = frame_type->getName();
-    if (!frame_name.startswith(func.getName()) ||
-        !frame_name.endswith(kStackFrameTypeNameSuffix)) {
+    if (!frame_name.starts_with(func.getName()) ||
+        !frame_name.ends_with(kStackFrameTypeNameSuffix)) {
       continue;
     }
 

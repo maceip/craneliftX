@@ -70,7 +70,7 @@ namespace {
 
 static llvm::Function *FindFunction(llvm::Module *module, std::string name) {
   for (auto &function : *module) {
-    if (function.getName().equals(name)) {
+    if (function.getName() == name) {
       return &function;
     }
   }

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <llvm/IR/PassManager.h>
+#include <llvm/IR/Value.h>
 
 namespace anvill {
 

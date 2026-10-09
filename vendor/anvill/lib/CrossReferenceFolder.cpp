@@ -13,6 +13,7 @@
 #include <anvill/Providers.h>
 #include <anvill/Utils.h>
 #include <glog/logging.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
@@ -539,6 +540,7 @@ CrossReferenceFolderImpl::ResolveConstantExpr(llvm::ConstantExpr *ce) {
       return xr;
     }
 
+#if LLVM_VERSION_MAJOR <= 18
     case llvm::Instruction::ICmp: {
       auto xr = FoldICmp(ResolveConstant(ce->getOperand(0)),
                          ResolveConstant(ce->getOperand(1)), mask, size,
@@ -546,6 +548,7 @@ CrossReferenceFolderImpl::ResolveConstantExpr(llvm::ConstantExpr *ce) {
       xr.size = static_cast<unsigned>(out_size);
       return xr;
     }
+#endif
 
     case llvm::Instruction::GetElementPtr: {
       auto base = ResolveConstant(ce->getOperand(0));
@@ -626,7 +629,7 @@ CrossReferenceFolderImpl::ResolveCall(llvm::CallInst *call) {
 
   // Looks like a call through a type hint function.
   if (auto func = call->getCalledFunction();
-      func && func->getName().startswith(kTypeHintFunctionPrefix)) {
+      func && func->getName().starts_with(kTypeHintFunctionPrefix)) {
     auto xr = ResolveValue(call->getArgOperand(0));
     xr.size = dl.getPointerSizeInBits(0);
     return xr;

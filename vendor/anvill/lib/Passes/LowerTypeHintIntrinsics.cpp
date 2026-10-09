@@ -33,7 +33,7 @@ LowerTypeHintIntrinsics::run(llvm::Function &func,
   for (auto &inst : llvm::instructions(func)) {
     if (auto call = llvm::dyn_cast<llvm::CallInst>(&inst)) {
       if (auto callee = call->getCalledFunction();
-          callee && callee->getName().startswith(kTypeHintFunctionPrefix)) {
+          callee && callee->getName().starts_with(kTypeHintFunctionPrefix)) {
         calls.push_back(call);
       }
     }

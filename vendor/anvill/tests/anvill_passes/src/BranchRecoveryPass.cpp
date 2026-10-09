@@ -18,7 +18,7 @@ namespace {
 
 static llvm::Function *FindFunction(llvm::Module *module, std::string name) {
   for (auto &function : *module) {
-    if (function.getName().equals(name)) {
+    if (function.getName() == name) {
       return &function;
     }
   }
@@ -59,7 +59,7 @@ TEST_SUITE("BranchRecoveryPass") {
     llvm::CallInst *target_compare = nullptr;
     for (auto &insn : llvm::instructions(target_function)) {
       if (auto *cll = llvm::dyn_cast<llvm::CallInst>(&insn)) {
-        if (cll->getCalledFunction()->getName().startswith(
+        if (cll->getCalledFunction()->getName().starts_with(
                 kCompareInstrinsicPrefix)) {
           target_compare = cll;
         }
@@ -140,7 +140,7 @@ TEST_SUITE("BranchRecoveryPass") {
     llvm::CallInst *target_compare = nullptr;
     for (auto &insn : llvm::instructions(target_function)) {
       if (auto *cll = llvm::dyn_cast<llvm::CallInst>(&insn)) {
-        if (cll->getCalledFunction()->getName().startswith(
+        if (cll->getCalledFunction()->getName().starts_with(
                 kCompareInstrinsicPrefix)) {
           target_compare = cll;
         }
