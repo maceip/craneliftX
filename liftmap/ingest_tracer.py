@@ -28,6 +28,7 @@ import os
 import re
 import json
 import subprocess
+import time
 from capstone import (
     Cs, CS_ARCH_X86, CS_MODE_64,
     CS_GRP_JUMP, CS_GRP_CALL, CS_GRP_RET,
@@ -524,9 +525,27 @@ def analyze_binary(binary: str, on_event=None) -> dict:
     return report
 
 
-def main():
-    binary = sys.argv[1] if len(sys.argv) > 1 else "sample_network"
-    out_json = sys.argv[2] if len(sys.argv) > 2 else "lift_map.json"
+def _color(text: str, code: str) -> str:
+    """ANSI color, but only when stdout is actually a terminal."""
+    return f"\033[{code}m{text}\033[0m" if sys.stdout.isatty() else text
+
+
+def main(argv=None) -> int:
+    """CLI entry point. Streams progress as the analysis runs."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    quiet = False
+    positional = []
+    for a in args:
+        if a in ("-q", "--quiet"):
+            quiet = True
+        elif a in ("-h", "--help"):
+            print(__doc__ or "usage: ingest_tracer.py <binary> [out.json] [-q]")
+            return 0
+        else:
+            positional.append(a)
+    binary = positional[0] if positional else "sample_network"
+    out_json = positional[1] if len(positional) > 1 else "lift_map.json"
+
     if not os.path.exists(binary):
         # try alongside the script
         alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), binary)
@@ -539,18 +558,49 @@ def main():
                   file=sys.stderr)
             return 2
 
-    def on_event(stage: str, payload) -> None:
-        if stage == "disassemble":
-            print(f"[ingest_tracer] symbols: {payload['symbols']}   "
-                  f"instructions: {payload['instructions']}")
-        elif stage == "done":
-            print(f"[ingest_tracer] LIFT        : {payload['lift']}")
-            print(f"[ingest_tracer] KEEP_NATIVE : {payload['keep_native']}")
+    started = time.time()
+    seen = {"function": 0, "decision": 0}
 
-    print(f"[ingest_tracer] binary : {binary}")
+    def on_event(stage: str, payload) -> None:
+        if stage == "load":
+            print(f"[ingest_tracer] binary  : {payload['binary']}")
+        elif stage == "disassemble":
+            print(f"[ingest_tracer] symbols : {payload['symbols']}   "
+                  f"instructions: {payload['instructions']}")
+            if not quiet:
+                print()
+                print("[ingest_tracer] building AST / CFG per function")
+        elif stage == "function" and not quiet:
+            seen["function"] += 1
+            print(f"  {seen['function']:>3}. {payload['name']:<22} "
+                  f"{payload['size_bytes']:>4}B  {payload['n_insn']:>4} insn  "
+                  f"loop={payload['loop_density']:<5} "
+                  f"net={payload['network_score']:<4}  "
+                  f"{payload['signature']}")
+        elif stage == "callgraph":
+            print(f"\n[ingest_tracer] call graph: {payload['reachable']} reachable "
+                  f"from {len(payload['roots'])} root(s)")
+            if not quiet:
+                print("[ingest_tracer] deciding lift vs keep-native")
+        elif stage == "decision" and not quiet:
+            seen["decision"] += 1
+            mark = (_color("LIFT       ", "32") if payload["decision"] == "LIFT"
+                    else _color("KEEP_NATIVE", "33"))
+            print(f"  {seen['decision']:>3}. {mark} {payload['name']:<22} "
+                  f"score={payload['lift_score']:<6} {payload['reason'][:58]}")
+
     report = analyze_binary(binary, on_event=on_event)
     with open(out_json, "w") as fh:
         json.dump(report, fh, indent=2)
+
+    lift, keep = report["lift"], report["keep_native"]
+    print()
+    print(f"[ingest_tracer] {report['total_functions']} functions "
+          f"in {time.time() - started:.2f}s")
+    print(f"[ingest_tracer] {_color('LIFT', '32')}        : "
+          f"{len(lift)}  {lift}")
+    print(f"[ingest_tracer] {_color('KEEP_NATIVE', '33')} : "
+          f"{len(keep)}  {keep}")
     print(f"[ingest_tracer] wrote {out_json}")
     return 0
 
