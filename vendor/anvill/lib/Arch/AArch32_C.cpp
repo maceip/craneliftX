@@ -247,7 +247,7 @@ AArch32_C::BindReturnValues(llvm::Function &function, bool &injected_sret,
 
       // There is a valid split over registers, so add the mapping
       if (mapping) {
-        return alloc_ret.CoalescePacking(mapping.getValue(), ret_values);
+        return alloc_ret.CoalescePacking(mapping.value(), ret_values);
 
       } else {
         auto &value_declaration = ret_values.emplace_back();
@@ -272,7 +272,7 @@ AArch32_C::BindParameters(llvm::Function &function, bool injected_sret,
                           std::vector<ParameterDecl> &parameter_declarations) {
 
   const auto param_names = TryRecoverParamNames(function);
-  llvm::DataLayout dl(function.getParent());
+  const llvm::DataLayout &dl = function.getParent()->getDataLayout();
 
   // Used to keep track of which registers have been allocated
   AllocationState alloc_param(parameter_register_constraints, arch, this);
@@ -305,7 +305,7 @@ AArch32_C::BindParameters(llvm::Function &function, bool injected_sret,
     if (allocation) {
       auto prev_size = parameter_declarations.size();
 
-      for (const auto &param_decl : allocation.getValue()) {
+      for (const auto &param_decl : allocation.value()) {
         auto &declaration = parameter_declarations.emplace_back();
         declaration.type = param_decl.type;
         if (param_decl.reg) {

@@ -42,8 +42,8 @@ static llvm::AllocaInst *FindStackFrameAlloca(llvm::Function &func) {
     }
 
     auto frame_name = frame_type->getName();
-    if (!frame_name.startswith(func.getName()) ||
-        !frame_name.endswith(kStackFrameTypeNameSuffix)) {
+    if (!frame_name.starts_with(func.getName()) ||
+        !frame_name.ends_with(kStackFrameTypeNameSuffix)) {
       continue;
     }
 
@@ -584,7 +584,7 @@ static void SplitStackFrameAround(
 
   if (!below.empty()) {
     auto frame_size = dl.getTypeAllocSize(
-        frame_alloca->getAllocatedType()).getKnownMinSize();
+        frame_alloca->getAllocatedType()).getKnownMinValue();
     auto num_slots = ((frame_size - end_of_ra) + (addr_size - 1u)) / addr_size;
     make_subframe(std::move(below), "locals", "parameters", num_slots);
   }

@@ -212,7 +212,7 @@ X86_FastCall::BindReturnValues(llvm::Function &function, bool &injected_sret,
         AllocationState alloc_ret(return_register_constraints, arch, this);
         auto mapping = alloc_ret.TryRegisterAllocate(*ret_type);
         if (mapping) {
-          mapping.getValue().swap(ret_values);
+          mapping.value().swap(ret_values);
           return llvm::Error::success();
 
         } else {
@@ -243,12 +243,14 @@ X86_FastCall::BindReturnValues(llvm::Function &function, bool &injected_sret,
       return llvm::Error::success();
     }
 
+#if LLVM_VERSION_MAJOR < 20
     case llvm::Type::X86_MMXTyID: {
       auto &value_declaration = ret_values.emplace_back();
       value_declaration.reg = arch->RegisterByName("MM0");
       value_declaration.type = ret_type;
       return llvm::Error::success();
     }
+#endif
 
     // Try to split the composite type over registers, and fall back on RVO
     // if it's not possible.
@@ -260,7 +262,7 @@ X86_FastCall::BindReturnValues(llvm::Function &function, bool &injected_sret,
 
       // There is a valid split over registers, so add the mapping
       if (mapping) {
-        return alloc_ret.CoalescePacking(mapping.getValue(), ret_values);
+        return alloc_ret.CoalescePacking(mapping.value(), ret_values);
 
       // Composite type splitting didn't work so do RVO. Assume that the
       // pointer to the return value resides in RAX.
@@ -288,7 +290,7 @@ llvm::ErrorOr<unsigned> X86_FastCall::BindParameters(
     std::vector<ParameterDecl> &parameter_declarations) {
 
   auto param_names = TryRecoverParamNames(function);
-  llvm::DataLayout dl(function.getParent());
+  const llvm::DataLayout &dl = function.getParent()->getDataLayout();
 
   // stack_offset describes the position of the first stack argument on entry to
   // the callee. For X86_FastCall, this is at [esp + 4] because the return address

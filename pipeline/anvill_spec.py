@@ -2,10 +2,9 @@
 """Build and read Anvill specification protobufs.
 
 Anvill (vendor/anvill) lifts a function from a specification, not from a raw
-binary. The C++ decompiler stays unbuilt on purpose, so this module is the
-spec producer the pipeline actually runs. `remill-lift` then consumes the
-address, bytes, architecture, and register ABI stored in the spec — the same
-inputs Anvill's lifter would hand to Remill.
+binary. This module writes that protobuf. `anvill-decompile-spec` decodes it
+with Specification::DecodeFromPB, asks remill to lift each instruction, and
+runs Anvill's cleanup passes. There is no second spec format.
 """
 from __future__ import annotations
 
@@ -72,6 +71,10 @@ def build_spec(symbol: str, code: bytes, signature: str, address: int = 0) -> by
     mem.is_writeable = False
     mem.is_executable = True
     mem.values = code
+
+    # DecodeFromPB rejects a specification that omits this message, even when
+    # there are no jumps, calls, or returns to redirect.
+    spec.overrides.SetInParent()
     return spec.SerializeToString()
 
 

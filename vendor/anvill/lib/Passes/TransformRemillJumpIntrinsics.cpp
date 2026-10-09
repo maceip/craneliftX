@@ -13,7 +13,6 @@
 #include <anvill/Transforms.h>
 #include <anvill/Utils.h>
 #include <glog/logging.h>
-#include <llvm/ADT/Triple.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
@@ -182,7 +181,7 @@ TransformRemillJumpIntrinsics::run(llvm::Function &func,
     llvm::FunctionPassManager fpm;
 
     fpm.addPass(llvm::DCEPass());
-    fpm.addPass(llvm::SROAPass());
+    fpm.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
     fpm.addPass(llvm::SimplifyCFGPass());
     fpm.addPass(llvm::InstCombinePass());
     fpm.run(func, fam);

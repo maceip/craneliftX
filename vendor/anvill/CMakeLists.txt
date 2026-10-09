@@ -26,8 +26,14 @@ find_package(XED CONFIG REQUIRED)
 find_package(gflags CONFIG REQUIRED)
 find_package(glog CONFIG REQUIRED)
 find_package(Z3 CONFIG REQUIRED)
-find_package(doctest CONFIG REQUIRED)
+if(ANVILL_ENABLE_TESTS)
+  find_package(doctest CONFIG REQUIRED)
+endif()
 find_package(LLVM CONFIG REQUIRED)
+# Installed remill exports its own headers, not LLVM's. The lifter and the
+# decompiler share one LLVM major, the one remill was built against.
+include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
+add_definitions(${LLVM_DEFINITIONS})
 llvm_map_components_to_libnames(llvm_libs support core irreader bitreader bitwriter)
 
 find_package(sleigh CONFIG)

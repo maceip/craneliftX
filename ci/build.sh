@@ -123,7 +123,7 @@ if [[ "$TARGET" == "x86_64-unknown-linux-gnu" ]]; then
 fi
 
 if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
-  for tool in cmake ninja llvm-config-18 git; do
+  for tool in cmake ninja llvm-config-20 git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "missing lifter tool: $tool" >&2
       exit 1
@@ -131,8 +131,8 @@ if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
   done
   # remill's BCCompiler.cmake only searches the directory that contains
   # llvm-link, and it looks for the names clang++ and clang.
-  if [[ ! -x /usr/lib/llvm-18/bin/clang++ ]]; then
-    echo "missing /usr/lib/llvm-18/bin/clang++ (package clang-18)" >&2
+  if [[ ! -x /usr/lib/llvm-20/bin/clang++ ]]; then
+    echo "missing /usr/lib/llvm-20/bin/clang++ (package clang-20)" >&2
     exit 1
   fi
   echo "==> pipeline/build_lifters.sh"
@@ -143,11 +143,17 @@ if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
   JOBS="${LIFTER_JOBS:-$(nproc)}" pipeline/build_lifters.sh
   shopt -s nullglob
   lifters=("${ROOT}/build/remill-install/bin/"remill-lift*)
+  decompilers=("${ROOT}/build/remill-install/bin/"anvill-decompile-spec)
   shopt -u nullglob
   if [[ ${#lifters[@]} -eq 0 ]]; then
     echo "remill-lift was not installed" >&2
     exit 1
   fi
+  if [[ ! -x "${decompilers[0]:-}" ]]; then
+    echo "anvill-decompile-spec was not installed" >&2
+    exit 1
+  fi
+  lifters+=("${decompilers[@]}")
   for bin in "${lifters[@]}"; do
     dest="${ROOT}/dist/$(basename "$bin")-${TARGET}"
     cp "$bin" "$dest"

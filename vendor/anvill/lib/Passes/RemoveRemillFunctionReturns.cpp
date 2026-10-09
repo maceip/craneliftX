@@ -12,7 +12,6 @@
 #include <anvill/Transforms.h>
 #include <anvill/Utils.h>
 #include <glog/logging.h>
-#include <llvm/ADT/Triple.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstIterator.h>
@@ -25,6 +24,7 @@
 #include <remill/BC/ABI.h>
 #include <remill/BC/Util.h>
 
+#include <optional>
 #include <utility>
 #include <vector>
 #include "Utils.h"
@@ -77,7 +77,7 @@ static void OverwriteReturnAddress(
 
   // Get the address of our return address.
   const auto addr_of_ret_addr = llvm::CallInst::Create(
-      addr_of_ret_addr_func, {}, llvm::None, llvm::Twine::createNull(),
+      addr_of_ret_addr_func, {}, std::nullopt, llvm::Twine::createNull(),
       &(func.getEntryBlock().front()));
 
   for (auto &[call, ret_addr] : fixups) {
@@ -171,7 +171,7 @@ RemoveRemillFunctionReturns::QueryReturnAddress(
 
   if (auto call = llvm::dyn_cast<llvm::CallBase>(val)) {
     if (auto func = call->getCalledFunction()) {
-      if (func->getName().startswith("__remill_read_memory_")) {
+      if (func->getName().starts_with("__remill_read_memory_")) {
         auto addr = call->getArgOperand(1);  // Address
         if (IsRelatedToStackPointer(module, addr)) {
           return kFoundSymbolicStackPointerLoad;

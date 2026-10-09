@@ -6,15 +6,16 @@ Pipeline, per function selected by liftmap/ingest_tracer.py:
   object bytes
       |  anvill spec (protobuf; ABI + bytes + arch)
       v
-  remill-lift  (vendored)  -> LLVM IR
-      |  remill runtime semantics (real memory + flags)
+  anvill-decompile-spec  -> LLVM IR, Anvill passes applied
+      |  remill runtime, only for __remill_* declares that survive
       v
   Cranelift drop -> Pulley bytecode -> Pulley interpreter
       and, when a riscv64 cross compiler is present,
   the same IR -> riscv64 machine code -> qemu-user
 
-Cranelift has no machine-code decoder. Remill is the lift. Pulley is the
-emulator the drop starts on.
+Cranelift has no machine-code decoder. Remill is the instruction lifter
+inside anvill-decompile-spec. Anvill is the stage after the spec. Pulley
+is the emulator the drop starts on.
 """
 from __future__ import annotations
 
@@ -52,6 +53,19 @@ def llvm_tool(base: str) -> str:
     if path:
         return path
     raise SystemExit(f"required LLVM tool not found: {name}")
+
+
+def find_anvill() -> str:
+    env = os.environ.get("ANVILL_DECOMPILE_SPEC")
+    if env and os.path.isfile(env):
+        return env
+    sibling = os.path.join(os.path.dirname(find_remill()), "anvill-decompile-spec")
+    if os.path.isfile(sibling):
+        return sibling
+    raise SystemExit(
+        "anvill-decompile-spec not found next to remill-lift. "
+        "Run pipeline/build_lifters.sh."
+    )
 
 
 def find_remill() -> str:
@@ -94,13 +108,21 @@ def retarget(ir: str, isa: str) -> str:
         ir = re.sub(r'target triple = "[^"]*"', triple, ir, count=1)
     else:
         ir = triple + "\n" + ir
+    # Anvill names the amd64 SysV ABI on the definition. wasm32 and riscv64
+    # cannot lower that convention; the drops call the function as ordinary C.
+    ir = ir.replace(" x86_64_sysvcc", "")
     return ir
 
 
 def rename_entry(ir: str, symbol: str) -> str:
+    """The spec already stores the symbol. --add_names applies it."""
+    if re.search(rf"define\s[^@\n]*@{re.escape(symbol)}\b", ir):
+        return ir
     match = re.search(r"@call_sub_[0-9A-Za-z]+", ir)
     if not match:
-        raise SystemExit("remill-lift did not produce a call_sub_* entry")
+        raise SystemExit(
+            f"anvill-decompile-spec did not name the lifted function {symbol}"
+        )
     return ir.replace(match.group(0), "@" + symbol)
 
 
@@ -140,33 +162,91 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return proc
 
 
-def remill_lift(hexbytes: str, signature: str, ir_out: str) -> None:
-    run(
-        [
-            find_remill(),
-            "-arch", "amd64",
-            "-os", "linux",
-            "-address", "0",
-            "-bytes", hexbytes,
-            "-signature", signature,
-            "-ir_out", ir_out,
-        ],
-        capture_output=True,
-    )
+def anvill_decompile(spec_path: str, ir_out: str) -> None:
+    cmd = [
+        find_anvill(),
+        "--spec", spec_path,
+        "--add_names",
+        "--ir_out", ir_out,
+    ]
+    print(" [LIFT]  anvill-decompile-spec --spec <pb> --add_names --ir_out <ll>")
+    run(cmd, capture_output=True)
+
+
+_DEF_START = re.compile(r"^define\s[^@\n]*@([A-Za-z0-9_.]+)\(", re.M)
+_GLOBAL_START = re.compile(r"^@([A-Za-z0-9_.]+) = ")
+
+
+def parse_runtime_defs(text: str) -> dict[str, str]:
+    """Top-level defines and globals in remill_runtime.ll."""
+    defs: dict[str, str] = {}
+    lines = text.splitlines(keepends=True)
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        define = _DEF_START.match(line)
+        glob = _GLOBAL_START.match(line)
+        if define:
+            name = define.group(1)
+            body = [line]
+            depth = line.count("{") - line.count("}")
+            index += 1
+            while index < len(lines) and depth > 0:
+                body.append(lines[index])
+                depth += lines[index].count("{") - lines[index].count("}")
+                index += 1
+            defs[name] = "".join(body)
+            continue
+        if glob:
+            defs[glob.group(1)] = line if line.endswith("\n") else line + "\n"
+        index += 1
+    return defs
+
+
+def slice_runtime(lifted: str, runtime_text: str) -> str:
+    """Keep runtime definitions only for helpers the lift still declares.
+
+    Anvill deletes function returns, error intrinsics, and other scaffolding,
+    and it recovers stack slots. A __remill_* helper that is still declared
+    keeps the definition already in remill_runtime.ll, plus the globals that
+    definition references. Helpers Anvill removed are not linked.
+    """
+    defs = parse_runtime_defs(runtime_text)
+    defined = set(_DEF_START.findall(lifted))
+    referenced = set(re.findall(r"@([A-Za-z0-9_.]+)", lifted))
+    pending = [name for name in referenced if name in defs and name not in defined]
+    chosen: list[str] = []
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in seen or name not in defs:
+            continue
+        seen.add(name)
+        body = defs[name]
+        chosen.append(body)
+        for ref in re.findall(r"@([A-Za-z0-9_.]+)", body):
+            if ref not in seen and ref in defs:
+                pending.append(ref)
+    if not chosen:
+        return ""
+    return "\n".join(chosen) + "\n"
 
 
 def link_ir(lifted_path: str, symbol: str, isa: str, work: str) -> str:
     lifted = rename_entry(open(lifted_path).read(), symbol)
     lifted = devariadic_flags(lifted)
     lifted = retarget(lifted, isa)
-    runtime = retarget(open(RUNTIME_LL).read(), isa)
+    runtime = slice_runtime(lifted, retarget(open(RUNTIME_LL).read(), isa))
     lifted_ll = os.path.join(work, f"lifted_{isa}.ll")
-    runtime_ll = os.path.join(work, f"runtime_{isa}.ll")
     linked = os.path.join(work, f"full_{isa}.bc")
     open(lifted_ll, "w").write(lifted)
-    open(runtime_ll, "w").write(runtime)
+    link_inputs = [lifted_ll]
+    if runtime.strip():
+        runtime_ll = os.path.join(work, f"runtime_{isa}.ll")
+        open(runtime_ll, "w").write(runtime)
+        link_inputs.append(runtime_ll)
     run(
-        [llvm_tool("llvm-link"), lifted_ll, runtime_ll, "-o", linked],
+        [llvm_tool("llvm-link"), *link_inputs, "-o", linked],
         capture_output=True,
     )
     return linked
@@ -359,9 +439,11 @@ def lift_and_drop(
 
     work = tempfile.mkdtemp(prefix="liftdrop-")
     try:
+        spec_path = os.path.join(work, "spec.pb")
         lifted_ll = os.path.join(work, "lifted.ll")
-        print(" [LIFT]  remill-lift -> LLVM IR")
-        remill_lift(spec_code.hex(), spec_sig, lifted_ll)
+        with open(spec_path, "wb") as spec_file:
+            spec_file.write(spec_blob)
+        anvill_decompile(spec_path, lifted_ll)
 
         print(" [DROP]  Cranelift -> Pulley interpreter")
         linked_wasm = link_ir(lifted_ll, symbol, "wasm32", work)

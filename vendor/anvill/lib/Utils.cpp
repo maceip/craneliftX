@@ -467,7 +467,7 @@ static bool IsLoadOfUnmodelledRegister(llvm::LoadInst *load, RegNamePred pred) {
   if (auto gv =
           llvm::dyn_cast<llvm::GlobalVariable>(load->getPointerOperand())) {
     if (const auto gv_name = gv->getName();
-        gv_name.startswith(kUnmodelledRegisterPrefix)) {
+        gv_name.starts_with(kUnmodelledRegisterPrefix)) {
       return pred(gv->getParent(),
                   gv_name.substr(kUnmodelledRegisterPrefix.size()).lower());
     }
@@ -671,7 +671,7 @@ bool IsReturnAddress(llvm::Module *module, llvm::Value *val) {
         call->getIntrinsicID() == llvm::Intrinsic::sponentry) {
       return true;
     } else if (auto func = call->getCalledFunction();
-               func && func->getName().startswith("__remill_read_memory_")) {
+               func && func->getName().starts_with("__remill_read_memory_")) {
       return addressofreturnaddress(
           llvm::dyn_cast<llvm::CallBase>(call->getArgOperand(1)));
     } else {

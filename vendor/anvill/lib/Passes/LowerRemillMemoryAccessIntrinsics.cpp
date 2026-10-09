@@ -115,9 +115,9 @@ static bool ReplaceMemoryOp(llvm::CallBase *call) {
   // conversions at the memory boundary.
   auto adjust_val_type = [=](llvm::Type *val_type) -> llvm::Type * {
     auto &context = val_type->getContext();
-    if (func_name.endswith("f80")) {
+    if (func_name.ends_with("f80")) {
       return llvm::Type::getX86_FP80Ty(context);
-    } else if (func_name.endswith("f128")) {
+    } else if (func_name.ends_with("f128")) {
       return llvm::Type::getFP128Ty(context);
     } else {
       return val_type;
@@ -125,7 +125,7 @@ static bool ReplaceMemoryOp(llvm::CallBase *call) {
   };
 
 
-  if (func_name.startswith("__remill_read_memory_")) {
+  if (func_name.starts_with("__remill_read_memory_")) {
     switch (call->arg_size()) {
 
       // `val = __remill_read_memory_NN(mem, addr)`.
@@ -148,7 +148,7 @@ static bool ReplaceMemoryOp(llvm::CallBase *call) {
         return false;
     }
 
-  } else if (func_name.startswith("__remill_write_memory_")) {
+  } else if (func_name.starts_with("__remill_write_memory_")) {
     auto arg3_type = call->getArgOperand(2)->getType();
 
     // `mem = __remill_write_memory_NN(mem, addr, val&)`.
@@ -189,8 +189,8 @@ LowerRemillMemoryAccessIntrinsics::run(llvm::Function &func,
 
     // TODO(pag): Add support for atomic read-modify-write intrinsics.
     const auto name = func->getName();
-    return name.startswith("__remill_read_memory_") ||
-           name.startswith("__remill_write_memory_");
+    return name.starts_with("__remill_read_memory_") ||
+           name.starts_with("__remill_write_memory_");
   });
 
   auto ret = false;

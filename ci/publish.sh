@@ -63,7 +63,7 @@ for pin in vendor/remill/dependencies/CMakeLists.txt vendor/remill/dependencies/
 done
 
 shopt -s nullglob
-extras=("${COLLECTED}"/remill-lift*)
+extras=("${COLLECTED}"/remill-lift* "${COLLECTED}"/anvill-decompile-spec*)
 shopt -u nullglob
 for extra in "${extras[@]}"; do
   cp "$extra" "${RELEASE}/bin/$(basename "$extra")"

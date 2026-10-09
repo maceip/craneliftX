@@ -33,7 +33,7 @@ LowerRemillUndefinedIntrinsics::run(llvm::Function &func,
   for (auto &inst : llvm::instructions(func)) {
     if (auto call = llvm::dyn_cast<llvm::CallInst>(&inst)) {
       if (auto callee = call->getCalledFunction();
-          callee && callee->getName().startswith("__remill_undefined_")) {
+          callee && callee->getName().starts_with("__remill_undefined_")) {
         calls.push_back(call);
       }
     }
