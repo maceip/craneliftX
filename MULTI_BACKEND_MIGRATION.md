@@ -438,6 +438,17 @@ extractor was injecting mnemonic bytes.
   Real memory and flag semantics, for helpers the passes leave declared, come
   from `pipeline/remill_runtime.ll`, a real memory/flag model that replaced
   the earlier no-op `remill_runtime_stub.ll` placeholder.
+- **Ingest tracer -> lift bridge: INTEGRATED.** `liftmap/ingest_tracer.py`
+  decides WHERE to lift (performance-safe: it rejects tight loops and
+  orchestration glue, prefers network/frequency code) and is the authority on
+  each function's byte window (`addr`/`size_bytes`) and recovered ABI
+  `signature`. `liftmap/lift_drop_demo.py` hands those exact offsets and the
+  signature to `pipeline/lift_drop.lift_and_drop`, which lifts only that window
+  (via `ceremony/extract_bytes.py --start/--end`) and re-enforces the tracer's
+  loop/call gates as a defense-in-depth guardrail so a lift plan can never move
+  tight-loop or glue code onto the slow path. Run `make demo` (or
+  `liftmap/lift_drop_demo.py --plan-only` without the LLVM-20 toolchain) to see
+  the hand-off.
 
 ---
 

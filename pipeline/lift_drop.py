@@ -28,7 +28,6 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import anvill_spec  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNTIME_LL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "remill_runtime.ll")
@@ -44,6 +43,14 @@ TRIPLES = {
         'target triple = "riscv64-unknown-linux-gnu"',
     ),
 }
+
+# Performance gates, mirrored from liftmap/ingest_tracer.py. The lift op refuses
+# to lift code the ingest tracer would have rejected, so a buggy or adversarial
+# lift plan cannot move tight loops / orchestration glue onto the slow path and
+# hurt the runtime of a server or database. The tracer is the authority; this is
+# defense-in-depth at the point where bytes actually get lifted.
+LOOP_DENSITY_REJECT = 0.45
+CALL_FRACTION_REJECT = 0.40
 
 
 def llvm_major() -> str:
@@ -106,10 +113,15 @@ def find_remill() -> str:
     )
 
 
-def extract_bytes(obj: str, symbol: str) -> str:
-    out = subprocess.check_output(
-        [sys.executable, EXTRACT, obj, symbol], text=True
-    )
+def extract_bytes(obj: str, symbol: str, addr: int | None = None,
+                  size: int | None = None) -> str:
+    cmd = [sys.executable, EXTRACT, obj, symbol]
+    if addr is not None and size is not None:
+        # The ingest tracer is authoritative on the byte window: it trims
+        # trailing alignment NOPs and knows the true function boundary, so we
+        # slice exactly [addr, addr+size) instead of re-deriving by name.
+        cmd += ["--start", f"{addr:x}", "--end", f"{addr + size:x}"]
+    out = subprocess.check_output(cmd, text=True)
     hexbytes = "".join(out.split())
     if not hexbytes:
         raise SystemExit(f"no bytes extracted for {symbol} from {obj}")
@@ -304,9 +316,19 @@ def runner_path() -> str:
     env = os.environ.get("CEREMONY_WASM")
     if env and os.path.isfile(env):
         return env
-    candidate = os.path.join(ROOT, "ceremony-wasm", "target", "debug", "ceremony-wasm")
-    if os.path.isfile(candidate):
-        return candidate
+    # Prefer an explicit build, then a debug build, then any cross-compiled
+    # release binary under target/ (e.g. target/x86_64-unknown-linux-gnu/release).
+    import glob
+    candidates = [
+        os.path.join(ROOT, "ceremony-wasm", "target", "debug", "ceremony-wasm"),
+    ]
+    candidates += glob.glob(
+        os.path.join(ROOT, "ceremony-wasm", "target", "**", "ceremony-wasm"),
+        recursive=True,
+    )
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
     raise SystemExit(
         "ceremony-wasm runner is not built. From ceremony-wasm/: cargo build"
     )
@@ -434,11 +456,35 @@ def lift_and_drop(
     expected_outs=None,
     qemu: bool = True,
     keep_wasm: str | None = None,
+    addr: int | None = None,
+    size: int | None = None,
+    metrics: dict | None = None,
 ) -> dict:
+    # Performance guardrail (defense-in-depth). The ingest tracer already
+    # excludes tight loops and orchestration glue; if a lift plan nevertheless
+    # asks to lift one, refuse here so it can never land on the slow path.
+    if metrics is not None:
+        loop_density = float(metrics.get("loop_density", 0.0) or 0.0)
+        call_fraction = float(metrics.get("call_fraction", 0.0) or 0.0)
+        if loop_density > LOOP_DENSITY_REJECT:
+            raise SystemExit(
+                f"refusing to lift {symbol}: loop_density {loop_density:.3f} "
+                f"> {LOOP_DENSITY_REJECT} (tight loop -> keep native)"
+            )
+        if call_fraction > CALL_FRACTION_REJECT:
+            raise SystemExit(
+                f"refusing to lift {symbol}: call_fraction {call_fraction:.3f} "
+                f"> {CALL_FRACTION_REJECT} (orchestration glue -> keep native)"
+            )
+
     if hexbytes is None:
         if not obj:
             raise SystemExit("need an object file or raw bytes")
-        hexbytes = extract_bytes(obj, symbol)
+        hexbytes = extract_bytes(obj, symbol, addr=addr, size=size)
+
+    # anvill_spec pulls in google.protobuf, which only the lift (not the
+    # guardrail or the bridge's plan-only path) needs; import it lazily.
+    import anvill_spec
     code = bytes.fromhex(hexbytes)
     spec_blob = anvill_spec.build_spec(symbol, code, signature, address=0)
     spec = anvill_spec.load_spec(spec_blob)

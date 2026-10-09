@@ -140,7 +140,9 @@ def parse_text_relocs(obj):
     in_text = False
     for line in out.splitlines():
         if line.startswith("RELOCATION RECORDS FOR"):
-            in_text = ".text" in line
+            # ELF emits "[.text]:"; Mach-O emits "[__text]:". Both name the
+            # code section, so match on the section containing "text".
+            in_text = "text" in line.lower()
             continue
         if not in_text:
             continue

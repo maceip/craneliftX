@@ -21,6 +21,13 @@ __pycache__/
 /liftmap/sample_network
 /liftmap/sample_network.o
 /liftmap/lift_map.json
+/liftmap/lift_plan.json
+
+# Lifted / dropped output artifact from the demo
+/ceremony/lifted_out.wasm
+
+# Per-deployment lift key (only used if/when lift placement is encrypted later)
+/.lift_key
 
 # Vendored-lifter build tree (pipeline/build_lifters.sh)
 /build/

@@ -12,6 +12,7 @@ result on the Pulley interpreter and on qemu-riscv64.
 import os
 import sys
 import json
+import argparse
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -77,6 +78,12 @@ def norm_name(name):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--plan-only", action="store_true",
+                    help="print the lift plan (exact offsets/signature/metrics) "
+                         "and guardrail verdict without running remill/LLVM")
+    ns = ap.parse_args()
+
     # Always re-analyze so a stale lift_map.json cannot disagree with the object.
     r = subprocess.run(
         [sys.executable, os.path.join(HERE, "ingest_tracer.py"),
@@ -112,7 +119,7 @@ def main():
         print(f"    - {f['name']:22} -> {f['decision']}: {f['reason']}")
 
     sys.path.insert(0, os.path.join(REPO, "pipeline"))
-    from lift_drop import lift_and_drop
+    from lift_drop import lift_and_drop, LOOP_DENSITY_REJECT, CALL_FRACTION_REJECT
 
     lifted = []
     for f in sorted(report["functions"], key=lambda x: -x["lift_score"]):
@@ -124,9 +131,40 @@ def main():
             print(f"\n  ERROR: no validation case for lift candidate {f['name']}",
                   file=sys.stderr)
             return 1
+        metrics = {
+            "loop_density": f["loop_density"],
+            "call_fraction": f["call_fraction"],
+        }
+        # Guardrail verdict the lift op will enforce (defense-in-depth). The
+        # tracer already excluded these, but we show the check explicitly.
+        if (f["loop_density"] > LOOP_DENSITY_REJECT
+                or f["call_fraction"] > CALL_FRACTION_REJECT):
+            verdict = "REJECT (would refuse to lift)"
+        else:
+            verdict = "OK"
+
+        if ns.plan_only:
+            # Show the exact hand-off the ingest tracer makes to the lift op:
+            # the authoritative byte window (addr/size), the recovered ABI
+            # signature, and the performance metrics the lift op re-checks.
+            print()
+            print("=" * 74)
+            print(f" PLAN  --  {f['name']}  (no lift; --plan-only)")
+            print("=" * 74)
+            print(f"  reason     : {f['reason']}")
+            print(f"  addr       : 0x{f['addr']:x}  (tracer-authoritative start)")
+            print(f"  size_bytes : {f['size_bytes']}  (tracer-authoritative extent)")
+            print(f"  signature  : {f['signature']}  (tracer-recovered ABI)")
+            print(f"  metrics    : loop_density={f['loop_density']} "
+                  f"call_fraction={f['call_fraction']}")
+            print(f"  guardrail  : {verdict}")
+            lifted.append(f["name"])
+            continue
+
         print()
         print("=" * 74)
-        print(f" LIFT+RUN  --  {f['name']}  {f['signature']}")
+        print(f" LIFT+RUN  --  {f['name']}  {f['signature']}  "
+              f"[{f['addr']:#x}, +{f['size_bytes']}]")
         print("=" * 74)
         print(f"  {f['reason']}")
         try:
@@ -139,6 +177,9 @@ def main():
                 expected=case["expected"],
                 expected_outs=case.get("expected_outs"),
                 qemu=True,
+                addr=f["addr"],
+                size=f["size_bytes"],
+                metrics=metrics,
             )
         except SystemExit as exc:
             print(f"  VALIDATION : FAIL  ({f['name']})", file=sys.stderr)
@@ -149,6 +190,15 @@ def main():
     if not lifted:
         print("\n  ERROR: ingest tracer selected nothing to lift", file=sys.stderr)
         return 1
+
+    if ns.plan_only:
+        print()
+        print("  PLAN SUMMARY (deterministic performance-safe placement; the")
+        print("  attacker would need the deployed binary to recompute this):")
+        print(f"    * lift plan            : {lifted}")
+        print(f"    * lift-eligible        : {report['lift']}")
+        print(f"    * kept NATIVE          : {report['keep_native']}")
+        return 0
 
     print()
     print("  MULTI LIFT-AND-DROP SUMMARY:")
