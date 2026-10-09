@@ -81,10 +81,17 @@ jobs:
             ${{ github.workspace }}/.ci-cargo/registry
             ${{ github.workspace }}/.ci-cargo/git
             ${{ github.workspace }}/target
-            ${{ github.workspace }}/build
-          key: cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock', 'vendor/remill/dependencies/**', 'pipeline/build_lifters.sh') }}
+          key: cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-${{ matrix.target }}-
+      # The lifter tree is not restored from an older key. A previous run
+      # baked /usr/lib/llvm-18/bin/clang++ into Ninja rules, and a prefix
+      # restore then compiled LLVM 20's remill with that compiler.
+      - name: Restore lifter build cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/build
+          key: lifter-llvm20-${{ matrix.target }}-${{ hashFiles('pipeline/build_lifters.sh', 'docker/ci.Dockerfile', 'vendor/remill/dependencies/**') }}
       - uses: ./.github/actions/ci-image
       - name: Build in the toolchain container
         run: |
