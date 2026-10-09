@@ -74,6 +74,12 @@ This is the highest-priority fix. Research code that claims verification it did 
 
 **Evidence:** `webapp/server.py:246` (“Synthetic & real test vectors for demonstration”), `webapp/server.py:395–397` (`"status": "VERIFIED_EQUIVALENT"`, `"equivalence": True`), `webapp/server.py:442–448` (`"bit_for_bit_identical": True`).
 
+Additional fabrication details:
+- “Pulley bytecode” traces use **fictional mnemonics** (`p64.load_arg`, `p64.mul_imm`, `p64.check_bounds` at `server.py:261–268,300–307`) — not real Pulley opcodes.
+- Expected values are presented as observed results (`"return_value": expected_val` at `:373,:385`).
+- Cycles for unknown functions come from size formulas (`size_bytes*1.8+15`, `*4.5+60` at `:372,:385`); `latency_ns` is cycles × invented constants `0.28`/`1.15`.
+- `lift_results.json` already contains **real** pulley stdout, qemu output, and hex windows — the webapp only cherry-picks `expected`/`expected_outs` (`server.py:365–366`).
+
 ### F2 — Policy constants duplicated in 6+ places
 
 | Constant | Locations |
@@ -110,10 +116,13 @@ lift_drop_demo.py
 
 | Path | What it actually is | On `make demo`? |
 |---|---|---|
-| `ceremony/` | CLIF→Pulley concept binary + trap trials + shell glue (`o2pulley.sh`) + wasm fixtures | glue yes, Rust binary **no** |
-| `ceremony-wasm/` | Real drop runner (wasmtime 36 → Pulley) | **yes** |
+| `ceremony/` Rust crate | Synthesized CLIF `f(a,b)=a*b+a` + 400-trial trap statistic. Own docstring admits the IR is fabricated (`main.rs:10–12`). Functional demo ⊂ `ceremony-wasm` smoke ⊂ real `make demo` lifts. | **no** (CI smoke only, `TRIALS=0` — the trap experiment is never gated) |
+| `ceremony/extract_bytes.py` | objdump byte-window extractor | **yes** (critical path) |
+| `ceremony/o2pulley.sh`, `lift_check.py` | CLI wrapper / wasm section prober | **no** (dead) |
+| `ceremony-wasm/` | Real drop runner (wasmtime 36 → Pulley64) | **yes** |
+| `probe/` | Cross-backend frame divergence (x86/aarch64/riscv64/s390x/pulley) | CI smoke only; distinct research purpose |
 
-A new reader will run the wrong one. `ceremony/src/main.rs` is a synthetic IR demo; the production-shaped path is `ceremony-wasm`.
+A new reader will run the wrong one. Three “Pulley works” proofs, only one genuine lift proof.
 
 ### F6 — JSON artifacts have no schema
 
@@ -146,11 +155,15 @@ Rough first-party source (excluding vendor/upstream/build/target/node_modules): 
 |---|---|---|
 | `liftmap/lift_map.json` | `ingest_tracer.py` | demo, `placement.py` CLI, `visualize.py` |
 | `liftmap/lift_plan.json` | `placement.plan` via demo | `visualize.py` (webapp recomputes in-process) |
-| `liftmap/lift_results.json` | `lift_drop_demo.py` | webapp overlay of expecteds only |
+| `liftmap/lift_results.json` | `lift_drop_demo.py` (real pulley/qemu/hexbytes) | webapp overlay of expecteds only |
 | Anvill `spec.pb` (temp) | `anvill_spec.build_spec` | `anvill-decompile-spec` |
 | SSE / `/api/report` | `webapp/server.py` | React `types.ts` (redeclared by hand) |
 
-Also duplicated: objdump byte-window regex in `ingest_tracer.py:97-99` and `ceremony/extract_bytes.py:55-58`; test vectors as code (`lift_drop_demo.CASES` + `_ip_id_hash`) vs magic numbers (`server.VECTORS`).
+Also duplicated: objdump byte-window regex in `ingest_tracer.py:97-99` and `ceremony/extract_bytes.py:55-58`; test vectors as code (`lift_drop_demo.CASES` + `_ip_id_hash`) vs magic numbers (`server.VECTORS`); mem/out args are a **side convention** between `CASES` and `ceremony-wasm --mem/--out` (not in the signature language).
+
+**Makefile gap:** `make demo` does not depend on `lifters` (`Makefile:33`). Fresh checkouts fail in `find_remill` until `pipeline/build_lifters.sh` has run (CI does this; local does not).
+
+**Not gated in CI:** qemu-riscv64 cross-check (qemu absent from `ci.Dockerfile` → `lift_drop.py:431` returns `SKIP`), keyed placement mode, the 400-trial trap experiment, the webapp (would fail any honesty check), Python units outside `ci/test_static_libs.py`.
 
 ### F9 — Good things to preserve
 
@@ -170,8 +183,8 @@ Also duplicated: objdump byte-window regex in `ingest_tracer.py:97-99` and `cere
 | D1 | **Fix or remove fabricated dual-run.** Prefer wire the UI to real `lift_results.json` / real `ceremony-wasm` invocations; if that is too slow for the demo, label the panel `SIMULATED` and strip all `verified` / `bit_for_bit_identical` / cycle-count claims. | F1 |
 | D2 | **Create `craneliftx/policy.py`** as the only place thresholds and labels live. Import from Python; expose a generated `policy.json` the UI reads at startup. | F2 |
 | D3 | **One `ensure_sample()`** in `craneliftx/sample.py`. Delete the three copies (plus keep `liftmap/Makefile` recipe as the only other build site). | F3 |
-| D4 | **Archive `o2pulley.sh`** (already off the live path). Make `pipeline/lift_drop.py` the documented CLI. Extract `normalize_symbol()` + `parse_signature()` into `craneliftx/abi.py`. | F4, F7 |
-| D5 | **Rename for clarity:** `ceremony-wasm/` → `drop/`. `ceremony/` → `ceremony-demo/` (CI smoke + trap trials). Keep `sign.wasm`. | F5 |
+| D4 | **Archive `o2pulley.sh`** (already off the live path). Make `pipeline/lift_drop.py` the documented CLI. Extract `normalize_symbol()` + `parse_signature()` into `craneliftx/abi.py`. **Merge** `extract_bytes.py` into `craneliftx/objdump_parse.py` (it is on the critical path). | F4, F7 |
+| D5 | **Rename for clarity:** `ceremony-wasm/` → `drop/`. Rust `ceremony/` → `experiments/trap-stats/` (not a product proof). Keep `sign.wasm` under `samples/`. Keep `probe/` as-is. | F5 |
 | D6 | **Define JSON schemas** (`craneliftx/schema.py` TypedDicts) for `lift_map`, `lift_plan`, `lift_results`; keep field list in §3 contracts as the checklist. | F6 |
 | D7 | **Archive** `visualize.py`, `lift_check.py`, `Header.tsx`, dead constants (`LIFT_THRESHOLD`, `tarjan_dummy`). | F7 |
 | D8 | **Keep** `probe/`, `ci/`, `ENVIRONMENT.md`, `MULTI_BACKEND_MIGRATION.md`, vendored lifters, `make demo` as the hard gate. | F9 |
@@ -185,6 +198,7 @@ Also duplicated: objdump byte-window regex in `ingest_tracer.py:97-99` and `cere
 craneliftX/
   .llvm-version              # unchanged
   Makefile                   # thin; targets: lifters, demo, web, test, check
+                             #   FIX: demo must depend on lifters (or fail fast)
   ENVIRONMENT.md
   MULTI_BACKEND_MIGRATION.md
   REARCHITECTURE.md          # this file (delete after P0–P3 land, or keep as changelog)
@@ -193,33 +207,28 @@ craneliftX/
     __init__.py
     policy.py                # thresholds, fractions, labels, policy.json writer
     sample.py                # ensure_sample() only
-    schema.py                # typed dicts / validation for the three JSON artifacts
+    abi.py                   # normalize_symbol(), parse_signature()
+    objdump_parse.py         # shared disasm/reloc/bytes (merges extract_bytes +
+                             #   ingest_tracer parsing; window authority stays tracer)
+    schema.py                # typed dicts for lift_map / lift_plan / lift_results
     tracer.py                # moved from liftmap/ingest_tracer.py
     placement.py             # moved from liftmap/placement.py
-    lift.py                  # moved from pipeline/lift_drop.py (split later if needed)
+    lift.py                  # moved from pipeline/lift_drop.py
     anvill_spec.py           # moved from pipeline/
     runtime/                 # remill_runtime.ll + specification_pb2.py
 
-  drop/                      # renamed from ceremony-wasm/
-    Cargo.toml
-    src/main.rs
-
-  ceremony-demo/             # renamed from ceremony/ (concept + trap trials)
-    src/main.rs
-    fixtures/                # sign.wasm, sign_x86_64.o, …
-    lift_check.py
-
-  demo/
-    lift_drop_demo.py        # make demo entry; imports craneliftx.*
+  drop/                      # renamed from ceremony-wasm/ (wasm → Pulley runner)
+  experiments/trap-stats/    # ex ceremony/ Rust crate (400-trial trap statistic)
+  samples/                   # sample_network.c, sign.wasm, expected.json (CASES)
+  demo/lift_drop_demo.py     # make demo entry
 
   web/
     server.py                # thin HTTP; imports craneliftx.*; NO fabricated metrics
     src/                     # React app (existing)
-    …
 
-  ci/                        # unchanged role
+  ci/  docker/  .github/     # unchanged role; add qemu-user if riscv dual-run counts
   vendor/  upstream/  build/ # unchanged
-  archived/                  # + visualize.py, o2pulley.sh if cut
+  archived/                  # + o2pulley.sh, lift_check.py
 ```
 
 Migration rule: **move, don’t rewrite.** Preserve git history with `git mv` where possible. Behavioral changes are confined to D1–D7.
