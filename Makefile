@@ -8,7 +8,7 @@
 #   make web       local UI: drop a binary and watch the static analysis run
 #                  (http://127.0.0.1:8765 by default)
 
-.PHONY: lifters runner demo sample web
+.PHONY: lifters runner demo sample web build-ui
 
 PORT ?= 8765
 
@@ -33,5 +33,8 @@ sample:
 demo: sample runner
 	$(PYTHON) liftmap/lift_drop_demo.py
 
-web:
+build-ui:
+	npm --prefix webapp run build
+
+web: build-ui
 	$(PYTHON) webapp/server.py --port $(PORT)
