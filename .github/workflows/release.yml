@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+      - name: LLVM version consistency guard
+        run: bash ci/check_llvm_version.sh
       - uses: ./.github/actions/ci-image
       - name: Syft SBOM and static-library supplement
         run: |

@@ -17,6 +17,10 @@ FILE_NEEDLE="$2"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Single source of truth for the LLVM major, shared with .llvm-version,
+# pipeline/build_lifters.sh, pipeline/lift_drop.py, and docker/ci.Dockerfile.
+LLVM_MAJOR="$(cat "${ROOT}/.llvm-version" 2>/dev/null || echo 20)"
+
 case "$TARGET" in
   x86_64-unknown-linux-gnu)
     CC_BIN=gcc
@@ -123,7 +127,7 @@ if [[ "$TARGET" == "x86_64-unknown-linux-gnu" ]]; then
 fi
 
 if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
-  for tool in cmake ninja llvm-config-20 git; do
+  for tool in cmake ninja "llvm-config-${LLVM_MAJOR}" git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "missing lifter tool: $tool" >&2
       exit 1
@@ -131,8 +135,8 @@ if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
   done
   # remill's BCCompiler.cmake only searches the directory that contains
   # llvm-link, and it looks for the names clang++ and clang.
-  if [[ ! -x /usr/lib/llvm-20/bin/clang++ ]]; then
-    echo "missing /usr/lib/llvm-20/bin/clang++ (package clang-20)" >&2
+  if [[ ! -x "/usr/lib/llvm-${LLVM_MAJOR}/bin/clang++" ]]; then
+    echo "missing /usr/lib/llvm-${LLVM_MAJOR}/bin/clang++ (package clang-${LLVM_MAJOR})" >&2
     exit 1
   fi
   echo "==> pipeline/build_lifters.sh"

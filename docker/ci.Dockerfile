@@ -1,12 +1,17 @@
 # Toolchain image for the main-branch release job.
-# Cross compilers, Rust, Syft, and LLVM 20 are installed here so a run does
-# not apt-get. clang-20 is installed next to llvm-link because remill's
+# Cross compilers, Rust, Syft, and LLVM ${LLVM_MAJOR} are installed here so a
+# run does not apt-get. clang-${LLVM_MAJOR} is installed next to llvm-link
+# because remill's
 # bitcode compiler search does not look on PATH. libz3-dev and
 # libprotobuf-dev are the libraries anvill-decompile-spec links. Source is
 # mounted at /src; this file does not COPY the repo, so the layer cache stays
 # valid across code changes.
 
 FROM ubuntu:24.04
+
+# LLVM major is injected from .llvm-version via --build-arg so the image and
+# the pipeline cannot drift apart. Defaults to 20 when built standalone.
+ARG LLVM_MAJOR=20
 
 ENV DEBIAN_FRONTEND=noninteractive \
     RUSTUP_HOME=/usr/local/rustup \
@@ -38,17 +43,17 @@ RUN apt-get update \
         libc6-dev \
         libc6-dev-arm64-cross \
         libc6-dev-riscv64-cross \
-        clang-20 \
+        clang-${LLVM_MAJOR} \
         libprotobuf-dev \
         libz3-dev \
-        llvm-20-dev \
+        llvm-${LLVM_MAJOR}-dev \
         ninja-build \
         pkg-config \
         protobuf-compiler \
         python3 \
         zlib1g-dev \
-    && test -x /usr/lib/llvm-20/bin/llvm-link \
-    && test -x /usr/lib/llvm-20/bin/clang++ \
+    && test -x /usr/lib/llvm-${LLVM_MAJOR}/bin/llvm-link \
+    && test -x /usr/lib/llvm-${LLVM_MAJOR}/bin/clang++ \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \

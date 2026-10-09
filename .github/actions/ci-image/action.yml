@@ -6,6 +6,9 @@ runs:
   steps:
     - name: Set up Buildx
       uses: docker/setup-buildx-action@v4
+    - name: Read pinned LLVM major
+      shell: bash
+      run: echo "PINNED_LLVM=$(cat .llvm-version 2>/dev/null || echo 20)" >> "$GITHUB_ENV"
     - name: Build toolchain container
       uses: docker/build-push-action@v7
       with:
@@ -13,6 +16,8 @@ runs:
         file: docker/ci.Dockerfile
         tags: ceremony-ci:local
         load: true
+        build-args: |
+          LLVM_MAJOR=${{ env.PINNED_LLVM }}
         # Image attestations are separate from the binary attestations this
         # workflow signs later, and they slow the cached image build.
         provenance: false

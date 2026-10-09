@@ -46,9 +46,27 @@ TRIPLES = {
 }
 
 
+def llvm_major() -> str:
+    """Single source of truth for the LLVM major.
+
+    Mirrors .llvm-version (and pipeline/build_lifters.sh) so the pinned
+    toolchain cannot drift: every llvm/clang invocation in this repo derives
+    its version from that one file.
+    """
+    candidate = os.path.join(ROOT, ".llvm-version")
+    try:
+        with open(candidate) as fh:
+            val = fh.read().strip()
+            if val:
+                return val
+    except FileNotFoundError:
+        pass
+    return "20"
+
+
 def llvm_tool(base: str) -> str:
-    """The drop uses the same LLVM 20 major that remill-lift is linked to."""
-    name = f"{base}-20"
+    """The drop uses the same LLVM major that remill-lift is linked to."""
+    name = f"{base}-{llvm_major()}"
     path = shutil.which(name)
     if path:
         return path

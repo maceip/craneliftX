@@ -436,8 +436,8 @@ extractor was injecting mnemonic bytes.
 - **anvill spec and `anvill-decompile-spec`: INTEGRATED.** `make lifters`
   installs `remill-lift-20` and `anvill-decompile-spec` side by side.
   Real memory and flag semantics, for helpers the passes leave declared, come
-  from `pipeline/remill_runtime.ll`, which replaces the old
-  `ceremony/remill_runtime_stub.ll` no-op stub.
+  from `pipeline/remill_runtime.ll`, a real memory/flag model that replaced
+  the earlier no-op `remill_runtime_stub.ll` placeholder.
 
 ---
 

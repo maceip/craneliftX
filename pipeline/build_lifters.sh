@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# Build vendored remill against system LLVM 20, then anvill-decompile-spec
-# against that install. Remill stays the instruction lifter. Anvill reads the
-# protobuf spec this repo already writes and runs its cleanup passes.
+# Build vendored remill against the pinned system LLVM major, then
+# anvill-decompile-spec against that install. Remill stays the instruction
+# lifter. Anvill reads the protobuf spec this repo already writes and runs its
+# cleanup passes.
 #
 # Anvill is configured against build/remill-install, not vendor/anvill's
-# bundled remill submodule. One LLVM major: LLVM 20, the one remill links.
+# bundled remill submodule.
+#
+# The LLVM major is the SINGLE SOURCE OF TRUTH: see .llvm-version at the repo
+# root. Every tool name below is derived from it so the version cannot drift
+# between this script, lift_drop.py, the CI container, and the release.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LLVM_MAJOR="$(cat "${ROOT}/.llvm-version" 2>/dev/null || echo 20)"
 PREFIX="${REMILL_PREFIX:-$ROOT/build/remill-install}"
 SRC="$ROOT/vendor/remill"
 ANVILL_SRC="$ROOT/vendor/anvill"
@@ -22,7 +28,7 @@ if [[ ! -f "$ANVILL_SRC/CMakeLists.txt" ]]; then
 fi
 
 shopt -s nullglob
-existing=("$PREFIX"/bin/remill-lift-20)
+existing=("$PREFIX"/bin/remill-lift-"$LLVM_MAJOR")
 anvill_bin="$PREFIX/bin/anvill-decompile-spec"
 need_remill=0
 need_anvill=0
@@ -38,19 +44,19 @@ if (( need_remill == 0 && need_anvill == 0 )); then
   exit 0
 fi
 
-if ! command -v llvm-config-20 >/dev/null; then
-  echo "llvm-config-20 is required (system LLVM 20: apt install llvm-20-dev clang-20)" >&2
+if ! command -v "llvm-config-$LLVM_MAJOR" >/dev/null; then
+  echo "llvm-config-$LLVM_MAJOR is required (system LLVM $LLVM_MAJOR: apt install llvm-$LLVM_MAJOR-dev clang-$LLVM_MAJOR)" >&2
   exit 1
 fi
 
-LLVM_PREFIX="$(llvm-config-20 --prefix)"
-LLVM_DIR="$(llvm-config-20 --cmakedir)"
+LLVM_PREFIX="$(llvm-config-"$LLVM_MAJOR" --prefix)"
+LLVM_DIR="$(llvm-config-"$LLVM_MAJOR" --cmakedir)"
 DEPS_INSTALL="$ROOT/build/remill-deps/install"
 JOBS="${JOBS:-2}"
 # Host compiler matches the one LLVM the lifter links. The default c++ on
 # this image is clang 18, which is a different major.
-export CC="${CC:-clang-20}"
-export CXX="${CXX:-clang++-20}"
+export CC="${CC:-clang-"$LLVM_MAJOR"}"
+export CXX="${CXX:-clang++-"$LLVM_MAJOR"}"
 
 if (( need_remill )); then
   # Sleigh is linked into remill-lift. Build it in the dependency superbuild
