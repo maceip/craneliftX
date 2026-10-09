@@ -214,22 +214,14 @@ class Handler(BaseHTTPRequestHandler):
             emit("start", {"name": job["name"], "id": job_id})
             # 1. Real ingest tracer analysis
             report = ingest_tracer.analyze_binary(job["path"], on_event=emit)
-            
+
             # 2. Keyed / deterministic placement calculation
             lift_key = placement.load_key()
             lift_plan = placement.plan(report, lift_key)
             report["placement"] = lift_plan
             emit("placement", lift_plan)
 
-            # 3. Side-by-side Dual Run ("Runs it twice")
-            # Left: Native hardware x86_64 run. Right: Recompiled Pulley VM run.
-            emit("dual_run_start", {
-                "total_functions": report["total_functions"],
-                "lift_count": len(lift_plan.get("selected", report.get("lift", []))),
-                "keep_count": len(report.get("keep_native", [])),
-                "mode": lift_plan.get("mode", "deterministic"),
-            })
-
+            selected_set = set(lift_plan.get("selected", report.get("lift", [])))
             precomputed = get_precomputed_results()
             precomputed_by_name = {}
             if precomputed and "results" in precomputed:
@@ -237,236 +229,83 @@ class Handler(BaseHTTPRequestHandler):
                     precomputed_by_name[r["name"]] = r
                     precomputed_by_name[r["name"].lstrip("_")] = r
 
-            dual_results = []
-            selected_set = set(lift_plan.get("selected", report.get("lift", [])))
-
-            # Function metadata map
-            fn_map = {f["name"]: f for f in report["functions"]}
-
-            # Synthetic & real test vectors for demonstration
-            VECTORS = {
-                "_ip_id_hash": {
-                    "args": "(src_ip=100, dst_ip=50)",
-                    "expected": 51156,
-                    "native_cycles": 24,
-                    "pulley_cycles": 118,
-                    "native_asm": [
-                        "xor   esi, edi",
-                        "imul  ecx, edi, 0x9e3779b1",
-                        "movzx eax, cx",
-                        "shr   ecx, 16",
-                        "xor   eax, ecx",
-                        "ret"
-                    ],
-                    "pulley_bc": [
-                        "p64.load_arg  r0, 0",
-                        "p64.load_arg  r1, 1",
-                        "p64.xor       r2, r0, r1",
-                        "p64.mul_imm   r3, r2, 2654435761",
-                        "p64.shr_imm   r4, r3, 16",
-                        "p64.xor       r0, r3, r4",
-                        "p64.ret       r0"
-                    ],
-                },
-                "_tcp_window_scaled": {
-                    "args": "(raw_window=100, scale=50)",
-                    "expected": 150,
-                    "native_cycles": 18,
-                    "pulley_cycles": 72,
-                    "native_asm": [
-                        "lea   eax, [rdi + rsi]",
-                        "ret"
-                    ],
-                    "pulley_bc": [
-                        "p64.load_arg  r0, 0",
-                        "p64.load_arg  r1, 1",
-                        "p64.add       r0, r0, r1",
-                        "p64.ret       r0"
-                    ],
-                },
-                "_parse_packet": {
-                    "args": "(pkt_buf=0x7fff40, len=20, out_ver, out_len)",
-                    "expected": 89,
-                    "expected_outs": [4, 20],
-                    "native_cycles": 65,
-                    "pulley_cycles": 310,
-                    "native_asm": [
-                        "movzx ecx, byte ptr [rdi + 2]",
-                        "movzx edx, byte ptr [rdi + 3]",
-                        "mov   dword ptr [rdx], ecx",
-                        "mov   eax, 89",
-                        "ret"
-                    ],
-                    "pulley_bc": [
-                        "p64.check_bounds r0, 20",
-                        "p64.mem_read8    r1, r0, 2",
-                        "p64.mem_read8    r2, r0, 3",
-                        "p64.mem_write32   r3, r1",
-                        "p64.const        r0, 89",
-                        "p64.ret          r0"
-                    ],
-                },
-                "_crc32_tight": {
-                    "args": "(buf=0x7fff40, len=1024)",
-                    "expected": 0x48A2B19F,
-                    "native_cycles": 384,
-                    "pulley_cycles": 2150,
-                    "native_asm": [
-                        "crc32 eax, byte ptr [rdi + rcx]",
-                        "inc   rcx",
-                        "cmp   rcx, rsi",
-                        "jne   loop"
-                    ],
-                    "pulley_bc": [
-                        "// NOT LIFTED: Guardrail rejected tight loop",
-                        "// loop_density=0.517 > 0.45 safety threshold",
-                        "// Retained on native x86_64 to prevent interpreter stall"
-                    ],
-                },
-                "_handle_connection": {
-                    "args": "(conn_ctx=0x1000, event=3)",
-                    "expected": 0,
-                    "native_cycles": 92,
-                    "pulley_cycles": 480,
-                    "native_asm": [
-                        "call  _tcp_window_scaled",
-                        "call  _parse_packet",
-                        "call  _ip_id_hash",
-                        "ret"
-                    ],
-                    "pulley_bc": [
-                        "// NOT LIFTED: Fan-out orchestration glue (4 callees)",
-                        "// Kept native as zero-overhead bridge"
-                    ],
-                },
-                "_main": {
-                    "args": "(argc=1, argv=0x7fff50)",
-                    "expected": 0,
-                    "native_cycles": 140,
-                    "pulley_cycles": 890,
-                    "native_asm": [
-                        "call  _handle_connection",
-                        "xor   eax, eax",
-                        "ret"
-                    ],
-                    "pulley_bc": [
-                        "// NOT LIFTED: Process entry point",
-                        "// Native host boundary"
-                    ],
-                },
-            }
-
+            # 3. Real per-function rows. Nothing here is invented: metrics come
+            #    from the tracer; execution fields come from lift_results.json
+            #    (produced by `make demo`) or are null when a lift has not run.
+            mem_rows = []
             for f in report["functions"]:
                 name = f["name"]
                 is_lifted = name in selected_set or name.lstrip("_") in selected_set
-                spec = VECTORS.get(name) or VECTORS.get("_" + name.lstrip("_"))
-                real_p = precomputed_by_name.get(name)
-
-                expected_val = (real_p.get("expected") if real_p else None) or (spec.get("expected") if spec else 0)
-                expected_outs = (real_p.get("expected_outs") if real_p else None) or (spec.get("expected_outs") if spec else None)
-
-                # Native run details
-                native_run = {
-                    "architecture": "x86_64 (Native Hardware)",
-                    "execution_mode": "Direct Host CPU Execution",
-                    "cycles": spec.get("native_cycles", 40) if spec else int(f["size_bytes"] * 1.8 + 15),
-                    "return_value": expected_val,
-                    "out_params": expected_outs,
-                    "status": "PASS",
-                    "asm_trace": spec.get("native_asm", [f"// {f['n_insn']} native x86 instructions executed", "ret"]) if spec else ["mov eax, 1", "ret"],
-                    "latency_ns": round((spec.get("native_cycles", 40) if spec else 40) * 0.28, 2),
-                }
-
-                # Pulley / Recompiled run details
-                if is_lifted:
-                    pulley_run = {
-                        "architecture": "pulley64 (Cranelift Portable Bytecode VM)",
-                        "execution_mode": "Decompiled Anvill Spec -> LLVM IR -> Wasm -> Pulley Interpreter",
-                        "cycles": spec.get("pulley_cycles", 150) if spec else int(f["size_bytes"] * 4.5 + 60),
-                        "return_value": expected_val,
-                        "out_params": expected_outs,
-                        "status": "VERIFIED_EQUIVALENT",
-                        "sandbox_boundary": "ENFORCED (isolated memory bounds)",
-                        "bytecode_trace": spec.get("pulley_bc", ["p64.load_arg r0, 0", "p64.ret r0"]) if spec else ["p64.ret"],
-                        "latency_ns": round((spec.get("pulley_cycles", 150) if spec else 150) * 1.15, 2),
-                        "equivalence": True,
-                        "delta": 0,
-                    }
-                else:
-                    pulley_run = {
-                        "architecture": "N/A (Kept Native)",
-                        "execution_mode": "Retained on Native Hardware",
-                        "cycles": 0,
-                        "return_value": expected_val,
-                        "out_params": expected_outs,
-                        "status": "NATIVE_RESIDENT",
-                        "sandbox_boundary": "HOST_NATIVE",
-                        "bytecode_trace": spec.get("pulley_bc", [f"// Kept native: {f.get('reason', '')}"]) if spec else ["// Kept native"],
-                        "latency_ns": 0,
-                        "equivalence": True,
-                        "delta": 0,
-                    }
-
-                step_payload = {
+                real = precomputed_by_name.get(name) or precomputed_by_name.get(name.lstrip("_"))
+                hexbytes = (real or {}).get("hexbytes") or ""
+                pulley_out = (real or {}).get("pulley") or ""
+                observed = None
+                for line in pulley_out.splitlines():
+                    if "=" in line and "expected" in line:
+                        # e.g. "_ip_id_hash(100, 50) = 51156  (expected 51156)"
+                        rhs = line.split("=", 1)[1]
+                        tok = rhs.split()[0] if rhs.split() else ""
+                        try:
+                            observed = int(tok, 0)
+                        except ValueError:
+                            observed = None
+                row = {
                     "name": name,
                     "addr": f["addr"],
                     "size_bytes": f["size_bytes"],
+                    "n_insn": f["n_insn"],
                     "signature": f["signature"],
+                    "loop_density": f["loop_density"],
+                    "call_fraction": f["call_fraction"],
+                    "network_score": f["network_score"],
+                    "lift_score": f.get("lift_score", 0.0),
+                    "pure_compute": bool(f.get("pure_compute")),
                     "decision": "LIFT" if is_lifted else "KEEP_NATIVE",
                     "reason": f.get("reason", ""),
-                    "args": spec.get("args", "(test_vector)") if spec else "(default_args)",
-                    "native": native_run,
-                    "pulley": pulley_run,
-                    "is_lifted": is_lifted,
-                    "verified": True,
+                    # source representation (x86_64 object)
+                    "src_size": (real or {}).get("src_size") or (len(hexbytes) // 2 if hexbytes else f["size_bytes"]),
+                    "src_insn": f["n_insn"],
+                    # destination representation (Pulley wasm) — only if measured
+                    "wasm_size": (real or {}).get("wasm_size"),
+                    "runner_ms": (real or {}).get("runner_ms"),
+                    "expected": (real or {}).get("expected"),
+                    "observed": observed,
+                    "expected_outs": (real or {}).get("expected_outs"),
+                    "passed": bool((real or {}).get("passed")) if real else None,
+                    "pulley_log": pulley_out or None,
+                    "qemu_log": (real or {}).get("qemu") or None,
+                    "lifted_measured": bool(real and real.get("passed")),
                 }
-                dual_results.append(step_payload)
-                emit("dual_step", step_payload)
+                mem_rows.append(row)
+                emit("function_row", row)
 
-            emit("dual_verify", {
-                "verified_count": len(dual_results),
-                "lifted_count": len([d for d in dual_results if d["is_lifted"]]),
-                "bit_for_bit_identical": True,
-                "summary": "Dual execution completed: 100% bit-for-bit equivalence between Native and Pulley targets.",
+            emit("memory_map", {
+                "binary": report.get("binary"),
+                "functions": mem_rows,
+                "span": max((r["addr"] + r["size_bytes"] for r in mem_rows), default=0),
             })
 
-            # 4. Heatmap Dataset generation
-            # Generates multidimensional metric rows for the React Heatmap component
-            heatmap_rows = []
-            for f in report["functions"]:
-                name = f["name"]
-                is_l = name in selected_set or name.lstrip("_") in selected_set
-                heatmap_rows.append({
-                    "name": name,
-                    "addr_hex": f"0x{f['addr']:x}",
-                    "loop_density": round(f["loop_density"], 3),
-                    "call_fraction": round(f["call_fraction"], 3),
-                    "network_score": round(f["network_score"], 3),
-                    "frequency_score": round(f.get("frequency_score", 0.5), 3),
-                    "pure_compute": 1.0 if f.get("pure_compute") else 0.0,
-                    "lift_score": round(f.get("lift_score", 0.0), 3),
-                    "n_insn": f["n_insn"],
-                    "size_bytes": f["size_bytes"],
-                    "decision": "LIFT" if is_l else "KEEP_NATIVE",
-                    "intensity": round(f["loop_density"] * 0.4 + f["call_fraction"] * 0.3 + f["network_score"] * 0.3, 3),
-                })
-
-            heatmap_payload = {
-                "columns": [
-                    {"id": "loop_density", "label": "Loop Density", "max": 1.0, "threshold": 0.45},
-                    {"id": "call_fraction", "label": "Call Fraction", "max": 1.0, "threshold": 0.40},
-                    {"id": "network_score", "label": "Net Score", "max": 1.0, "threshold": 0.50},
-                    {"id": "frequency_score", "label": "Call Frequency", "max": 1.0, "threshold": 0.70},
-                    {"id": "pure_compute", "label": "Pure Compute", "max": 1.0, "threshold": 0.50},
-                    {"id": "lift_score", "label": "Lift Affinity", "max": 1.0, "threshold": 0.50},
+            measured = [r for r in mem_rows if r["lifted_measured"]]
+            emit("perf", {
+                "note": "Static metrics from Capstone. runner_ms is wall time of the Pulley runner process from make demo. No cycle counts.",
+                "functions": [
+                    {
+                        "name": r["name"],
+                        "decision": r["decision"],
+                        "src_size": r["src_size"],
+                        "src_insn": r["src_insn"],
+                        "wasm_size": r["wasm_size"],
+                        "runner_ms": r["runner_ms"],
+                        "expected": r["expected"],
+                        "observed": r["observed"],
+                        "passed": r["passed"],
+                    }
+                    for r in mem_rows
                 ],
-                "rows": heatmap_rows,
-            }
-            emit("heatmap_data", heatmap_payload)
+                "measured_count": len(measured),
+            })
 
-            # 5. Final completion event
-            report["dual_results"] = dual_results
-            report["heatmap"] = heatmap_payload
+            report["functions"] = mem_rows
             job["report"] = report
 
             emit("done", {
@@ -474,7 +313,8 @@ class Handler(BaseHTTPRequestHandler):
                 "lift": report["lift"],
                 "keep_native": report["keep_native"],
                 "placement": lift_plan,
-                "dual_verified": True,
+                "measured_count": len(measured),
+                "honest": True,
             })
 
         except SystemExit as exc:

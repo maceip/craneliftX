@@ -1,320 +1,406 @@
-import React, { useState, useRef } from "react";
-import { Sidebar } from "./components/Sidebar";
-import { Topbar } from "./components/Topbar";
-import { DropZone } from "./components/DropZone";
-import { VoronoiBinaryGraph } from "./components/VoronoiBinaryGraph";
-import { StaticAnalysisView } from "./components/StaticAnalysisView";
-import { SideBySideRunView } from "./components/SideBySideRunView";
-import { HeatMap } from "./components/HeatMap";
-import { EventLog } from "./components/EventLog";
+import React, { useCallback, useRef, useState } from "react";
+import { Button } from "./components/ui/button";
 import {
-  Stage,
-  FunctionItem,
-  PlacementPlan,
-  DualRunStep,
-  HeatMapPayload,
-  LogEntry,
-} from "./types";
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "./components/ui/card";
+import { Badge } from "./components/ui/badge";
+import { Spinner } from "./components/ui/spinner";
+import { Separator } from "./components/ui/separator";
 
-const STAGES: string[] = [
-  "load",
-  "disassemble",
-  "function",
-  "callgraph",
-  "decision",
-  "dual_run_start",
-  "dual_verify",
-  "heatmap_data",
-  "done",
-];
+/** Real tracer + lift-results rows. Nulls mean "not measured" — never invent. */
+interface FunctionRow {
+  name: string;
+  addr: number;
+  size_bytes: number;
+  n_insn: number;
+  signature: string;
+  loop_density: number;
+  call_fraction: number;
+  network_score: number;
+  decision: "LIFT" | "KEEP_NATIVE";
+  reason: string;
+  src_size: number;
+  src_insn: number;
+  wasm_size: number | null;
+  runner_ms: number | null;
+  expected: number | null;
+  observed: number | null;
+  expected_outs: number[] | null;
+  passed: boolean | null;
+  pulley_log: string | null;
+  qemu_log: string | null;
+  lifted_measured: boolean;
+}
+
+interface Placement {
+  mode: string;
+  selected: string[];
+  held_native?: string[];
+  eligible?: string[];
+}
+
+const fmt = (n: number | null | undefined, unit = "") =>
+  n === null || n === undefined ? "—" : `${n}${unit}`;
+
+const fmtMs = (n: number | null | undefined) =>
+  n === null || n === undefined ? "—" : `${n.toFixed(2)} ms`;
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"overview" | "voronoi" | "matrix" | "dual" | "heatmap" | "logs">("overview");
-  const [currentStage, setCurrentStage] = useState<Stage>("idle");
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [binaryName, setBinaryName] = useState<string | null>(null);
-  const [byteCount, setByteCount] = useState<number | null>(null);
-  const [functions, setFunctions] = useState<FunctionItem[]>([]);
-  const [placement, setPlacement] = useState<PlacementPlan | null>(null);
-  const [dualSteps, setDualSteps] = useState<DualRunStep[]>([]);
-  const [heatmapData, setHeatmapData] = useState<HeatMapPayload | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isVerified, setIsVerified] = useState<boolean>(false);
-  const [selectedFunctionName, setSelectedFunctionName] = useState<string | null>(null);
+  const [rows, setRows] = useState<FunctionRow[]>([]);
+  const [placement, setPlacement] = useState<Placement | null>(null);
+  const [measuredCount, setMeasuredCount] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const hiddenFileInputRef = useRef<HTMLInputElement>(null);
+  const pushLog = useCallback((line: string) => {
+    setLog((prev) => [...prev.slice(-80), line]);
+  }, []);
 
-  const addLog = (stage: string, text: string, isError = false) => {
-    const entry: LogEntry = {
-      id: Math.random().toString(36).substring(2, 9),
-      time: new Date().toLocaleTimeString(),
-      stage,
-      text,
-      isError,
-    };
-    setLogs((prev) => [...prev, entry]);
-  };
+  const run = useCallback(
+    async (file?: File) => {
+      setRunning(true);
+      setError(null);
+      setRows([]);
+      setPlacement(null);
+      setMeasuredCount(0);
+      setSelected(null);
+      setLog([]);
 
-  const resetState = () => {
-    setCurrentStage("idle");
-    setBinaryName(null);
-    setByteCount(null);
-    setFunctions([]);
-    setPlacement(null);
-    setDualSteps([]);
-    setHeatmapData(null);
-    setLogs([]);
-    setIsLoading(false);
-    setIsVerified(false);
-    setSelectedFunctionName(null);
-  };
-
-  const runAnalysis = (jobId: string, name: string) => {
-    setIsLoading(true);
-    setBinaryName(name);
-
-    const es = new EventSource(`/api/events/${jobId}`);
-
-    es.onmessage = (ev) => {
       try {
-        const { stage, payload } = JSON.parse(ev.data);
-        setCurrentStage(stage);
-
-        if (stage === "start") {
-          addLog(stage, `Initialized ingest analysis for ${payload.name}`);
-        } else if (stage === "load") {
-          addLog(stage, `Ingested binary: ${payload.binary}`);
-        } else if (stage === "disassemble") {
-          addLog(stage, `Disassembled ${payload.symbols} symbols, ${payload.instructions} machine instructions`);
-        } else if (stage === "function") {
-          setFunctions((prev) => {
-            const exists = prev.findIndex((f) => f.name === payload.name);
-            if (exists >= 0) {
-              const updated = [...prev];
-              updated[exists] = { ...updated[exists], ...payload };
-              return updated;
-            }
-            return [...prev, payload];
+        let id: string;
+        let name: string;
+        if (file) {
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            headers: { "X-Filename": file.name },
+            body: file,
           });
-          addLog(
-            stage,
-            `${payload.name} [0x${payload.addr.toString(16)}] &bull; ${payload.n_insn} insn &bull; loop: ${payload.loop_density}`
-          );
-        } else if (stage === "callgraph") {
-          addLog(stage, `${payload.reachable} functions reachable from roots [${payload.roots.join(", ")}]`);
-        } else if (stage === "decision") {
-          setFunctions((prev) =>
-            prev.map((f) =>
-              f.name === payload.name
-                ? { ...f, decision: payload.decision, reason: payload.reason }
-                : f
-            )
-          );
-          addLog(stage, `${payload.name} &rarr; ${payload.decision} (${payload.reason})`);
-        } else if (stage === "placement") {
-          setPlacement(payload);
-          addLog(stage, `Placement mode: ${payload.mode} (Selected: ${payload.selected?.length || 0})`);
-        } else if (stage === "dual_run_start") {
-          addLog(stage, `Starting side-by-side dual run (Native Hardware vs Pulley VM)`);
-        } else if (stage === "dual_step") {
-          setDualSteps((prev) => {
-            const idx = prev.findIndex((s) => s.name === payload.name);
-            if (idx >= 0) {
-              const u = [...prev];
-              u[idx] = payload;
-              return u;
-            }
-            return [...prev, payload];
-          });
-          addLog(
-            stage,
-            `Dual run ${payload.name}: Native ret=${payload.native.return_value} <==> Pulley ret=${payload.pulley.return_value} [MATCH]`
-          );
-        } else if (stage === "dual_verify") {
-          setIsVerified(true);
-          addLog(stage, payload.summary);
-        } else if (stage === "heatmap_data") {
-          setHeatmapData(payload);
-          addLog(stage, `Compiled ${payload.rows.length}x${payload.columns.length} complexity & execution heatmap matrix`);
-        } else if (stage === "done") {
-          setIsLoading(false);
-          addLog(
-            stage,
-            `Complete: ${payload.total_functions} functions analyzed &bull; ${payload.lift.length} lifted &bull; ${payload.keep_native.length} native`
-          );
-        } else if (stage === "error") {
-          setIsLoading(false);
-          addLog(stage, payload.message, true);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "upload failed");
+          id = data.id;
+          name = data.name;
+        } else {
+          const res = await fetch("/api/sample", { method: "POST" });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "sample failed");
+          id = data.id;
+          name = data.name;
         }
-      } catch (err) {
-        console.error("Failed to parse SSE event:", err);
+        setBinaryName(name);
+        pushLog(`job ${id} · ${name}`);
+
+        const es = new EventSource(`/api/events/${id}`);
+        es.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            const { stage, payload } = msg;
+            if (stage === "function_row") {
+              setRows((prev) => [...prev, payload as FunctionRow]);
+            } else if (stage === "placement") {
+              setPlacement(payload as Placement);
+              pushLog(
+                `placement mode=${payload.mode} selected=${(payload.selected || []).length}`
+              );
+            } else if (stage === "memory_map") {
+              pushLog(`memory map · ${payload.functions?.length ?? 0} functions`);
+            } else if (stage === "perf") {
+              setMeasuredCount(payload.measured_count ?? 0);
+              pushLog(
+                `perf · ${payload.measured_count ?? 0} lifted functions measured`
+              );
+            } else if (stage === "done") {
+              setMeasuredCount(payload.measured_count ?? 0);
+              pushLog("analysis complete");
+              setRunning(false);
+              es.close();
+            } else if (stage === "error") {
+              setError(payload.message || "analysis failed");
+              setRunning(false);
+              es.close();
+            } else {
+              pushLog(stage);
+            }
+          } catch {
+            /* ignore malformed SSE frame */
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          setRunning(false);
+          setError("event stream closed");
+        };
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setRunning(false);
       }
-    };
+    },
+    [pushLog]
+  );
 
-    es.addEventListener("close", () => {
-      es.close();
-      setIsLoading(false);
-    });
-
-    es.onerror = () => {
-      es.close();
-      setIsLoading(false);
-    };
-  };
-
-  const handleFileUpload = async (file: File) => {
-    resetState();
-    setIsLoading(true);
-    addLog("upload", `Uploading ${file.name} (${file.size} bytes)...`);
-    try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "X-Filename": file.name },
-        body: file,
-      });
-      const data = await res.json();
-      setByteCount(data.bytes);
-      runAnalysis(data.id, data.name);
-    } catch (err: any) {
-      addLog("error", `Upload failed: ${err.message}`, true);
-      setIsLoading(false);
-    }
-  };
-
-  const handleLoadSample = async () => {
-    resetState();
-    setIsLoading(true);
-    addLog("sample", "Requesting bundled sample_network.o...");
-    try {
-      const res = await fetch("/api/sample", { method: "POST" });
-      const data = await res.json();
-      setByteCount(data.bytes);
-      runAnalysis(data.id, data.name);
-    } catch (err: any) {
-      addLog("error", `Failed to load sample: ${err.message}`, true);
-      setIsLoading(false);
-    }
-  };
-
-  const handleSelectFromVoronoi = (fnName: string) => {
-    setSelectedFunctionName(fnName);
-    setActiveTab("dual");
-  };
+  const span = rows.reduce((m, r) => Math.max(m, r.addr + r.size_bytes), 1);
+  const active = rows.find((r) => r.name === selected) || null;
 
   return (
-    <div className="wm-app-shell">
-      <input
-        type="file"
-        ref={hiddenFileInputRef}
-        style={{ display: "none" }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files[0]) {
-            handleFileUpload(e.target.files[0]);
-          }
-        }}
-      />
-
-      {/* Watermelon UI Left Navigation Sidebar */}
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        binaryName={binaryName}
-        currentStage={currentStage}
-        busy={isLoading}
-        functionCount={functions.length}
-        dualCount={dualSteps.length}
-        hasHeatmap={!!heatmapData}
-        onReset={resetState}
-        onLoadSample={handleLoadSample}
-      />
-
-      {/* Main Workspace Area */}
-      <div className="wm-main-area">
-        {/* Watermelon UI Topbar */}
-        <Topbar
-          activeTab={activeTab}
-          binaryName={binaryName}
-          currentStage={currentStage}
-          isVerified={isVerified}
-          onOpenUpload={() => hiddenFileInputRef.current?.click()}
-          onLoadSample={handleLoadSample}
-          busy={isLoading}
-        />
-
-        {/* Scrollable Main Content */}
-        <div className="wm-content-scroll">
-          {/* Hero Ingest DropZone */}
-          <DropZone
-            onFileUpload={handleFileUpload}
-            onLoadSample={handleLoadSample}
-            stages={STAGES}
-            currentStage={currentStage}
-            binaryName={binaryName}
-            byteCount={byteCount}
-            isLoading={isLoading}
-          />
-
-          {/* Tab Views */}
-          {activeTab === "overview" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
-              <VoronoiBinaryGraph
-                functions={functions}
-                binaryName={binaryName}
-                onSelectFunction={handleSelectFromVoronoi}
-                selectedFunction={selectedFunctionName}
-              />
-
-              <StaticAnalysisView
-                functions={functions}
-                placement={placement}
-                activeStage={currentStage}
-              />
-
-              <SideBySideRunView
-                dualSteps={dualSteps}
-                isVerified={isVerified}
-              />
-
-              <HeatMap payload={heatmapData} />
+    <div className="min-h-screen bg-[#000000] text-[#f4f4f5] p-6 sm:p-10 selection:bg-[#fc4c01]/20">
+      <div className="mx-auto max-w-5xl flex flex-col gap-8">
+        {/* Header */}
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="size-8 rounded-full border border-white/10 grid place-items-center text-[#fc4c01] text-xs font-bold">
+              CX
             </div>
-          )}
-
-          {activeTab === "voronoi" && (
-            <VoronoiBinaryGraph
-              functions={functions}
-              binaryName={binaryName}
-              onSelectFunction={handleSelectFromVoronoi}
-              selectedFunction={selectedFunctionName}
+            <div>
+              <div className="text-sm font-semibold tracking-tight">CraneliftX</div>
+              <div className="text-xs text-neutral-500 font-mono">
+                {binaryName || "no binary loaded"}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {running ? (
+              <Badge variant="accent">
+                <Spinner size="sm" /> running
+              </Badge>
+            ) : measuredCount > 0 ? (
+              <Badge variant="outline">{measuredCount} lifts measured</Badge>
+            ) : rows.length > 0 ? (
+              <Badge variant="outline">analysis only</Badge>
+            ) : (
+              <Badge variant="outline">idle</Badge>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileRef.current?.click()}
+            >
+              Upload
+            </Button>
+            <Button
+              variant="accent"
+              size="sm"
+              disabled={running}
+              onClick={() => run()}
+            >
+              {running ? <Spinner size="sm" /> : null}
+              Run sample
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) run(f);
+                e.target.value = "";
+              }}
             />
-          )}
+          </div>
+        </header>
 
-          {activeTab === "matrix" && (
-            <StaticAnalysisView
-              functions={functions}
-              placement={placement}
-              activeStage={currentStage}
-            />
-          )}
+        <p className="text-sm text-neutral-400 max-w-2xl">
+          Drop a native object to see where functions sit in the binary and which
+          the tracer selects to lift onto Pulley. Metrics are Capstone static
+          analysis; execution numbers come from{" "}
+          <code className="text-neutral-300">make demo</code> lift results only.
+          Fields that were not measured show as —.
+        </p>
 
-          {activeTab === "dual" && (
-            <SideBySideRunView
-              dualSteps={dualSteps}
-              isVerified={isVerified}
-            />
-          )}
+        {error && (
+          <div className="border border-red-500/30 bg-red-500/10 text-red-200 text-sm rounded-lg px-4 py-3">
+            {error}
+          </div>
+        )}
 
-          {activeTab === "heatmap" && (
-            <HeatMap payload={heatmapData} />
-          )}
+        {/* Memory map */}
+        {rows.length > 0 && (
+          <Card className="bg-[#121212] border-white/[0.08]">
+            <CardHeader>
+              <CardTitle className="text-sm">Memory map · lift placement</CardTitle>
+              <CardDescription className="text-xs">
+                Function extents in the object file. Orange = lifted to Pulley,
+                gray = kept native. Width ∝ size_bytes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="relative h-12 w-full rounded-lg border border-white/[0.06] bg-black/40 overflow-hidden">
+                {rows.map((r) => {
+                  const left = (r.addr / span) * 100;
+                  const width = Math.max((r.size_bytes / span) * 100, 0.6);
+                  const lift = r.decision === "LIFT";
+                  return (
+                    <button
+                      key={r.name}
+                      type="button"
+                      title={`${r.name} @ 0x${r.addr.toString(16)} +${r.size_bytes}B`}
+                      onClick={() => setSelected(r.name)}
+                      className={`absolute top-0 h-full border-r border-black/40 transition-opacity ${
+                        lift ? "bg-[#fc4c01]/80" : "bg-neutral-700/80"
+                      } ${selected === r.name ? "opacity-100 ring-1 ring-white" : "opacity-90 hover:opacity-100"}`}
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                    />
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-4 text-[11px] text-neutral-400 font-mono">
+                <span>
+                  <span className="inline-block size-2 rounded-sm bg-[#fc4c01]/80 mr-1" />
+                  LIFT
+                </span>
+                <span>
+                  <span className="inline-block size-2 rounded-sm bg-neutral-700 mr-1" />
+                  KEEP_NATIVE
+                </span>
+                <span>span 0x0 – 0x{span.toString(16)} ({span} B)</span>
+                {placement && (
+                  <span>
+                    mode {placement.mode} · selected{" "}
+                    {(placement.selected || []).join(", ") || "—"}
+                  </span>
+                )}
+              </div>
+              {active && (
+                <div className="rounded-lg border border-white/[0.06] bg-black/30 p-3 text-xs font-mono text-neutral-300 space-y-1">
+                  <div className="text-white text-sm font-semibold not-italic">
+                    {active.name}{" "}
+                    <Badge variant={active.decision === "LIFT" ? "accent" : "outline"}>
+                      {active.decision}
+                    </Badge>
+                  </div>
+                  <div>
+                    0x{active.addr.toString(16)} · {active.size_bytes} B ·{" "}
+                    {active.n_insn} insn · {active.signature}
+                  </div>
+                  <div>
+                    loop {active.loop_density.toFixed(3)} · call{" "}
+                    {active.call_fraction.toFixed(3)} · net{" "}
+                    {active.network_score.toFixed(2)}
+                  </div>
+                  <div className="text-neutral-400">{active.reason}</div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-          {activeTab === "logs" && (
-            <EventLog logs={logs} />
-          )}
+        {/* Source vs destination */}
+        {rows.length > 0 && (
+          <Card className="bg-[#121212] border-white/[0.08]">
+            <CardHeader>
+              <CardTitle className="text-sm">Source vs destination</CardTitle>
+              <CardDescription className="text-xs">
+                Source = x86_64 machine-code window handed to the lifter.
+                Destination = Pulley wasm artifact. runner_ms is wall time of the
+                Pulley runner process from make demo — not a cycle estimate.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs font-mono">
+                  <thead>
+                    <tr className="text-neutral-500 text-left border-b border-white/[0.06]">
+                      <th className="py-2 pr-3">function</th>
+                      <th className="py-2 pr-3">decision</th>
+                      <th className="py-2 pr-3">src B</th>
+                      <th className="py-2 pr-3">src insn</th>
+                      <th className="py-2 pr-3">wasm B</th>
+                      <th className="py-2 pr-3">runner</th>
+                      <th className="py-2 pr-3">expected</th>
+                      <th className="py-2 pr-3">observed</th>
+                      <th className="py-2">result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr
+                        key={r.name}
+                        className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer"
+                        onClick={() => setSelected(r.name)}
+                      >
+                        <td className="py-2 pr-3 text-neutral-200">{r.name}</td>
+                        <td className="py-2 pr-3">
+                          <span
+                            className={
+                              r.decision === "LIFT" ? "text-[#fc4c01]" : "text-neutral-500"
+                            }
+                          >
+                            {r.decision}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3">{fmt(r.src_size)}</td>
+                        <td className="py-2 pr-3">{fmt(r.src_insn)}</td>
+                        <td className="py-2 pr-3">{fmt(r.wasm_size)}</td>
+                        <td className="py-2 pr-3">{fmtMs(r.runner_ms)}</td>
+                        <td className="py-2 pr-3">{fmt(r.expected)}</td>
+                        <td className="py-2 pr-3">{fmt(r.observed)}</td>
+                        <td className="py-2">
+                          {r.passed === true ? (
+                            <span className="text-emerald-400">PASS</span>
+                          ) : r.passed === false ? (
+                            <span className="text-red-400">FAIL</span>
+                          ) : (
+                            <span className="text-neutral-600">not run</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {active?.pulley_log && (
+                <>
+                  <Separator className="my-4 bg-white/[0.06]" />
+                  <div className="text-[11px] text-neutral-500 mb-2 font-mono">
+                    Pulley runner output · {active.name}
+                  </div>
+                  <pre className="text-[11px] font-mono text-neutral-300 bg-black/40 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">
+                    {active.pulley_log}
+                  </pre>
+                </>
+              )}
+              {active && !active.lifted_measured && (
+                <>
+                  <Separator className="my-4 bg-white/[0.06]" />
+                  <div className="text-xs text-neutral-400">
+                    No lift measurement for this function. Run{" "}
+                    <code className="text-neutral-300">make demo</code> to populate{" "}
+                    <code className="text-neutral-300">lift_results.json</code>
+                    {active.decision === "KEEP_NATIVE"
+                      ? " — this function is kept native by the tracer."
+                      : "."}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-          {activeTab !== "logs" && (
-            <EventLog logs={logs} />
-          )}
-        </div>
+        {/* Log */}
+        {log.length > 0 && (
+          <Card className="bg-[#121212] border-white/[0.08]">
+            <CardHeader>
+              <CardTitle className="text-sm">Event log</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="text-[11px] font-mono text-neutral-400 space-y-0.5 max-h-48 overflow-y-auto">
+                {log.map((l, i) => (
+                  <div key={i}>{l}</div>
+                ))}
+              </pre>
+            </CardContent>
+          </Card>
+        )}
+
+        <footer className="text-[11px] text-neutral-600 font-mono pb-8">
+          local demo · no auth · data stays on this machine · no synthetic metrics
+        </footer>
       </div>
     </div>
   );

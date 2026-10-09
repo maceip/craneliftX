@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -526,13 +527,16 @@ def lift_and_drop(
         print(" [DROP]  Cranelift -> Pulley interpreter")
         linked_wasm = link_ir(lifted_ll, symbol, "wasm32", work)
         wasm = build_wasm(linked_wasm, work)
+        wasm_size = os.path.getsize(wasm)
         if keep_wasm:
             shutil.copy(wasm, keep_wasm)
+        t0 = time.perf_counter()
         proc = subprocess.run(
             pulley_argv(wasm, symbol, arguments, expected, expected_outs),
             text=True,
             capture_output=True,
         )
+        runner_ms = (time.perf_counter() - t0) * 1000.0
         sys.stdout.write(proc.stdout or "")
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr or "")
@@ -554,6 +558,11 @@ def lift_and_drop(
             # window, as handed to remill. Kept so the visualization can show
             # precisely which bytes moved.
             "hexbytes": hexbytes,
+            # Real measurements only: destination artifact size and wall time
+            # of the Pulley runner process (not a synthetic cycle count).
+            "wasm_size": wasm_size,
+            "src_size": len(bytes.fromhex(hexbytes)),
+            "runner_ms": round(runner_ms, 3),
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)
