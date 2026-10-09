@@ -316,16 +316,21 @@ def runner_path() -> str:
     env = os.environ.get("CEREMONY_WASM")
     if env and os.path.isfile(env):
         return env
-    # Prefer an explicit build, then a debug build, then any cross-compiled
-    # release binary under target/ (e.g. target/x86_64-unknown-linux-gnu/release).
+    # The runner may be built in the crate-local target/ (local cargo build) or
+    # the workspace target/ (CI sets CARGO_TARGET_DIR=$ROOT/target and builds
+    # --release --target <triple>). Search both and prefer a release build.
     import glob
     candidates = [
         os.path.join(ROOT, "ceremony-wasm", "target", "debug", "ceremony-wasm"),
     ]
-    candidates += glob.glob(
-        os.path.join(ROOT, "ceremony-wasm", "target", "**", "ceremony-wasm"),
-        recursive=True,
+    found = (
+        glob.glob(os.path.join(ROOT, "target", "**", "ceremony-wasm"), recursive=True)
+        + glob.glob(
+            os.path.join(ROOT, "ceremony-wasm", "target", "**", "ceremony-wasm"),
+            recursive=True,
+        )
     )
+    candidates += sorted(found, key=lambda p: (0 if "release" in p else 1, p))
     for candidate in candidates:
         if os.path.isfile(candidate):
             return candidate

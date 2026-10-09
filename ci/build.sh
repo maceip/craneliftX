@@ -169,6 +169,15 @@ if [[ "${BUILD_LIFTERS:-0}" == "1" ]]; then
     fi
     echo "built ${dest}"
   done
+
+  # End-to-end lift gate. The ingest tracer (capstone) decides which functions
+  # to lift, then remill/anvill lift each one and it is validated on Pulley
+  # (and qemu-riscv64 when present). Any lift or validation failure makes this
+  # step fail, which fails the x86_64 build, which blocks the release in the
+  # publish job (needs: [inventory, build]). This is the hard CI gate for the
+  # native -> Pulley pipeline; it is not advisory.
+  echo "==> end-to-end lift gate: make demo"
+  make demo
 fi
 
 pin_args=()

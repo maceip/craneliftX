@@ -450,6 +450,14 @@ extractor was injecting mnemonic bytes.
   `liftmap/lift_drop_demo.py --plan-only` without the LLVM-20 toolchain) to see
   the hand-off.
 
+  The end-to-end lift is a **hard CI gate**: `ci/build.sh` runs `make demo` on
+  the x86_64 build (the only job that also builds the remill/anvill lifters),
+  and the release `publish` job `needs: [inventory, build]`, so a lift or
+  validation failure blocks the release. The CI toolchain image
+  (`docker/ci.Dockerfile`) carries the gate's extra dependencies: `capstone`
+  and the `protobuf` Python runtime (for the Anvill spec) plus
+  `lld-${LLVM_MAJOR}` (`wasm-ld`).
+
 ---
 
 ## 5. Security threat model

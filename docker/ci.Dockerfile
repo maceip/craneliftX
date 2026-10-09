@@ -47,14 +47,26 @@ RUN apt-get update \
         libprotobuf-dev \
         libz3-dev \
         llvm-${LLVM_MAJOR}-dev \
+        lld-${LLVM_MAJOR} \
         ninja-build \
         pkg-config \
         protobuf-compiler \
         python3 \
+        python3-pip \
         zlib1g-dev \
     && test -x /usr/lib/llvm-${LLVM_MAJOR}/bin/llvm-link \
     && test -x /usr/lib/llvm-${LLVM_MAJOR}/bin/clang++ \
+    && test -x /usr/bin/wasm-ld-${LLVM_MAJOR} \
     && rm -rf /var/lib/apt/lists/*
+
+# Python deps for the end-to-end lift gate (make demo):
+#   * capstone          -> the ingest tracer disassembler
+#   * protobuf (runtime) -> anvill_spec.py builds/parses the Anvill .pb that
+#                          anvill-decompile-spec consumes (the generated
+#                          specification_pb2.py imports google.protobuf).
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+        capstone \
+        "protobuf>=4.21,<5"
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
         | sh -s -- -y --default-toolchain 1.99.0 --profile minimal \
