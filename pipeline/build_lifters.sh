@@ -21,6 +21,31 @@ if [[ ! -f "$ANVILL_SRC/CMakeLists.txt" ]]; then
   exit 1
 fi
 
+# CI restores build/ from an older run. Remill writes the bitcode compiler
+# into Ninja rules and will not replace a CACHE entry, so a tree configured
+# with clang-18 keeps compiling with clang-18 after the image moves to LLVM 20.
+drop_other_llvm() {
+  local path hit
+  # 16, 17, 18, and 19. LLVM 20 does not match this pattern.
+  local other_llvm='llvm-(16|17|18|19)|clang-(16|17|18|19)'
+  for path in "$ROOT/build/remill" "$ROOT/build/remill-deps" "$ROOT/build/anvill"; do
+    [[ -d "$path" ]] || continue
+    hit="$(grep -R -l -E --include=CMakeCache.txt --include=build.ninja --include=rules.ninja \
+      "$other_llvm" "$path" 2>/dev/null | head -1 || true)"
+    if [[ -n "$hit" ]]; then
+      echo "removing $path (configured for an LLVM other than 20)"
+      rm -rf "$path" "$PREFIX"
+    fi
+  done
+  if [[ -x "$PREFIX/bin/remill-clang-20" ]]; then
+    if ! "$PREFIX/bin/remill-clang-20" --version | head -1 | grep -q 'version 20\.'; then
+      echo "installed remill-clang-20 is not LLVM 20; rebuilding"
+      rm -rf "$PREFIX" "$ROOT/build/remill" "$ROOT/build/remill-deps" "$ROOT/build/anvill"
+    fi
+  fi
+}
+drop_other_llvm
+
 shopt -s nullglob
 existing=("$PREFIX"/bin/remill-lift-20)
 anvill_bin="$PREFIX/bin/anvill-decompile-spec"
@@ -45,19 +70,29 @@ fi
 
 LLVM_PREFIX="$(llvm-config-20 --prefix)"
 LLVM_DIR="$(llvm-config-20 --cmakedir)"
+BC_CLANG="/usr/lib/llvm-20/bin/clang++"
+BC_LINK="/usr/lib/llvm-20/bin/llvm-link"
+if [[ ! -x "$BC_CLANG" || ! -x "$BC_LINK" ]]; then
+  echo "LLVM 20 bitcode tools are required: $BC_CLANG and $BC_LINK" >&2
+  exit 1
+fi
+if ! "$BC_CLANG" --version | head -1 | grep -q 'version 20\.'; then
+  echo "bitcode compiler is not LLVM 20: $("$BC_CLANG" --version | head -1)" >&2
+  exit 1
+fi
 DEPS_INSTALL="$ROOT/build/remill-deps/install"
 JOBS="${JOBS:-2}"
-# Host compiler matches the one LLVM the lifter links. The default c++ on
-# this image is clang 18, which is a different major.
+# Host compiler is the same LLVM 20 the lifter links. Do not fall back to
+# whatever c++ is first on PATH.
 export CC="${CC:-clang-20}"
 export CXX="${CXX:-clang++-20}"
 
 if (( need_remill )); then
   # Sleigh is linked into remill-lift. Build it in the dependency superbuild
   # (ENABLE_SLEIGH) and point remill at that install (REMILL_FETCH_SLEIGH=OFF),
-  # which is the configuration remill's own CI uses. A previous configure can
-  # cache CLANG_PATH=NOTFOUND; -UCLANG_PATH makes cmake search again once
-  # clang-20 is installed next to llvm-link.
+  # which is the configuration remill's own CI uses. -U drops a cached
+  # clang from another LLVM major; the -D flags pin the bitcode tools to
+  # LLVM 20, because set(CACHE) will not replace an existing entry.
   cmake -G Ninja -S "$SRC/dependencies" -B "$ROOT/build/remill-deps" \
     -DUSE_EXTERNAL_LLVM=ON \
     -DENABLE_SLEIGH=ON \
@@ -72,6 +107,11 @@ if (( need_remill )); then
     -DREMILL_ENABLE_TESTING=OFF \
     -DREMILL_FETCH_SLEIGH=OFF \
     -UCLANG_PATH \
+    -UCMAKE_BC_COMPILER \
+    -UCMAKE_BC_LINKER \
+    -DCLANG_PATH="$BC_CLANG" \
+    -DCMAKE_BC_COMPILER="$BC_CLANG" \
+    -DCMAKE_BC_LINKER="$BC_LINK" \
     -DCMAKE_PREFIX_PATH="$DEPS_INSTALL;$LLVM_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DLLVM_DIR="$LLVM_DIR"
@@ -119,4 +159,19 @@ EOF
   echo "installed anvill-decompile-spec into $PREFIX"
 fi
 
+if ! "$PREFIX/bin/remill-clang-20" --version | head -1 | grep -q 'version 20\.'; then
+  echo "remill-clang-20 is not LLVM 20" >&2
+  "$PREFIX/bin/remill-clang-20" --version | head -1 >&2 || true
+  exit 1
+fi
+if ! ldd "$PREFIX/bin/remill-lift-20" | grep -q 'libLLVM.so.20'; then
+  echo "remill-lift-20 is not linked to libLLVM.so.20" >&2
+  ldd "$PREFIX/bin/remill-lift-20" >&2 || true
+  exit 1
+fi
+if ! ldd "$PREFIX/bin/anvill-decompile-spec" | grep -q 'libLLVM.so.20'; then
+  echo "anvill-decompile-spec is not linked to libLLVM.so.20" >&2
+  ldd "$PREFIX/bin/anvill-decompile-spec" >&2 || true
+  exit 1
+fi
 ls -1 "$PREFIX"/bin
