@@ -44,17 +44,52 @@ if (( need_remill == 0 && need_anvill == 0 )); then
   exit 0
 fi
 
-if ! command -v "llvm-config-$LLVM_MAJOR" >/dev/null; then
-  echo "llvm-config-$LLVM_MAJOR is required (system LLVM $LLVM_MAJOR: apt install llvm-$LLVM_MAJOR-dev clang-$LLVM_MAJOR)" >&2
-  exit 1
-fi
+# Make the pinned LLVM discoverable on Linux (apt: suffixed tools under
+# /usr/lib/llvm-<n>) and macOS (Homebrew: unsuffixed tools under
+# /opt/homebrew/opt/llvm@<n>). We lay down a shim directory that exposes both
+# the suffixed names (llvm-config-<n>, clang-<n>, llc-<n>, ...) the rest of
+# this script and lift_drop.py expect and the unsuffixed names remill's
+# BCCompiler.cmake probes for. Nothing downstream changes.
+setup_llvm_shims() {
+  local major="$1"
+  local real_prefix=""
+  if command -v "llvm-config-${major}" >/dev/null; then
+    real_prefix="$(llvm-config-"${major}" --prefix)"
+  elif command -v "llvm-config" >/dev/null \
+       && [[ "$(llvm-config --version 2>/dev/null | cut -d. -f1)" == "$major" ]]; then
+    real_prefix="$(llvm-config --prefix)"
+  else
+    for hp in "/opt/homebrew/opt/llvm@${major}" "/usr/local/opt/llvm@${major}"; do
+      if [[ -x "$hp/bin/llvm-config" ]]; then real_prefix="$hp"; break; fi
+    done
+  fi
+  if [[ -z "$real_prefix" ]]; then
+    echo "LLVM ${major} not found. Linux: apt install llvm-${major}-dev clang-${major}; macOS: brew install llvm@${major}" >&2
+    exit 1
+  fi
+  local shim_dir="$ROOT/build/llvm-shims-${major}/bin"
+  mkdir -p "$shim_dir"
+  local bindir="$real_prefix/bin"
+  local tool
+  for tool in llvm-config clang clang++ llc llvm-link opt wasm-ld ld.lld; do
+    local real="$bindir/$tool"
+    [[ "$tool" == "wasm-ld" && ! -x "$real" ]] && real="$bindir/ld.lld"
+    [[ -x "$real" ]] || continue
+    ln -sf "$real" "$shim_dir/$tool"
+    ln -sf "$real" "$shim_dir/${tool}-${major}"
+  done
+  echo "$shim_dir"
+}
+
+LLVM_SHIMS="$(setup_llvm_shims "$LLVM_MAJOR")"
+export PATH="$LLVM_SHIMS:$PATH"
 
 LLVM_PREFIX="$(llvm-config-"$LLVM_MAJOR" --prefix)"
 LLVM_DIR="$(llvm-config-"$LLVM_MAJOR" --cmakedir)"
 DEPS_INSTALL="$ROOT/build/remill-deps/install"
 JOBS="${JOBS:-2}"
-# Host compiler matches the one LLVM the lifter links. The default c++ on
-# this image is clang 18, which is a different major.
+# Host compiler matches the one LLVM the lifter links. On macOS this is the
+# Homebrew llvm@<n> clang via the shims above.
 export CC="${CC:-clang-"$LLVM_MAJOR"}"
 export CXX="${CXX:-clang++-"$LLVM_MAJOR"}"
 
@@ -91,12 +126,16 @@ if (( need_anvill )); then
   # configure requires find_package(Z3 CONFIG).
   Z3_CMAKE="$ROOT/build/cmake"
   if [[ ! -f "$Z3_CMAKE/lib/cmake/Z3/Z3Config.cmake" ]]; then
-    z3_lib="$(pkg-config --variable=libdir z3 2>/dev/null || true)/libz3.so"
-    if [[ ! -f "$z3_lib" ]]; then
-      z3_lib="/usr/lib/x86_64-linux-gnu/libz3.so"
-    fi
-    if [[ ! -f "$z3_lib" ]]; then
-      echo "libz3 is required to configure anvill (apt install libz3-dev)" >&2
+    z3_lib=""
+    for cand in \
+        "$(pkg-config --variable=libdir z3 2>/dev/null)/libz3.so" \
+        "$(pkg-config --variable=libdir z3 2>/dev/null)/libz3.dylib" \
+        /usr/lib/x86_64-linux-gnu/libz3.so \
+        /opt/homebrew/lib/libz3.dylib ; do
+      if [[ -f "$cand" ]]; then z3_lib="$cand"; break; fi
+    done
+    if [[ -z "$z3_lib" ]]; then
+      echo "libz3 is required to configure anvill (apt install libz3-dev / brew install z3)" >&2
       exit 1
     fi
     z3_inc="$(pkg-config --variable=includedir z3 2>/dev/null || echo /usr/include)"

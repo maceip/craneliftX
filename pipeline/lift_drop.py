@@ -71,6 +71,15 @@ def llvm_major() -> str:
     return "20"
 
 
+# On a dev machine the pinned LLVM tools are exposed through the shim directory
+# build_lifters.sh writes (build/llvm-shims-<major>/bin), since macOS Homebrew
+# and CI name them differently. Prepend it to PATH so llvm_tool() resolves
+# llc-<major> / wasm-ld-<major> / ... regardless of who invokes this module.
+_SHIM_DIR = os.path.join(ROOT, "build", f"llvm-shims-{llvm_major()}", "bin")
+if os.path.isdir(_SHIM_DIR) and _SHIM_DIR not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _SHIM_DIR + os.pathsep + os.environ.get("PATH", "")
+
+
 def llvm_tool(base: str) -> str:
     """The drop uses the same LLVM major that remill-lift is linked to."""
     name = f"{base}-{llvm_major()}"
