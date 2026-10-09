@@ -5,8 +5,12 @@
 #   make demo      analyze sample_network, lift every selected function, validate
 #                  on Pulley. CI runs this as the hard gate on the x86_64 build:
 #                  a lift/validation failure blocks the release.
+#   make web       local UI: drop a binary and watch the static analysis run
+#                  (http://127.0.0.1:8765 by default)
 
-.PHONY: lifters runner demo sample
+.PHONY: lifters runner demo sample web
+
+PORT ?= 8765
 
 # Prefer the local uv venv when present: on macOS the system python3 has no
 # capstone/protobuf. Create it with:
@@ -28,3 +32,6 @@ sample:
 
 demo: sample runner
 	$(PYTHON) liftmap/lift_drop_demo.py
+
+web:
+	$(PYTHON) webapp/server.py --port $(PORT)

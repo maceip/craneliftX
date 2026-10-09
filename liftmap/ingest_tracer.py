@@ -398,32 +398,29 @@ def tarjan_dummy():  # placeholder to keep linter calm about recursion
     pass
 
 
-def main():
-    binary = sys.argv[1] if len(sys.argv) > 1 else "sample_network"
-    out_json = sys.argv[2] if len(sys.argv) > 2 else "lift_map.json"
-    if not os.path.exists(binary):
-        # try alongside the script
-        alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), binary)
-        if os.path.exists(alt):
-            binary = alt
-    if not os.path.exists(binary):
-        # reproducible: build from the committed sample_network.c
-        if not ensure_sample(binary):
-            print(f"error: binary not found and could not build: {binary}",
-                  file=sys.stderr)
-            return 2
+def analyze_binary(binary: str, on_event=None) -> dict:
+    """Run the full static analysis, emitting progress events as it goes.
 
-    print(f"[ingest_tracer] binary : {binary}")
+    `on_event(stage, payload)` is invoked for each step so a caller (the web
+    app) can animate the analysis live instead of replaying a finished result.
+
+    The lift/drop decision logic lives *only* here, so the CLI and the web UI
+    can never disagree about which functions get lifted.
+    """
+    def emit(stage: str, **payload) -> None:
+        if on_event:
+            on_event(stage, payload)
+
+    emit("load", binary=os.path.abspath(binary))
     symbols, insns = parse_objdump_disasm(binary)
     relocs = parse_text_relocs(binary)
-    print(f"[ingest_tracer] symbols: {len(symbols)}   instructions: {len(insns)}")
+    emit("disassemble", symbols=len(symbols), instructions=len(insns))
 
     # function boundaries from sorted text symbols
     text_syms = [(a, n) for a, n in symbols if re.match(r"^_?[a-zA-Z]", n)]
     text_syms.sort(key=lambda x: x[0])
     if not text_syms:
-        print("error: no symbols found", file=sys.stderr)
-        return 2
+        raise SystemExit("error: no symbols found")
 
     funcs = []
     for i, (addr, name) in enumerate(text_syms):
@@ -436,6 +433,7 @@ def main():
         finfo = analyze_function(name, body, text_syms, relocs)
         if finfo:
             funcs.append(finfo)
+            emit("function", **finfo)
 
     # ---- build call graph + frequency (BFS from entry roots) ----
     cg = {f["name"]: set(f["calls"]) for f in funcs}
@@ -464,6 +462,8 @@ def main():
         else:
             f["frequency_score"] = [1.0, 0.7, 0.5, 0.3, 0.2][min(d, 4)]
             f["reachable"] = True
+    emit("callgraph", roots=roots,
+         reachable=sum(1 for f in funcs if f.get("reachable")))
 
     # ---- final lift/drop decision (performance-oriented, rule-based) ----
     # We LIFT frequently-executed NETWORK code that is NOT a super-tight loop,
@@ -506,6 +506,11 @@ def main():
         f["decision"] = decision
         f["reason"] = "; ".join(reasons)
         (lift_names if decision == "LIFT" else keep_names).append(f["name"])
+        emit("decision", name=f["name"], decision=decision, reason=f["reason"],
+             lift_score=f["lift_score"], loop_density=f["loop_density"],
+             call_fraction=f["call_fraction"], network_score=f["network_score"],
+             frequency_score=f["frequency_score"],
+             liftable_now=f["liftable_now"])
 
     funcs.sort(key=lambda f: (-f["lift_score"], f["name"]))
     report = {
@@ -515,11 +520,38 @@ def main():
         "keep_native": keep_names,
         "functions": funcs,
     }
+    emit("done", **report)
+    return report
+
+
+def main():
+    binary = sys.argv[1] if len(sys.argv) > 1 else "sample_network"
+    out_json = sys.argv[2] if len(sys.argv) > 2 else "lift_map.json"
+    if not os.path.exists(binary):
+        # try alongside the script
+        alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), binary)
+        if os.path.exists(alt):
+            binary = alt
+    if not os.path.exists(binary):
+        # reproducible: build from the committed sample_network.c
+        if not ensure_sample(binary):
+            print(f"error: binary not found and could not build: {binary}",
+                  file=sys.stderr)
+            return 2
+
+    def on_event(stage: str, payload) -> None:
+        if stage == "disassemble":
+            print(f"[ingest_tracer] symbols: {payload['symbols']}   "
+                  f"instructions: {payload['instructions']}")
+        elif stage == "done":
+            print(f"[ingest_tracer] LIFT        : {payload['lift']}")
+            print(f"[ingest_tracer] KEEP_NATIVE : {payload['keep_native']}")
+
+    print(f"[ingest_tracer] binary : {binary}")
+    report = analyze_binary(binary, on_event=on_event)
     with open(out_json, "w") as fh:
         json.dump(report, fh, indent=2)
     print(f"[ingest_tracer] wrote {out_json}")
-    print(f"[ingest_tracer] LIFT        : {lift_names}")
-    print(f"[ingest_tracer] KEEP_NATIVE : {keep_names}")
     return 0
 
 
