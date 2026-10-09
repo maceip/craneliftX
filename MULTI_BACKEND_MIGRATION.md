@@ -458,6 +458,22 @@ extractor was injecting mnemonic bytes.
   and the `protobuf` Python runtime (for the Anvill spec) plus
   `lld-${LLVM_MAJOR}` (`wasm-ld`).
 
+  ### Keyed lift placement (anti-predictability)
+  The tracer decides which functions are *eligible* (performance-safe). Which
+  of those actually move onto the diverse ISA is decided separately by
+  `liftmap/placement.py`, and can depend on a per-deployment secret
+  (`$LIFT_KEY`, or a `.lift_key` file). With no key the placement is
+  deterministic -- every eligible function is lifted -- which is what CI runs,
+  so the gate stays reproducible. With a key, an HMAC-SHA256-based selection
+  picks a pseudo-random subset of the eligible pool; measured over 400 random
+  keys on the sample, all seven non-empty subsets occur, so an attacker holding
+  the binary but not the key cannot predict which functions run lifted.
+
+  Crucially the key only chooses among functions the tracer already approved,
+  so a key can never move a tight loop or orchestration glue onto the slow
+  path; `lift_and_drop` re-checks the gates as defense-in-depth regardless. Only
+  a non-secret key *fingerprint* is ever recorded (in `lift_plan.json`).
+
 ---
 
 ## 5. Security threat model

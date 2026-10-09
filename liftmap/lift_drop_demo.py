@@ -17,9 +17,13 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import placement  # noqa: E402  (keyed lift placement)
+
 OBJ = os.path.join(HERE, "sample_network.o")
 O2PULLEY = os.path.join(REPO, "ceremony", "o2pulley.sh")
 JSON = os.path.join(HERE, "lift_map.json")
+PLAN = os.path.join(HERE, "lift_plan.json")
 
 # Reference semantics for the sample. Names are compared with the leading
 # underscore stripped so the same cases work for ELF and Mach-O symbols.
@@ -98,6 +102,22 @@ def main():
         ensure_sample(OBJ)
     report = json.load(open(JSON))
 
+    # Final placement. The tracer decided which functions are ELIGIBLE
+    # (performance-safe); placement decides which of those actually move, using
+    # a per-deployment key when one is configured. No key -> deterministic
+    # (every eligible function), which is what CI uses.
+    lift_key = placement.load_key()
+    lift_plan = placement.plan(report, lift_key)
+    with open(PLAN, "w") as plan_fh:
+        json.dump(lift_plan, plan_fh, indent=2)
+    selected_norms = {norm_name(n) for n in lift_plan["selected"]}
+
+    print()
+    print(f"  PLACEMENT  : mode={lift_plan['mode']} "
+          f"(key {lift_plan.get('key_fingerprint', 'none')})")
+    print(f"    selected     : {lift_plan['selected']}")
+    print(f"    held NATIVE  : {lift_plan['held_native']}")
+
     print("=" * 74)
     print(" MULTI LIFT-AND-DROP  --  ingest_tracer analysis of",
           os.path.basename(report["binary"]))
@@ -125,6 +145,8 @@ def main():
     for f in sorted(report["functions"], key=lambda x: -x["lift_score"]):
         if f["decision"] != "LIFT" or not f.get("liftable_now"):
             continue
+        if norm_name(f["name"]) not in selected_norms:
+            continue  # keyed placement kept this one native
         key = norm_name(f["name"])
         case = CASES.get(key)
         if case is None:
