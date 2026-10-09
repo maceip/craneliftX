@@ -74,14 +74,14 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-0.5">
             <CardTitle className="text-sm font-bold text-neutral-900">
-              Source vs destination size
+              Size before and after the lift
             </CardTitle>
             <Badge variant="outline" className="text-[10px] font-mono border-black/15 text-neutral-600">
               measured bytes
             </Badge>
           </div>
           <CardDescription className="text-xs text-neutral-500">
-            x86 machine-code window vs Pulley wasm artifact. Blank bars mean not measured — no estimates.
+            Native code vs lifted wasm. Empty bars were not measured.
           </CardDescription>
         </div>
 
@@ -193,7 +193,7 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
         <div className="md:col-span-5 flex flex-col justify-between gap-3 bg-neutral-900 text-white p-4 rounded-xl shadow-md border border-neutral-800">
           <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
             <span className="font-mono text-xs font-bold truncate text-white">
-              {activeItem ? activeItem.name : "Select Routine"}
+              {activeItem ? activeItem.name : "Pick a function"}
             </span>
             <Badge
               variant={activeItem?.isLifted ? "default" : "secondary"}
@@ -205,7 +205,7 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
 
           <div className="grid grid-cols-2 gap-3 text-xs font-mono">
             <div>
-              <span className="text-[10px] text-neutral-400 block">SOURCE x86</span>
+              <span className="text-[10px] text-neutral-400 block">NATIVE</span>
               <span className="text-base font-bold text-white">
                 {activeItem ? `${activeItem.srcSize} B` : "---"}
               </span>

@@ -51,14 +51,14 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-0.5">
             <CardTitle className="text-sm font-bold text-neutral-900">
-              Virtual Memory Map &amp; Cross-ISA Lift Chamber
+              Function map
             </CardTitle>
             <Badge variant="outline" className="text-[10px] font-mono border-black/15 text-neutral-600">
-              x86_64 CISC &rarr; Pulley VM
+              x86_64 → Pulley
             </Badge>
           </div>
           <CardDescription className="text-xs text-neutral-500">
-            Function extents in host object space. Orange = selected for lift; gray = kept native. Layout is tracer data, not a mock plane.
+            Each block is a function in the object file. Orange is selected to lift; gray stays native.
           </CardDescription>
         </div>
 
@@ -75,7 +75,7 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
         {/* Left Side: Host x86 Virtual Memory Plane */}
         <div className="md:col-span-5 flex flex-col gap-2 bg-[#F5F5F7] p-4 rounded-xl border border-black/[0.05]">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="font-bold text-neutral-800">Host Virtual Memory (x86_64)</span>
+            <span className="font-bold text-neutral-800">Object file (x86_64)</span>
             <span className="text-[10px] text-neutral-400">Base: 0x00000000</span>
           </div>
 
@@ -180,7 +180,7 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
 
             {/* Micro Badge Under Conduit */}
             <span className="text-[10px] font-mono font-bold text-[#FC4C01] bg-[#FC4C01]/10 px-2 py-0.5 rounded-full border border-[#FC4C01]/20 -mt-8">
-              {activeSegment?.decision === "LIFT" ? "LIFT PATH" : "NATIVE"}
+              {activeSegment?.decision === "LIFT" ? "LIFT" : "NATIVE"}
             </span>
           </div>
         </div>
@@ -213,7 +213,7 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
 
             <div className="space-y-1 font-mono text-[11px] text-neutral-400 pt-1">
               <div className="flex justify-between">
-                <span>Extent:</span>
+                <span>Size:</span>
                 <span className="text-white font-medium">
                   {activeSegment
                     ? `${activeSegment.size_bytes}B · ${activeSegment.n_insn} insn`
@@ -247,8 +247,8 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
           </div>
 
           <div className="flex justify-between text-[10px] font-mono text-neutral-500 pt-1">
-            <span>extents from Capstone</span>
-            <span>not a simulated sandbox</span>
+            <span>from disassembly</span>
+            <span>Capstone</span>
           </div>
         </div>
 

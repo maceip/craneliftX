@@ -261,15 +261,15 @@ export const App: React.FC = () => {
             variant="outline"
             className="text-[#FC4C01] border-[#FC4C01]/30 bg-[#FC4C01]/10"
           >
-            Binary Lift &amp; Drop Engine
+            Binary lifting
           </Badge>
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-neutral-900 max-w-2xl leading-tight">
-            Where in the binary it was lifted.
+            See which functions get lifted to Pulley
           </h1>
           <p className="text-neutral-500 text-sm sm:text-base max-w-lg font-normal leading-relaxed">
-            Static placement over the object, then real source vs destination
-            measurements from <code>make demo</code>. No estimated cycles. Blank
-            means not measured.
+            Disassemble the object, pick functions to lift, then show real sizes
+            and run times from <code>make demo</code>. Empty cells mean nothing
+            was measured.
           </p>
         </section>
 
@@ -308,11 +308,11 @@ export const App: React.FC = () => {
             <CardHeader className="p-0 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <CardTitle className="text-base font-semibold text-neutral-900">
-                  Binary memory address space (0x0000 — 0x
+                  Function layout (0x0000 — 0x
                   {totalAddressSpan.toString(16).toUpperCase().padStart(4, "0")})
                 </CardTitle>
                 <CardDescription className="text-xs text-neutral-500">
-                  Function extents from Capstone. Width ∝ size_bytes.
+                  Addresses from disassembly. Bar width is size in bytes.
                 </CardDescription>
               </div>
               <div className="flex items-center gap-4 text-xs font-medium">
@@ -462,7 +462,7 @@ export const App: React.FC = () => {
                       signature <b>{activeFunction.signature}</b>
                     </div>
                     <div>
-                      decision reason
+                      reason
                       <div className="text-neutral-500 mt-0.5">
                         {activeFunction.reason}
                       </div>
@@ -485,7 +485,7 @@ export const App: React.FC = () => {
                   </div>
                   <div className="space-y-1 font-mono text-[11px] text-neutral-600">
                     <div>
-                      runner wall <b>{fmtMs(activeFunction.runner_ms)}</b>
+                      run time <b>{fmtMs(activeFunction.runner_ms)}</b>
                     </div>
                     <div>
                       expected <b>{fmt(activeFunction.expected)}</b>
@@ -506,7 +506,7 @@ export const App: React.FC = () => {
               {activeFunction.pulley_log && (
                 <div className="mt-6">
                   <div className="text-[11px] font-mono font-medium text-neutral-400 mb-1.5">
-                    PULLEY RUNNER LOG (verbatim)
+                    PULLEY OUTPUT
                   </div>
                   <pre className="p-3 bg-[#F5F5F7] rounded-xl text-xs font-mono text-neutral-800 overflow-x-auto border border-black/[0.04] whitespace-pre-wrap">
                     {activeFunction.pulley_log}
@@ -517,8 +517,8 @@ export const App: React.FC = () => {
               {!activeFunction.lifted_measured && (
                 <div className="mt-4 text-xs text-neutral-500">
                   {activeFunction.decision === "KEEP_NATIVE"
-                    ? "Kept native by the tracer — no lift measurement."
-                    : "Lift not executed in this session. Run `make demo` to populate lift_results.json."}
+                    ? "Not lifted — this function stays on the host CPU."
+                    : "No run saved. Run `make demo` first."}
                 </div>
               )}
             </CardContent>
@@ -526,8 +526,8 @@ export const App: React.FC = () => {
         )}
 
         <footer className="flex flex-col sm:flex-row items-center justify-between text-xs text-neutral-400 font-mono pt-4 border-t border-black/[0.05] gap-2">
-          <span>CraneliftX · live static analysis · measured lifts only</span>
-          <span>no synthetic cycles · blank = not measured</span>
+          <span>CraneliftX · local analysis</span>
+          <span>measured numbers only</span>
         </footer>
       </div>
     </div>
