@@ -39,6 +39,7 @@ RUN apt-get update \
         file \
         gcc-aarch64-linux-gnu \
         gcc-riscv64-linux-gnu \
+        qemu-user-static \
         git \
         libc6-dev \
         libc6-dev-arm64-cross \

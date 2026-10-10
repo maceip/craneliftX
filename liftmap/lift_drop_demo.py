@@ -34,6 +34,14 @@ def _ip_id_hash(a, b):
 
 
 CASES = {
+    "clamp_val": {
+        "arguments": [15, 10, 20],
+        "expected": 15,
+    },
+    "abs_diff": {
+        "arguments": [10, 3],
+        "expected": 7,
+    },
     "tcp_window_scaled": {
         "arguments": [100, 50],
         "expected": 150,
@@ -87,20 +95,24 @@ def main():
     ap.add_argument("--plan-only", action="store_true",
                     help="print the lift plan (exact offsets/signature/metrics) "
                          "and guardrail verdict without running remill/LLVM")
+    ap.add_argument("--object", default=OBJ,
+                    help="path to object to analyze and lift (default: sample_network.o)")
     ns = ap.parse_args()
+
+    target_obj = os.path.abspath(ns.object)
+    if not os.path.exists(target_obj):
+        ensure_sample(target_obj)
 
     # Always re-analyze so a stale lift_map.json cannot disagree with the object.
     r = subprocess.run(
         [sys.executable, os.path.join(HERE, "ingest_tracer.py"),
-         OBJ, JSON],
+         target_obj, JSON],
         capture_output=True, text=True,
     )
     if r.returncode != 0 or not os.path.exists(JSON):
         print("failed to run ingest_tracer.py:", file=sys.stderr)
         print(r.stderr.strip(), file=sys.stderr)
         return 2
-    if not os.path.exists(OBJ):
-        ensure_sample(OBJ)
     report = json.load(open(JSON))
 
     # Final placement. The tracer decided which functions are ELIGIBLE
@@ -193,7 +205,7 @@ def main():
         print(f"  {f['reason']}")
         try:
             res = lift_and_drop(
-                obj=OBJ,
+                obj=target_obj,
                 hexbytes=None,
                 symbol=f["name"],
                 signature=f["signature"],
@@ -223,11 +235,13 @@ def main():
             "hexbytes": res.get("hexbytes", ""),
             "src_size": res.get("src_size"),
             "wasm_size": res.get("wasm_size"),
+            "riscv_size": res.get("riscv_size"),
             "runner_ms": res.get("runner_ms"),
             "expected": case["expected"],
             "expected_outs": case.get("expected_outs"),
             "pulley": res.get("pulley", ""),
             "qemu": res.get("qemu", ""),
+            "riscv_passed": res.get("riscv_passed"),
             "passed": True,
         })
 
@@ -250,13 +264,25 @@ def main():
     print(f"    * lift-eligible        : {report['lift']}")
     print(f"    * kept NATIVE          : {report['keep_native']}")
 
-    # Machine-readable outcome for liftmap/visualize.py.
+    # Machine-readable outcome for liftmap/visualize.py and webapp/server.py.
+    existing_results = {}
+    if os.path.exists(RESULTS):
+        try:
+            with open(RESULTS) as prev_fh:
+                prev_data = json.load(prev_fh)
+                for r in prev_data.get("results", []):
+                    existing_results[r["name"]] = r
+        except Exception:
+            pass
+    for r in results:
+        existing_results[r["name"]] = r
+
     with open(RESULTS, "w") as res_fh:
         json.dump(
             {
                 "binary": report.get("binary"),
                 "placement": lift_plan,
-                "results": results,
+                "results": list(existing_results.values()),
                 "keep_native": report.get("keep_native", []),
             },
             res_fh,

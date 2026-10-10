@@ -35,6 +35,8 @@ interface FunctionRow {
   src_size: number;
   src_insn: number;
   wasm_size: number | null;
+  riscv_size: number | null;
+  riscv_passed: boolean | null;
   runner_ms: number | null;
   expected: number | null;
   observed: number | null;
@@ -84,9 +86,10 @@ export const App: React.FC = () => {
   const [selectedFunctionName, setSelectedFunctionName] = useState<string | null>(
     null
   );
+  const [selectedSample, setSelectedSample] = useState<"sample_network" | "sample_basic">("sample_network");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const startJob = useCallback(async (file?: File) => {
+  const startJob = useCallback(async (file?: File, sampleId?: "sample_network" | "sample_basic") => {
     setIsRunning(true);
     setError(null);
     setRows([]);
@@ -94,6 +97,11 @@ export const App: React.FC = () => {
     setMeasuredCount(0);
     setSelectedFunctionName(null);
     setStageLabel("starting");
+
+    const targetSample = sampleId || selectedSample;
+    if (sampleId) {
+      setSelectedSample(sampleId);
+    }
 
     try {
       let id: string;
@@ -111,7 +119,7 @@ export const App: React.FC = () => {
         name = data.name;
         bytes = data.bytes;
       } else {
-        const res = await fetch("/api/sample", { method: "POST" });
+        const res = await fetch(`/api/sample?sample=${targetSample}`, { method: "POST" });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "sample failed");
         id = data.id;
@@ -179,6 +187,7 @@ export const App: React.FC = () => {
     addr: fn.addr,
     srcSize: fn.src_size ?? fn.size_bytes,
     wasmSize: fn.wasm_size,
+    riscvSize: fn.riscv_size,
     runnerMs: fn.runner_ms,
     isLifted: fn.decision === "LIFT",
     measured: fn.lifted_measured,
@@ -195,33 +204,22 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F5F5F7] text-[#1c1c1e] flex flex-col items-center py-8 sm:py-12 md:py-16 px-4 sm:px-6">
-      <input
-        type="file"
-        ref={fileInputRef}
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) startJob(f);
-          e.target.value = "";
-        }}
-      />
-
       <div className="w-full max-w-5xl flex flex-col gap-10 md:gap-12">
         {/* Topbar */}
         <header className="flex items-center justify-between rounded-full border border-black/[0.06] bg-white/90 backdrop-blur-md px-5 py-2.5 shadow-sm">
           <div className="flex items-center gap-3">
             <Avatar className="size-8">
               <AvatarFallback className="bg-neutral-900 text-white font-bold text-xs">
-                CX
+                M-ISA
               </AvatarFallback>
             </Avatar>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm tracking-tight text-neutral-900">
-                CraneliftX
+                HeteroSec Drop
               </span>
-              <span className="size-1.5 rounded-full bg-[#FC4C01]" />
+              <span className="size-1.5 rounded-full bg-[#0284c7]" />
               <span className="text-xs text-neutral-500 font-mono">
-                {binaryName}
+                {binaryName} (ELF x86_64)
               </span>
             </div>
           </div>
@@ -233,44 +231,95 @@ export const App: React.FC = () => {
               {isRunning
                 ? stageLabel || "working"
                 : rows.length
-                  ? `${rows.length} fn · ${measuredCount} measured`
+                  ? `${rows.length} fn · ${measuredCount} lowered`
                   : "idle"}
             </Badge>
-            <Button
+            <Badge
               variant="outline"
-              size="sm"
-              className="text-xs"
-              onClick={() => fileInputRef.current?.click()}
+              className="text-[11px] font-mono border-[#0284c7]/20 text-[#0284c7] bg-[#0284c7]/5 hidden sm:inline-flex"
             >
-              Upload
-            </Button>
+              Targets: RISC-V 64 + Pulley
+            </Badge>
             <Button
               size="sm"
-              className="text-xs bg-[#FC4C01] text-white hover:bg-[#e04300]"
+              className="text-xs bg-[#0284c7] text-white hover:bg-[#0369a1]"
               disabled={isRunning}
               onClick={() => startJob()}
             >
-              {isRunning ? "Analyzing…" : "Analyze sample"}
+              {isRunning ? "Lowering…" : "Run Multi-ISA Demo"}
             </Button>
           </div>
         </header>
 
-        {/* Hero — capability copy only */}
-        <section className="flex flex-col items-center text-center gap-4 py-2">
+        {/* Hero */}
+        <section className="flex flex-col items-center text-center gap-3 py-2">
           <Badge
             variant="outline"
-            className="text-[#FC4C01] border-[#FC4C01]/30 bg-[#FC4C01]/10"
+            className="text-[#0284c7] border-[#0284c7]/30 bg-[#0284c7]/10"
           >
-            Binary lifting
+            Multi-ISA Lowering
           </Badge>
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-neutral-900 max-w-2xl leading-tight">
-            See which functions get lifted to Pulley
+            Lower x86_64 to RISC-V 64 &amp; Pulley
           </h1>
           <p className="text-neutral-500 text-sm sm:text-base max-w-lg font-normal leading-relaxed">
-            Disassemble the object, pick functions to lift, then show real sizes
-            and run times from <code>make demo</code>. Empty cells mean nothing
-            was measured.
+            Lift x86_64 machine code via Remill &amp; Anvill into LLVM IR, then
+            compile to 64-bit RISC-V ELF and Pulley bytecode. RISC-V runs under
+            qemu-user only when that toolchain is installed; otherwise the UI
+            reports compile-only.
           </p>
+
+          {/* Sample Selection: Scaled Difficulty */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
+            <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
+              Demonstration Binary:
+            </span>
+            <div className="inline-flex rounded-xl p-1 bg-black/[0.04] border border-black/[0.06] gap-1">
+              <button
+                disabled={isRunning}
+                onClick={() => startJob(undefined, "sample_basic")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  selectedSample === "sample_basic"
+                    ? "bg-white text-neutral-900 shadow-sm border border-black/5"
+                    : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                Level 1: Basic ALU (sample_basic.o)
+              </button>
+              <button
+                disabled={isRunning}
+                onClick={() => startJob(undefined, "sample_network")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  selectedSample === "sample_network"
+                    ? "bg-white text-neutral-900 shadow-sm border border-black/5"
+                    : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                Level 2: Network Data-Plane (sample_network.o)
+              </button>
+            </div>
+          </div>
+
+          {/* Architecture & Capability Frontier Note */}
+          <div className="w-full max-w-2xl rounded-2xl border border-black/[0.06] bg-[#F5F5F7] p-3 text-left mt-1 text-xs text-neutral-600">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-semibold text-neutral-900 text-xs flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-[#0284c7]" />
+                Capability Frontier: Leaf Functions vs. Network Servers
+              </span>
+              <Badge variant="outline" className="text-[10px] font-mono text-neutral-500">
+                Placement Model
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] leading-relaxed mt-1 text-neutral-600">
+              <div>
+                <b className="text-neutral-800">What is lowered:</b> Self-contained leaf routines (Level 1 ALU) and untrusted data-plane packet/protocol parsers (Level 2).
+              </div>
+              <div>
+                <b className="text-neutral-800">Why not Caddy directly?</b> Caddy is a 43MB Go binary with goroutine runtimes and epoll loops. Pulley has no OS kernel. The heterogeneous model keeps socket loops native and isolates parsers.
+              </div>
+            </div>
+          </div>
         </section>
 
         {error && (
@@ -443,12 +492,12 @@ export const App: React.FC = () => {
             </CardHeader>
 
             <CardContent className="p-0 pt-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Source */}
                 <div className="rounded-2xl border border-black/[0.06] bg-[#F5F5F7] p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-semibold text-neutral-800">
-                      Source · x86_64 window
+                      Source · x86_64 CISC
                     </span>
                     <Badge variant="outline" className="text-[10px] font-mono">
                       {fmt(activeFunction.src_size)} B
@@ -463,18 +512,51 @@ export const App: React.FC = () => {
                     </div>
                     <div>
                       reason
-                      <div className="text-neutral-500 mt-0.5">
+                      <div className="text-neutral-500 mt-0.5 text-[10px]">
                         {activeFunction.reason}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Destination */}
-                <div className="rounded-2xl border border-black/[0.06] bg-[#F5F5F7] p-4">
+                {/* Target 1: RISC-V 64 */}
+                <div className="rounded-2xl border border-[#0284c7]/20 bg-[#0284c7]/5 p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-neutral-800">
-                      Destination · Pulley wasm
+                    <span className="text-xs font-semibold text-[#0284c7]">
+                      Target 1 · RISC-V 64 (QEMU)
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-mono text-[#0284c7] border-[#0284c7]/30"
+                    >
+                      {fmt(activeFunction.riscv_size)} B
+                    </Badge>
+                  </div>
+                  <div className="space-y-1 font-mono text-[11px] text-neutral-700">
+                    <div>
+                      format <b>ELF 64-bit LSB</b>
+                    </div>
+                    <div>
+                      ABI <b>lp64d (double float)</b>
+                    </div>
+                    <div>
+                      execution{" "}
+                      <b>
+                        {activeFunction.qemu_log?.includes("QEMU ")
+                          ? "QEMU verified"
+                          : activeFunction.qemu_log?.includes("SKIP")
+                            ? "not run (no qemu)"
+                            : activeFunction.qemu_log || "ELF compiled only"}
+                      </b>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Target 2: Pulley VM */}
+                <div className="rounded-2xl border border-[#FC4C01]/20 bg-[#FC4C01]/5 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-[#FC4C01]">
+                      Target 2 · Pulley64 VM
                     </span>
                     <Badge
                       variant="outline"
@@ -483,7 +565,7 @@ export const App: React.FC = () => {
                       {fmt(activeFunction.wasm_size)} B
                     </Badge>
                   </div>
-                  <div className="space-y-1 font-mono text-[11px] text-neutral-600">
+                  <div className="space-y-1 font-mono text-[11px] text-neutral-700">
                     <div>
                       run time <b>{fmtMs(activeFunction.runner_ms)}</b>
                     </div>
@@ -493,26 +575,36 @@ export const App: React.FC = () => {
                     <div>
                       observed <b>{fmt(activeFunction.observed)}</b>
                     </div>
-                    {activeFunction.expected_outs && (
-                      <div>
-                        outs{" "}
-                        <b>{activeFunction.expected_outs.join(", ")}</b>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
 
-              {activeFunction.pulley_log && (
-                <div className="mt-6">
-                  <div className="text-[11px] font-mono font-medium text-neutral-400 mb-1.5">
-                    PULLEY OUTPUT
+              {/* Multi-ISA Output Logs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                {activeFunction.qemu_log && (
+                  <div>
+                    <div className="text-[11px] font-mono font-medium text-neutral-400 mb-1.5 flex items-center justify-between">
+                      <span>RISC-V 64 QEMU OUTPUT</span>
+                      <span className="text-[#0284c7] text-[10px]">qemu-riscv64</span>
+                    </div>
+                    <pre className="p-3 bg-[#F5F5F7] rounded-xl text-xs font-mono text-neutral-800 overflow-x-auto border border-black/[0.04] whitespace-pre-wrap min-h-[80px]">
+                      {activeFunction.qemu_log}
+                    </pre>
                   </div>
-                  <pre className="p-3 bg-[#F5F5F7] rounded-xl text-xs font-mono text-neutral-800 overflow-x-auto border border-black/[0.04] whitespace-pre-wrap">
-                    {activeFunction.pulley_log}
-                  </pre>
-                </div>
-              )}
+                )}
+
+                {activeFunction.pulley_log && (
+                  <div>
+                    <div className="text-[11px] font-mono font-medium text-neutral-400 mb-1.5 flex items-center justify-between">
+                      <span>PULLEY INTERPRETER OUTPUT</span>
+                      <span className="text-[#FC4C01] text-[10px]">pulley64</span>
+                    </div>
+                    <pre className="p-3 bg-[#F5F5F7] rounded-xl text-xs font-mono text-neutral-800 overflow-x-auto border border-black/[0.04] whitespace-pre-wrap min-h-[80px]">
+                      {activeFunction.pulley_log}
+                    </pre>
+                  </div>
+                )}
+              </div>
 
               {!activeFunction.lifted_measured && (
                 <div className="mt-4 text-xs text-neutral-500">

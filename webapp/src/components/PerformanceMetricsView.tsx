@@ -12,6 +12,8 @@ export interface MetricItem {
   srcSize: number;
   /** Destination Pulley wasm bytes — null if not lifted/measured. */
   wasmSize: number | null;
+  /** Destination RISC-V 64 ELF bytes — null if not compiled/measured. */
+  riscvSize: number | null;
   /** Wall time of the Pulley runner process in ms — null if not measured. */
   runnerMs: number | null;
   isLifted: boolean;
@@ -51,7 +53,7 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
 
   const maxLatency = useMemo(() => {
     const maxVal = Math.max(
-      ...metrics.map((d) => Math.max(d.srcSize || 0, d.wasmSize || 0)),
+      ...metrics.map((d) => Math.max(d.srcSize || 0, d.wasmSize || 0, d.riscvSize || 0)),
       1
     );
     return maxVal * 1.15;
@@ -74,14 +76,14 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-0.5">
             <CardTitle className="text-sm font-bold text-neutral-900">
-              Size before and after the lift
+              Cross-ISA lowered binary sizes
             </CardTitle>
             <Badge variant="outline" className="text-[10px] font-mono border-black/15 text-neutral-600">
               measured bytes
             </Badge>
           </div>
           <CardDescription className="text-xs text-neutral-500">
-            Native code vs lifted wasm. Empty bars were not measured.
+            Native x86_64 source vs lowered RISC-V 64 ELF and Pulley Wasm.
           </CardDescription>
         </div>
 
@@ -89,11 +91,15 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
         <div className="flex items-center gap-4 text-xs font-mono font-medium">
           <div className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm bg-neutral-900" />
-            <span className="text-neutral-700">Source (B)</span>
+            <span className="text-neutral-700">x86_64</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="size-2.5 rounded-sm bg-[#0284c7]" />
+            <span className="text-[#0284c7]">RISC-V</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm bg-[#FC4C01]" />
-            <span className="text-[#FC4C01]">Wasm (B)</span>
+            <span className="text-[#FC4C01]">Pulley</span>
           </div>
         </div>
       </CardHeader>
@@ -104,16 +110,22 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
         <div className="md:col-span-7 flex flex-col items-center justify-center bg-[#F5F5F7] p-3 rounded-xl border border-black/[0.04]">
           <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
             <LinearGradient id="visx-native-grad" from="#18181b" to="#27272a" />
+            <LinearGradient id="visx-riscv-grad" from="#0284c7" to="#38bdf8" />
             <LinearGradient id="visx-pulley-grad" from="#FC4C01" to="#FF6B2C" />
 
             <Group left={margin.left} top={margin.top}>
               {metrics.map((d) => {
                 const groupX = xScale(d.name) ?? 0;
                 const bandWidth = xScale.bandwidth();
-                const barWidth = bandWidth / 2 - 1.5;
+                const barWidth = Math.max(3, (bandWidth - 6) / 3);
                 const isSelected = selectedFunction === d.name;
 
                 const srcH = yMax - (yScale(d.srcSize || 0) ?? 0);
+                const riscvVal = d.riscvSize;
+                const riscvH =
+                  riscvVal === null || riscvVal === undefined
+                    ? 0
+                    : yMax - (yScale(riscvVal) ?? 0);
                 const wasmVal = d.wasmSize;
                 const wasmH =
                   wasmVal === null || wasmVal === undefined
@@ -135,15 +147,15 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
                         width={bandWidth + 8}
                         height={yMax + 10}
                         rx={6}
-                        fill="#FC4C01"
+                        fill="#0284c7"
                         fillOpacity={0.08}
-                        stroke="#FC4C01"
+                        stroke="#0284c7"
                         strokeWidth={1}
                         strokeDasharray="2 2"
                       />
                     )}
 
-                    {/* Source bytes */}
+                    {/* Source x86 bytes */}
                     <Bar
                       x={0}
                       y={yMax - srcH}
@@ -153,9 +165,27 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
                       rx={2}
                     />
 
+                    {/* RISC-V bytes */}
+                    <Bar
+                      x={barWidth + 2}
+                      y={yMax - riscvH}
+                      width={barWidth}
+                      height={
+                        riscvVal === null || riscvVal === undefined
+                          ? 2
+                          : Math.max(2, riscvH)
+                      }
+                      fill={
+                        riscvVal === null || riscvVal === undefined
+                          ? "#d4d4d8"
+                          : "url(#visx-riscv-grad)"
+                      }
+                      rx={2}
+                    />
+
                     {/* Wasm bytes — only when measured */}
                     <Bar
-                      x={barWidth + 3}
+                      x={(barWidth + 2) * 2}
                       y={yMax - wasmH}
                       width={barWidth}
                       height={
@@ -177,7 +207,7 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
                       y={yMax + 16}
                       textAnchor="middle"
                       className={`text-[9px] font-mono select-none ${
-                        isSelected ? "fill-[#FC4C01] font-bold" : "fill-neutral-500"
+                        isSelected ? "fill-[#0284c7] font-bold" : "fill-neutral-500"
                       }`}
                     >
                       {d.name.replace("_", "").slice(0, 7)}
@@ -203,26 +233,36 @@ export const PerformanceMetricsView: React.FC<PerformanceMetricsViewProps> = ({
             </Badge>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+          <div className="grid grid-cols-3 gap-2 text-xs font-mono">
             <div>
-              <span className="text-[10px] text-neutral-400 block">NATIVE</span>
-              <span className="text-base font-bold text-white">
+              <span className="text-[9px] text-neutral-400 block">x86_64</span>
+              <span className="text-sm font-bold text-white">
                 {activeItem ? `${activeItem.srcSize} B` : "---"}
               </span>
-              <span className="text-[10px] text-neutral-400 block mt-0.5">
+              <span className="text-[9px] text-neutral-400 block mt-0.5 truncate">
                 {activeItem ? `0x${activeItem.addr.toString(16)}` : "---"}
               </span>
             </div>
 
             <div>
-              <span className="text-[10px] text-neutral-400 block">PULLEY WASM</span>
-              <span className={`text-base font-bold ${activeItem?.wasmSize != null ? "text-[#FC4C01]" : "text-neutral-500"}`}>
+              <span className="text-[9px] text-neutral-400 block">RISC-V 64</span>
+              <span className={`text-sm font-bold ${activeItem?.riscvSize != null ? "text-[#38bdf8]" : "text-neutral-500"}`}>
+                {activeItem?.riscvSize != null ? `${activeItem.riscvSize} B` : "—"}
+              </span>
+              <span className="text-[9px] text-neutral-400 block mt-0.5">
+                ELF binary
+              </span>
+            </div>
+
+            <div>
+              <span className="text-[9px] text-neutral-400 block">PULLEY</span>
+              <span className={`text-sm font-bold ${activeItem?.wasmSize != null ? "text-[#FC4C01]" : "text-neutral-500"}`}>
                 {activeItem?.wasmSize != null ? `${activeItem.wasmSize} B` : "—"}
               </span>
-              <span className="text-[10px] text-neutral-400 block mt-0.5">
+              <span className="text-[9px] text-neutral-400 block mt-0.5">
                 {activeItem?.runnerMs != null
-                  ? `${activeItem.runnerMs.toFixed(2)} ms wall`
-                  : "not measured"}
+                  ? `${activeItem.runnerMs.toFixed(1)} ms`
+                  : "—"}
               </span>
             </div>
           </div>

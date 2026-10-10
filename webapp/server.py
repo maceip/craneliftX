@@ -37,6 +37,29 @@ sys.path.insert(0, LIFTMAP)
 import ingest_tracer  # noqa: E402
 import placement  # noqa: E402
 
+SAMPLES = {
+    "sample_basic": {
+        "id": "sample_basic",
+        "name": "sample_basic.o",
+        "c_name": "sample_basic.c",
+        "format": "ELF 64-bit x86_64",
+        "tier": "Level 1: Pure ALU Leaf (Hello World)",
+        "title": "Basic ALU Arithmetic & Clamping",
+        "desc": "Baseline register-to-register functions (clamp_val, abs_diff). Tests pure arithmetic decompilation, Cranelift Pulley execution, and RISC-V 64 ELF cross-compilation with zero memory dependencies.",
+        "targets": ["RISC-V 64 (QEMU)", "Pulley64 (VM)"],
+    },
+    "sample_network": {
+        "id": "sample_network",
+        "name": "sample_network.o",
+        "c_name": "sample_network.c",
+        "format": "ELF 64-bit x86_64",
+        "tier": "Level 2: Network Data-Plane",
+        "title": "Network Packet Parser & Checksum Engine",
+        "desc": "Real x86_64 object containing packet header parsing (loads, bounded loops), TCP window scaling, IP ID hashing, and a tight CRC32 loop (kept native by policy).",
+        "targets": ["RISC-V 64 (QEMU)", "Pulley64 (VM)"],
+    },
+}
+
 SAMPLE_OBJ = os.path.join(LIFTMAP, "sample_network.o")
 SAMPLE_C = os.path.join(LIFTMAP, "sample_network.c")
 LIFT_RESULTS_PATH = os.path.join(LIFTMAP, "lift_results.json")
@@ -47,21 +70,24 @@ JOBS: dict[str, dict] = {}
 DELAY = 0.08  # pacing so the animation is watchable; analysis itself is fast
 
 
-def ensure_sample_obj():
-    if os.path.exists(SAMPLE_OBJ):
-        return SAMPLE_OBJ
-    if not os.path.exists(SAMPLE_C):
+def ensure_sample_obj(sample_id: str = "sample_network") -> str | None:
+    sample_info = SAMPLES.get(sample_id, SAMPLES["sample_network"])
+    obj_path = os.path.join(LIFTMAP, sample_info["name"])
+    c_path = os.path.join(LIFTMAP, sample_info["c_name"])
+    if os.path.exists(obj_path):
+        return obj_path
+    if not os.path.exists(c_path):
         return None
     cc = os.environ.get("CC", "cc")
     flags = ["-O1", "-fno-inline"]
     if sys.platform == "darwin":
         flags += ["-arch", "x86_64"]
-    cmd = [cc] + flags + ["-c", SAMPLE_C, "-o", SAMPLE_OBJ]
+    cmd = [cc] + flags + ["-c", c_path, "-o", obj_path]
     try:
         subprocess.run(cmd, check=True, capture_output=True)
-        return SAMPLE_OBJ if os.path.exists(SAMPLE_OBJ) else None
+        return obj_path if os.path.exists(obj_path) else None
     except Exception as e:
-        sys.stderr.write(f"warn: failed to compile sample_network.o: {e}\n")
+        sys.stderr.write(f"warn: failed to compile {sample_info['name']}: {e}\n")
         return None
 
 
@@ -145,8 +171,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, job.get("report") or {"status": "pending"})
         if path == "/api/sample":
             return self._handle_sample()
+        if path == "/api/samples":
+            return self._json(200, {
+                "samples": list(SAMPLES.values())
+            })
         if path == "/api/health":
-            return self._json(200, {"ok": True, "jobs": len(JOBS), "sample_available": os.path.exists(SAMPLE_OBJ)})
+            return self._json(200, {
+                "ok": True,
+                "jobs": len(JOBS),
+                "samples_available": [k for k, v in SAMPLES.items() if os.path.exists(os.path.join(LIFTMAP, v["name"]))]
+            })
         return self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
@@ -171,20 +205,45 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"id": job_id, "name": safe, "bytes": len(data)})
 
     def _handle_sample(self) -> None:
-        sample_path = ensure_sample_obj()
+        parsed = urllib.parse.urlparse(self.path)
+        query = urllib.parse.parse_qs(parsed.query)
+        sample_id = query.get("sample", [None])[0] or query.get("id", [None])[0]
+
+        if not sample_id and self.command == "POST":
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 0:
+                try:
+                    body = json.loads(self.rfile.read(length).decode("utf-8"))
+                    sample_id = body.get("sample") or body.get("id")
+                except Exception:
+                    pass
+
+        if not sample_id or sample_id not in SAMPLES:
+            sample_id = "sample_network"
+
+        info = SAMPLES[sample_id]
+        sample_path = ensure_sample_obj(sample_id)
         if not sample_path or not os.path.exists(sample_path):
-            return self._json(500, {"error": "sample_network.o not available"})
+            return self._json(500, {"error": f"{info['name']} not available"})
         with open(sample_path, "rb") as fh:
             data = fh.read()
         job_id = uuid.uuid4().hex[:12]
         JOBS[job_id] = {
             "id": job_id,
-            "name": "sample_network.o",
+            "name": info["name"],
             "path": sample_path,
             "report": None,
             "is_sample": True,
+            "sample_id": sample_id,
         }
-        self._json(200, {"id": job_id, "name": "sample_network.o", "bytes": len(data), "is_sample": True})
+        self._json(200, {
+            "id": job_id,
+            "name": info["name"],
+            "bytes": len(data),
+            "is_sample": True,
+            "sample_id": sample_id,
+            "tier": info["tier"],
+        })
 
     def do_HEAD(self) -> None:
         self.do_GET()
@@ -269,6 +328,9 @@ class Handler(BaseHTTPRequestHandler):
                     "src_insn": f["n_insn"],
                     # destination representation (Pulley wasm) — only if measured
                     "wasm_size": (real or {}).get("wasm_size"),
+                    # destination representation (RISC-V 64 ELF) — measured artifact size
+                    "riscv_size": (real or {}).get("riscv_size"),
+                    "riscv_passed": (real or {}).get("riscv_passed"),
                     "runner_ms": (real or {}).get("runner_ms"),
                     "expected": (real or {}).get("expected"),
                     "observed": observed,
@@ -289,7 +351,7 @@ class Handler(BaseHTTPRequestHandler):
 
             measured = [r for r in mem_rows if r["lifted_measured"]]
             emit("perf", {
-                "note": "Static metrics from Capstone. runner_ms is wall time of the Pulley runner process from make demo. No cycle counts.",
+                "note": "Static metrics from Capstone. destination representations: RISC-V 64 ELF & Pulley wasm.",
                 "functions": [
                     {
                         "name": r["name"],
@@ -297,10 +359,12 @@ class Handler(BaseHTTPRequestHandler):
                         "src_size": r["src_size"],
                         "src_insn": r["src_insn"],
                         "wasm_size": r["wasm_size"],
+                        "riscv_size": r["riscv_size"],
                         "runner_ms": r["runner_ms"],
                         "expected": r["expected"],
                         "observed": r["observed"],
                         "passed": r["passed"],
+                        "qemu_log": r["qemu_log"],
                     }
                     for r in mem_rows
                 ],

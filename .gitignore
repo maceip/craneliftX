@@ -20,6 +20,8 @@ __pycache__/
 # liftmap generated artifacts (reproducible from sample_network.c via `make`)
 /liftmap/sample_network
 /liftmap/sample_network.o
+/liftmap/sample_basic
+/liftmap/sample_basic.o
 /liftmap/lift_map.json
 /liftmap/lift_plan.json
 /liftmap/lift_results.json

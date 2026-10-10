@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Card, CardHeader, CardTitle, CardDescription, Badge } from "@graundtech/fluent2-react-kit";
+import { ThinkingOrb } from "thinking-orbs";
 
 export interface MemorySegment {
   name: string;
@@ -23,16 +24,6 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
   onSelectFunction,
   isLoading,
 }) => {
-  const [animStep, setAnimStep] = useState<number>(0);
-
-  // Cycle animation step for active migration motion
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setAnimStep((prev) => (prev + 1) % 100);
-    }, 40);
-    return () => clearInterval(timer);
-  }, []);
-
   const sorted = [...segments].sort((a, b) => a.addr - b.addr);
   // Code footprint from real segment extents — not a hardcoded number.
   const totalBytes = sorted.reduce(
@@ -54,7 +45,7 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
               Function map
             </CardTitle>
             <Badge variant="outline" className="text-[10px] font-mono border-black/15 text-neutral-600">
-              x86_64 → Pulley
+              x86_64 → RISC-V 64 / Pulley
             </Badge>
           </div>
           <CardDescription className="text-xs text-neutral-500">
@@ -123,63 +114,23 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
           </div>
         </div>
 
-        {/* Center: Dynamic Animated ISA Migration Conduit (SVG Particle Beam) */}
+        {/* Center: lift indicator (ThinkingOrb) */}
         <div className="md:col-span-2 flex flex-col items-center justify-center py-2">
-          <div className="relative w-full flex flex-col items-center">
-            {/* SVG Conduit Paths */}
-            <svg width="100%" height="160" viewBox="0 0 120 160" className="overflow-visible">
-              <defs>
-                <linearGradient id="beam-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#18181b" />
-                  <stop offset="50%" stopColor="#FC4C01" />
-                  <stop offset="100%" stopColor="#FC4C01" />
-                </linearGradient>
-              </defs>
-
-              {/* Static Guide Track */}
-              <path
-                d="M 10 80 C 50 80, 70 80, 110 80"
-                fill="none"
-                stroke="rgba(0,0,0,0.08)"
-                strokeWidth="4"
-                strokeLinecap="round"
+          <div className="relative w-full flex flex-col items-center gap-3">
+            <div className="flex items-center justify-center h-[160px]">
+              <ThinkingOrb
+                state={activeSegment?.decision === "LIFT" ? "connecting" : "breathing"}
+                size={64}
+                color="#FC4C01"
+                theme="light"
+                aria-label={
+                  activeSegment?.decision === "LIFT"
+                    ? "Lift path active"
+                    : "Function stays native"
+                }
               />
-
-              {/* Animated Particle Beam */}
-              {activeSegment?.decision === "LIFT" ? (
-                <>
-                  <path
-                    d="M 10 80 C 50 80, 70 80, 110 80"
-                    fill="none"
-                    stroke="url(#beam-gradient)"
-                    strokeWidth="3"
-                    strokeDasharray="6 6"
-                    strokeDashoffset={-animStep * 1.5}
-                    strokeLinecap="round"
-                  />
-                  {/* Glowing Transit Core */}
-                  <circle
-                    cx={15 + ((animStep % 100) / 100) * 90}
-                    cy={80}
-                    r={4}
-                    fill="#FC4C01"
-                    className="drop-shadow-[0_0_8px_rgba(252,76,1,0.8)]"
-                  />
-                </>
-              ) : (
-                <text
-                  x="60"
-                  y="75"
-                  textAnchor="middle"
-                  className="text-[9px] font-mono fill-neutral-400 font-medium"
-                >
-                  HOST LOCKED
-                </text>
-              )}
-            </svg>
-
-            {/* Micro Badge Under Conduit */}
-            <span className="text-[10px] font-mono font-bold text-[#FC4C01] bg-[#FC4C01]/10 px-2 py-0.5 rounded-full border border-[#FC4C01]/20 -mt-8">
+            </div>
+            <span className="text-[10px] font-mono font-bold text-[#FC4C01] bg-[#FC4C01]/10 px-2 py-0.5 rounded-full border border-[#FC4C01]/20">
               {activeSegment?.decision === "LIFT" ? "LIFT" : "NATIVE"}
             </span>
           </div>
@@ -207,7 +158,7 @@ export const VirtualMemoryMap: React.FC<VirtualMemoryMapProps> = ({
                   ? "bg-[#FC4C01] text-white"
                   : "bg-neutral-800 text-neutral-400"
               }`}>
-                {activeSegment?.decision === "LIFT" ? "LIFT → PULLEY" : "KEEP_NATIVE"}
+                {activeSegment?.decision === "LIFT" ? "LIFT → RISC-V / PULLEY" : "KEEP_NATIVE"}
               </span>
             </div>
 

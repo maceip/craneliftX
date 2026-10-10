@@ -31,7 +31,8 @@ sample:
 	$(MAKE) -C liftmap
 
 demo: sample runner
-	$(PYTHON) liftmap/lift_drop_demo.py
+	$(PYTHON) liftmap/lift_drop_demo.py --object liftmap/sample_basic.o
+	$(PYTHON) liftmap/lift_drop_demo.py --object liftmap/sample_network.o
 
 build-ui:
 	npm --prefix webapp run build

@@ -10,7 +10,13 @@ ifeq ($(UNAME),Darwin)
 endif
 
 .PHONY: all clean
-all: sample_network sample_network.o
+all: sample_basic.o sample_network.o
+
+sample_basic: sample_basic.c
+	$(CC) $(CFLAGS) sample_basic.c -o sample_basic
+
+sample_basic.o: sample_basic.c
+	$(CC) $(CFLAGS) -c sample_basic.c -o sample_basic.o
 
 sample_network: sample_network.c
 	$(CC) $(CFLAGS) sample_network.c -o sample_network
@@ -19,4 +25,4 @@ sample_network.o: sample_network.c
 	$(CC) $(CFLAGS) -c sample_network.c -o sample_network.o
 
 clean:
-	rm -f sample_network sample_network.o lift_map.json
+	rm -f sample_basic sample_basic.o sample_network sample_network.o lift_map.json

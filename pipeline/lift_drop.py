@@ -425,28 +425,33 @@ def conv_placeholder(conv: str) -> str:
     return "%u" if conv == "u" else "%llu"
 
 
-def run_qemu(linked_bc: str, symbol: str, arguments, expected, expected_outs, work: str) -> str:
-    gcc = shutil.which("riscv64-linux-gnu-gcc")
-    qemu = shutil.which("qemu-riscv64-static") or shutil.which("qemu-riscv64")
-    if not gcc or not qemu:
-        return "SKIP (riscv64 gcc or qemu-user not installed)"
+def run_qemu(linked_bc: str, symbol: str, arguments, expected, expected_outs, work: str) -> dict:
     obj = os.path.join(work, "full.riscv.o")
-    harness = os.path.join(work, "harness.c")
-    prog = os.path.join(work, "lifted.riscv")
-    open(harness, "w").write(render_harness(symbol, arguments, expected, expected_outs))
-    # clang picks the lp64d ABI the riscv64 cross gcc links against.
+    # clang produces the real 64-bit RISC-V ELF object
     run(
         [
             llvm_tool("clang"),
-            "--target=riscv64-linux-gnu",
-            "--sysroot=/usr/riscv64-linux-gnu",
-            "-O0",
+            "--target=riscv64-unknown-linux-gnu",
+            "-O2",
             "-c",
             linked_bc,
             "-o", obj,
         ],
         capture_output=True,
     )
+    riscv_size = os.path.getsize(obj) if os.path.exists(obj) else None
+
+    gcc = shutil.which("riscv64-linux-gnu-gcc")
+    qemu = shutil.which("qemu-riscv64-static") or shutil.which("qemu-riscv64")
+    if not gcc or not qemu:
+        return {
+            "log": "SKIP (qemu-riscv64 or riscv64 gcc not installed on host)",
+            "size": riscv_size,
+            "passed": None,
+        }
+    harness = os.path.join(work, "harness.c")
+    prog = os.path.join(work, "lifted.riscv")
+    open(harness, "w").write(render_harness(symbol, arguments, expected, expected_outs))
     run([gcc, "-O1", harness, obj, "-o", prog], capture_output=True)
     qemu_cmd = [qemu]
     if os.path.isdir("/usr/riscv64-linux-gnu"):
@@ -457,7 +462,11 @@ def run_qemu(linked_bc: str, symbol: str, arguments, expected, expected_outs, wo
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr)
         raise SystemExit(f"qemu-riscv64 failed for {symbol} (exit {proc.returncode})")
-    return proc.stdout.strip()
+    return {
+        "log": proc.stdout.strip(),
+        "size": riscv_size,
+        "passed": bool(proc.returncode == 0 and ("QEMU " in proc.stdout)),
+    }
 
 
 def lift_and_drop(
@@ -544,16 +553,18 @@ def lift_and_drop(
         if expected is not None and "RESULT   : OK" not in proc.stdout:
             raise SystemExit(f"Pulley validation failed for {symbol}")
 
-        qemu_out = ""
+        qemu_res = {"log": "", "size": None, "passed": None}
         if qemu:
             print(" [EMU]   same LLVM IR -> riscv64 -> qemu-user")
             linked_rv = link_ir(lifted_ll, symbol, "riscv64", work)
-            qemu_out = run_qemu(linked_rv, symbol, arguments, expected, expected_outs, work)
+            qemu_res = run_qemu(linked_rv, symbol, arguments, expected, expected_outs, work)
         return {
             "symbol": symbol,
             "wasm": wasm,
             "pulley": proc.stdout,
-            "qemu": qemu_out,
+            "qemu": qemu_res.get("log", ""),
+            "riscv_size": qemu_res.get("size"),
+            "riscv_passed": qemu_res.get("passed"),
             # The exact machine-code bytes that were lifted -- the tracer's
             # window, as handed to remill. Kept so the visualization can show
             # precisely which bytes moved.
