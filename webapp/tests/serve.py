@@ -72,14 +72,18 @@ def start(name):
     )
 
 
-def kill(name):
+def kill(name, graceful=False):
     process = processes.get(name)
     if process and process.poll() is None:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            os.killpg(process.pid, signal.SIGTERM if graceful else signal.SIGKILL)
         except ProcessLookupError:
             pass
-        process.wait(timeout=10)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
 
 
 def stopping(*_):
@@ -113,7 +117,7 @@ try:
         time.sleep(0.1)
 finally:
     for name in list(processes):
-        kill(name)
+        kill(name, graceful=True)
     metadata.unlink(missing_ok=True)
     log.close()
     if os.environ.get("ISR_KEEP_E2E_STATE"):

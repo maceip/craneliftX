@@ -45,10 +45,37 @@ async function upload(page: Page, name: string, buffer: Buffer) {
 }
 test.afterEach(async ({ page, context }) => {
   await context.setOffline(false);
-  if (runId(page))
-    await page.request
-      .post(`/api/pipeline/runs/${runId(page)}/cancel`)
-      .catch(() => {});
+  if (runId(page)) {
+    await expect
+      .poll(
+        async () => {
+          try {
+            const cancelled = await page.request.post(
+              `/api/pipeline/runs/${runId(page)}/cancel`,
+            );
+            return cancelled.ok();
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () => {
+          try {
+            return ["completed", "failed", "cancelled", "interrupted"].includes(
+              (await snapshot(page)).status,
+            );
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15000 },
+      )
+      .toBe(true);
+  }
 });
 
 test("13 groups consume real Rust server events live, recover a connection, and reconcile exact evidence", async ({
@@ -281,12 +308,26 @@ test("16 MiB input keeps the browser live through hundreds of lazy compilations 
       readFileSync(join(tmpdir(), "isr-e2e-stack-8878.json"), "utf8"),
     );
     writeFileSync(metadata.control, "proxy");
+    await expect(page.getByText("Reconnecting", { exact: true })).toBeVisible();
+    const interruptedCursor = await sequence(page);
+    await expect
+      .poll(() => sequence(page), { timeout: 30000 })
+      .toBeGreaterThan(interruptedCursor);
   }
   await expect
     .poll(() => sequence(page), { timeout: 30000 })
     .toBeGreaterThan(first + 120);
   await expect
-    .poll(async () => (await snapshot(page)).status, { timeout: 120000 })
+    .poll(
+      async () => {
+        try {
+          return (await snapshot(page)).status;
+        } catch {
+          return "proxy unavailable";
+        }
+      },
+      { timeout: 120000 },
+    )
     .toBe("completed");
   const final = await snapshot(page);
   await expect(page.getByTestId("event-sequence")).toHaveText(
