@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { Button } from "@graundtech/fluent2-react-kit";
 import {
   blankGroup,
   bytes,
@@ -17,6 +16,7 @@ import {
 } from "./pipeline";
 import { request, usePipeline } from "./usePipeline";
 import { PipelineTimeline } from "./components/PipelineTimeline";
+import { TelemetryGauge } from "./components/Telemetry";
 
 const cn = (...values: Parameters<typeof clsx>) => twMerge(clsx(...values));
 const descriptions: Record<string, string> = {
@@ -326,6 +326,8 @@ export function App() {
   const [raw, setRaw] = useState(false),
     [filter, setFilter] = useState("all"),
     [submitting, setSubmitting] = useState(false);
+  const evidence = useRef<HTMLDialogElement>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null),
     [setupError, setSetupError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
@@ -365,6 +367,11 @@ export function App() {
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
+  useEffect(() => {
+    const latest = run?.recent.at(-1);
+    if (latest) setSelected(latest.group);
+    if (run && !terminal(run.status)) setFollowing(true);
+  }, [run?.id]);
   const latestGroup = useRef<string | undefined>(undefined);
   latestGroup.current = run?.recent.at(-1)?.group;
   useEffect(() => {
@@ -455,207 +462,197 @@ export function App() {
     connection === "live" && run?.engine_connection === "reconnecting"
       ? "upstream-reconnecting"
       : connection;
-  const runStatus = run?.status
-    ? run.status[0].toUpperCase() + run.status.slice(1)
-    : submitting
-      ? "Starting"
-      : "Ready";
+  function openEvidence() {
+    setFollowing(false);
+    setEvidenceOpen(true);
+    evidence.current?.showModal();
+  }
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#pipeline">
-        Skip to pipeline
-      </a>
-      <header className="masthead">
-        <a className="brand" href="/" aria-label="Chunder home">
-          <span className="brand-mark" aria-hidden="true">
-            c
-          </span>
-          chunder
-          <span className="brand-divider" />
-          <small>Execution observatory</small>
-        </a>
-        <div className="engine-identity">
-          <span className={cn("signal-dot", config?.ready && "available")} />
-          {config
-            ? config.ready
-              ? "RV64 runtime available"
-              : "Runtime unavailable"
-            : "Connecting to runtime"}
-        </div>
-      </header>
-      <main>
-        <div className="page-heading">
-          <div>
-            <div className="eyebrow">x86-64 → CLIF → RV64</div>
-            <h1>Execution pipeline</h1>
-            <p>Thirteen operation groups. One live execution ledger.</p>
-          </div>
-          <div className="run-actions">
-            <input
-              ref={file}
-              type="file"
-              aria-label="Choose an x86-64 ELF binary"
-              className="visually-hidden"
-              tabIndex={-1}
-              onChange={(e) => {
-                const b = e.target.files?.[0];
-                if (b) void start(b);
-              }}
-            />
-            <Button
-              className="button secondary"
+    <div className="focus-shell">
+      <input
+        ref={file}
+        type="file"
+        aria-label="Choose an x86-64 ELF binary"
+        className="visually-hidden"
+        tabIndex={-1}
+        onChange={(e) => {
+          const binary = e.target.files?.[0];
+          if (binary) void start(binary);
+        }}
+      />
+      {!id ? (
+        <main className="launch-screen">
+          <div className="launch-wordmark">chunder</div>
+          <h1>Watch a binary come alive.</h1>
+          <p className="launch-description">
+            x86-64 → iced-x86 → Cranelift → RV64
+          </p>
+          <div className="launch-actions">
+            <button
+              aria-label="Run demo"
+              className="launch-action launch-primary"
+              disabled={busy || !config?.ready || !config.server_available}
+              onClick={() => void start()}
+            >
+              <span className="launch-symbol" aria-hidden="true">
+                ▷
+              </span>
+              <strong>{submitting ? "Starting…" : "Run demo"}</strong>
+              <span>A real Rust TCP server, running through RV64.</span>
+            </button>
+            <button
+              aria-label="Open binary"
+              className="launch-action"
               disabled={busy || !config?.ready}
               onClick={() => file.current?.click()}
             >
-              Open binary <span aria-hidden="true">↑</span>
-            </Button>
-            {busy && run ? (
-              <Button
-                className="button secondary"
-                disabled={run.status === "cancelling"}
-                onClick={() => void stop()}
-              >
-                Stop execution
-              </Button>
-            ) : (
-              <Button
-                className="button primary"
-                disabled={busy || !config?.ready || !config.server_available}
-                onClick={() => void start()}
-              >
-                <span aria-hidden="true">▶</span>
-                {submitting ? "Starting…" : "Run Rust server"}
-              </Button>
-            )}
-          </div>
-        </div>
-        <div className="profile-line">
-          <span>
-            Static Linux x86-64 ELF · scalar instructions · loopback TCP
-          </span>
-          <span>{bytes(config?.max_upload_bytes)} input limit</span>
-        </div>
-        {(setupError || actionError || config?.error) && (
-          <div className="error-banner" role="alert">
-            {actionError ?? setupError ?? config?.error}
-          </div>
-        )}
-        <section className="run-bar" aria-label="Current execution">
-          <div className="run-file">
-            <span className="file-symbol" aria-hidden="true">
-              ⌘
-            </span>
-            <div>
-              <strong>{run?.input_name ?? "No binary running"}</strong>
-              <small>
-                {run
-                  ? `${run.mode === "rust-server" ? "Freestanding Rust TCP server" : "Uploaded binary"} · ${bytes(run.input?.bytes)} input`
-                  : "Run the Rust server or open a supported executable."}
-              </small>
-            </div>
-          </div>
-          <div className="run-bar-right">
-            <Status value={runStatus} />
-            <label className="history-select">
-              <span className="visually-hidden">Saved runs</span>
-              <select
-                value={id && history.some((h) => h.id === id) ? id : ""}
-                onChange={(e) => {
-                  if (e.target.value) selectRun(e.target.value);
-                }}
-              >
-                <option value="">Saved runs</option>
-                {history.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.input_name} · {h.status} · {timestamp(h.created_unix_ns)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </section>
-        {error && (
-          <div className="error-banner" role="status">
-            {error}. The saved journal is retained.
-          </div>
-        )}
-        {run && ["failed", "interrupted", "cancelled"].includes(run.status) && (
-          <div className="error-banner" role="alert">
-            {run.message}
-          </div>
-        )}
-        <div className="runtime-overview" id="pipeline">
-          <section className="runtime-panel" aria-label="Execution counters">
-            <div className="section-heading">
-              <h2>Runtime</h2>
-              <span
-                className={cn(
-                  "connection-state",
-                  streamConnection === "live" && "is-live",
-                )}
-                role="status"
-              >
-                <span aria-hidden="true" />
-                {connectionLabel[streamConnection]}
+              <span className="launch-symbol" aria-hidden="true">
+                ↑
               </span>
-            </div>
-            <div className="metrics-grid">
-              <Metric
-                label="Compiled blocks"
-                value={number(run?.counters.compiled_blocks)}
-                note="Includes recompilation"
-                testId="compiled-blocks"
-              />
-              <Metric
-                label="Source lifted"
-                value={bytes(run?.counters.unique_lifted_bytes)}
-                note={`${number(run?.counters.unique_lifted_instructions)} unique instructions`}
-              />
-              <Metric
-                label="RV64 instructions"
-                value={number(run?.counters.rv64_steps)}
-                note="Executed by the interpreter"
-                testId="rv64-steps"
-              />
-              <Metric
-                label="Elapsed"
-                value={duration(run?.elapsed_ns)}
-                note="Last emitted engine timestamp"
-              />
-            </div>
-            <div className="runtime-caption">
+              <strong>Open binary</strong>
               <span>
-                Active:{" "}
-                <strong>
-                  {active.length
-                    ? active.map((g) => g.id).join(" / ")
-                    : run && terminal(run.status)
-                      ? "Execution ended"
-                      : "Awaiting events"}
-                </strong>
+                Static Linux x86-64 ELF · up to{" "}
+                {bytes(config?.max_upload_bytes)}
               </span>
-              <span className="mono">
-                seq{" "}
-                <strong data-testid="event-sequence">{run?.cursor ?? 0}</strong>
-              </span>
-            </div>
-          </section>
-          <Activity run={run} />
+            </button>
+          </div>
+          <p className="launch-caption">
+            {config
+              ? config.ready
+                ? "Live engine events. Actual instructions. Preserved connections."
+                : "Runtime unavailable"
+              : "Connecting to runtime…"}
+          </p>
+          {history.length > 0 && (
+            <details className="launch-history">
+              <summary>Previous runs</summary>
+              <label>
+                <span className="visually-hidden">Saved runs</span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) selectRun(e.target.value);
+                  }}
+                >
+                  <option value="">Choose a recorded run</option>
+                  {history.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.input_name} · {h.status} ·{" "}
+                      {timestamp(h.created_unix_ns)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </details>
+          )}
+          {(setupError || actionError || config?.error) && (
+            <p className="focus-error" role="alert">
+              {actionError ?? setupError ?? config?.error}
+            </p>
+          )}
+        </main>
+      ) : (
+        <main className="execution-screen" aria-label="Live execution">
+          {(actionError || error) && (
+            <p className="focus-error" role="status">
+              {actionError ?? error}
+            </p>
+          )}
+          {run &&
+            ["failed", "interrupted", "cancelled"].includes(run.status) && (
+              <p className="focus-error" role="alert">
+                {run.message}
+              </p>
+            )}
+          <TelemetryGauge run={run} />
+          <PipelineTimeline
+            groups={groups}
+            run={run}
+            selected={selected}
+            onSelect={(id) => {
+              setFollowing(false);
+              setSelected(id);
+              setInspection(null);
+            }}
+            following={following}
+            onFollow={setFollowing}
+            connection={streamConnection}
+            liveAfter={liveAfter}
+            obscured={evidenceOpen}
+            status={
+              <>
+                <span role="status">{connectionLabel[streamConnection]}</span>
+                <span className="mono">
+                  #
+                  {<span data-testid="event-sequence">{run?.cursor ?? 0}</span>}
+                </span>
+                <span className="focus-run-name">
+                  {run?.input_name ?? "Starting execution"}
+                </span>
+              </>
+            }
+            controls={
+              <>
+                <button
+                  type="button"
+                  onClick={openEvidence}
+                  aria-label="View evidence"
+                >
+                  Evidence
+                </button>
+                {busy && run ? (
+                  <button
+                    type="button"
+                    aria-label="Stop execution"
+                    disabled={run.status === "cancelling"}
+                    onClick={() => void stop()}
+                  >
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="Start a new run"
+                    onClick={() => selectRun(null)}
+                  >
+                    New run
+                  </button>
+                )}
+              </>
+            }
+          />
+        </main>
+      )}
+      <dialog
+        ref={evidence}
+        className="evidence-dialog"
+        aria-labelledby="evidence-title"
+        onClose={() => setEvidenceOpen(false)}
+      >
+        <div className="evidence-heading">
+          <h2 id="evidence-title">Execution evidence</h2>
+          <button type="button" onClick={() => evidence.current?.close()}>
+            Back to execution
+          </button>
         </div>
-        <PipelineTimeline
-          groups={groups}
-          run={run}
-          selected={selected}
-          onSelect={(id) => {
-            setFollowing(false);
-            setSelected(id);
-            setInspection(null);
-          }}
-          following={following}
-          onFollow={setFollowing}
-          connection={streamConnection}
-          liveAfter={liveAfter}
-        >
+        <div className="evidence-body">
+          <label className="evidence-group">
+            Inspect operation group
+            <select
+              aria-label="Inspect operation group"
+              value={selected}
+              onChange={(e) => {
+                setSelected(e.target.value);
+                setInspection(null);
+              }}
+            >
+              {groups.map((g) => (
+                <option value={g.id} key={g.id}>
+                  {g.order}. {g.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <section className="detail-panel" aria-label="Operation inspector">
             <div className="section-heading">
               <div className="detail-title">
@@ -771,131 +768,175 @@ export function App() {
               />
             </section>
           )}
-        </PipelineTimeline>
-        <section className="ledger-panel" aria-label="Live event ledger">
-          <div className="section-heading">
-            <div>
-              <h2>
-                Event ledger{" "}
-                <span className="count-label">{number(run?.cursor ?? 0)}</span>
-              </h2>
-              <p>Original engine events · newest first · timestamps in UTC</p>
+          <section className="runtime-panel" aria-label="Execution counters">
+            <div className="section-heading">
+              <h2>Runtime</h2>
             </div>
-            <div className="ledger-controls">
-              <label>
-                <span className="visually-hidden">Filter ledger by group</span>
-                <select
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                >
-                  <option value="all">All groups</option>
-                  {groups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.id}
-                    </option>
+            <div className="metrics-grid">
+              <Metric
+                label="Compiled blocks"
+                value={number(run?.counters.compiled_blocks)}
+                note="Includes recompilation"
+                testId="compiled-blocks"
+              />
+              <Metric
+                label="Source lifted"
+                value={bytes(run?.counters.unique_lifted_bytes)}
+                note={`${number(run?.counters.unique_lifted_instructions)} unique instructions`}
+              />
+              <Metric
+                label="RV64 instructions"
+                value={number(run?.counters.rv64_steps)}
+                note="Executed by the interpreter"
+                testId="rv64-steps"
+              />
+              <Metric
+                label="Elapsed"
+                value={duration(run?.elapsed_ns)}
+                note="Last emitted engine timestamp"
+              />
+            </div>
+            <div className="runtime-caption">
+              <span>
+                Active:{" "}
+                <strong>
+                  {active.length
+                    ? active.map((g) => g.id).join(" / ")
+                    : run && terminal(run.status)
+                      ? "Execution ended"
+                      : "Awaiting events"}
+                </strong>
+              </span>
+              <span className="mono">
+                seq{" "}
+                <strong data-evidence-sequence="true">
+                  {run?.cursor ?? 0}
+                </strong>
+              </span>
+            </div>
+          </section>
+          <Activity run={run} />
+          <section className="ledger-panel" aria-label="Live event ledger">
+            <div className="section-heading">
+              <div>
+                <h2>
+                  Event ledger{" "}
+                  <span className="count-label">
+                    {number(run?.cursor ?? 0)}
+                  </span>
+                </h2>
+                <p>Original engine events · newest first · timestamps in UTC</p>
+              </div>
+              <div className="ledger-controls">
+                <label>
+                  <span className="visually-hidden">
+                    Filter ledger by group
+                  </span>
+                  <select
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  >
+                    <option value="all">All groups</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {run && run.cursor > 0 && (
+                  <a href={`/api/pipeline/runs/${run.id}/journal`}>
+                    Download JSONL ↗
+                  </a>
+                )}
+              </div>
+            </div>
+            <div className="ledger-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Sequence</th>
+                    <th>Timestamp</th>
+                    <th>Group</th>
+                    <th>Event</th>
+                    <th>State / detail</th>
+                    <th>Source / block</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map((e) => (
+                    <tr
+                      key={e.seq}
+                      className={cn(inspection?.seq === e.seq && "inspected")}
+                    >
+                      <td>
+                        <button
+                          className="event-link"
+                          onClick={() => {
+                            setFollowing(false);
+                            setSelected(e.group);
+                            setInspection(e);
+                            setRaw(true);
+                            document
+                              .querySelector(".detail-panel")
+                              ?.scrollIntoView({
+                                behavior: "instant",
+                                block: "nearest",
+                              });
+                          }}
+                          aria-label={`Inspect event ${e.seq}`}
+                        >
+                          #{e.seq}
+                        </button>
+                      </td>
+                      <td>{timestamp(e.timestamp_unix_ns)}</td>
+                      <td>
+                        <span className="group-tag">{e.group}</span>
+                      </td>
+                      <td>{e.type === "stage" ? e.stage : e.type}</td>
+                      <td
+                        className={
+                          e.status === "failed" || e.type === "syscall_failed"
+                            ? "failed-text"
+                            : ""
+                        }
+                      >
+                        {e.status ??
+                          e.state ??
+                          e.detail?.name ??
+                          (e.type === "artifact" ? e.name : "recorded")}
+                      </td>
+                      <td>
+                        {e.rip ?? e.block_rip ?? "—"}
+                        {e.block_id !== undefined ? ` / ${e.block_id}` : ""}
+                      </td>
+                    </tr>
                   ))}
-                </select>
-              </label>
-              {run && run.cursor > 0 && (
-                <a href={`/api/pipeline/runs/${run.id}/journal`}>
-                  Download JSONL ↗
-                </a>
+                </tbody>
+              </table>
+              {!events.length && (
+                <div className="ledger-empty">
+                  {run
+                    ? "No matching events in the recent window. The complete journal is available to download."
+                    : "Start a run to see the engine's events as they are emitted."}
+                </div>
               )}
             </div>
-          </div>
-          <div className="ledger-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Sequence</th>
-                  <th>Timestamp</th>
-                  <th>Group</th>
-                  <th>Event</th>
-                  <th>State / detail</th>
-                  <th>Source / block</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((e) => (
-                  <tr
-                    key={e.seq}
-                    className={cn(inspection?.seq === e.seq && "inspected")}
-                  >
-                    <td>
-                      <button
-                        className="event-link"
-                        onClick={() => {
-                          setFollowing(false);
-                          setSelected(e.group);
-                          setInspection(e);
-                          setRaw(true);
-                          document
-                            .querySelector(".detail-panel")
-                            ?.scrollIntoView({
-                              behavior: "instant",
-                              block: "nearest",
-                            });
-                        }}
-                        aria-label={`Inspect event ${e.seq}`}
-                      >
-                        #{e.seq}
-                      </button>
-                    </td>
-                    <td>{timestamp(e.timestamp_unix_ns)}</td>
-                    <td>
-                      <span className="group-tag">{e.group}</span>
-                    </td>
-                    <td>{e.type === "stage" ? e.stage : e.type}</td>
-                    <td
-                      className={
-                        e.status === "failed" || e.type === "syscall_failed"
-                          ? "failed-text"
-                          : ""
-                      }
-                    >
-                      {e.status ??
-                        e.state ??
-                        e.detail?.name ??
-                        (e.type === "artifact" ? e.name : "recorded")}
-                    </td>
-                    <td>
-                      {e.rip ?? e.block_rip ?? "—"}
-                      {e.block_id !== undefined ? ` / ${e.block_id}` : ""}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!events.length && (
-              <div className="ledger-empty">
-                {run
-                  ? "No matching events in the recent window. The complete journal is available to download."
-                  : "Start a run to see the engine's events as they are emitted."}
-              </div>
-            )}
-          </div>
-          <div className="ledger-footer">
-            <span>
-              Showing {events.length} of the latest 120 events. Complete history
-              stays in the journal.
-            </span>
-            <span>Engine sequence · no generated stage transitions</span>
-          </div>
-        </section>
-        <footer>
-          <span>
-            chunder <span className="footer-dot">·</span> iced-x86 / Cranelift /
-            RV64 interpreter
-          </span>
-          <span>
-            {run?.engine_run_id ? (
-              <span className="mono">Run {run.engine_run_id}</span>
-            ) : (
-              "Static ELF process runtime"
-            )}
-          </span>
-        </footer>
-      </main>
+            <div className="ledger-footer">
+              <span>
+                Showing {events.length} of the latest 120 events. Complete
+                history stays in the journal.
+              </span>
+              <span>Engine sequence · no generated stage transitions</span>
+            </div>
+          </section>
+
+          <p className="evidence-note">
+            Original engine receipts · repeating groups follow reached blocks ·
+            animation never advances a counter.
+          </p>
+        </div>
+      </dialog>
     </div>
   );
 }

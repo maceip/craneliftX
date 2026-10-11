@@ -59,6 +59,16 @@ async function upload(page: Page, name: string, buffer: Buffer) {
     .setInputFiles({ name, mimeType: "application/octet-stream", buffer });
   await expect(page).toHaveURL(/run=/, { timeout: 120000 });
 }
+async function openEvidence(page: Page, group?: string) {
+  if (
+    !(await page
+      .getByRole("dialog", { name: "Execution evidence" })
+      .isVisible())
+  )
+    await page.getByRole("button", { name: "View evidence" }).click();
+  if (group)
+    await page.getByLabel("Inspect operation group").selectOption(group);
+}
 test.afterEach(async ({ page, context }) => {
   await context.setOffline(false);
   if (runId(page)) {
@@ -102,17 +112,18 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   page.on("pageerror", (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
-  await expect(page.locator(".timeline-stage-button")).toHaveCount(13);
-  await expect(page.getByTestId("group-audit")).toHaveAttribute(
-    "data-state",
-    "Not exercised",
+  await expect(page.locator(".launch-action")).toHaveCount(2);
+  await expect(page.locator(".timeline-stage-button")).toHaveCount(0);
+  await expect(page.locator("nav, .timeline-inspector, .masthead")).toHaveCount(
+    0,
   );
   await page.screenshot({
     path: info.outputPath("idle-desktop.png"),
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Run Rust server" }).click();
+  await page.getByRole("button", { name: "Run demo" }).click();
   await expect(page).toHaveURL(/run=/);
+  await expect(page.locator(".timeline-stage-button")).toHaveCount(13);
   await expect(page.getByText("Live stream", { exact: true })).toBeVisible();
   await expect.poll(() => sequence(page)).toBeGreaterThan(100);
   const before = await runSummary(page),
@@ -141,6 +152,41 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   expect(final.verification?.first_connection_responses).toBe(12);
   expect(final.verification?.reconnects_on_first_connection).toBe(0);
   expect(final.counters.cache_invalidations).toBeGreaterThan(0);
+  await page.getByTestId("group-result").click();
+  await expect(page.getByTestId("telemetry-gauge")).toHaveAttribute(
+    "data-elapsed-ns",
+    String(final.elapsed_ns),
+  );
+  const metrics = {
+    elapsed_ns: final.elapsed_ns,
+    rv64_steps: final.counters.rv64_steps,
+    compiled_blocks: final.counters.compiled_blocks,
+    unique_lifted_instructions: final.counters.unique_lifted_instructions,
+    unique_lifted_bytes: final.counters.unique_lifted_bytes,
+    cache_invalidations: final.counters.cache_invalidations,
+  };
+  for (const [key, value] of Object.entries(metrics)) {
+    await expect(page.locator(`[data-metric="${key}"]`)).toHaveAttribute(
+      "data-value",
+      String(value),
+    );
+    await expect(
+      page.locator(`[data-metric="${key}"]`).getByRole("img"),
+    ).toHaveAttribute(
+      "aria-label",
+      key === "elapsed_ns"
+        ? (value! / 1e9).toFixed(3)
+        : value!.toLocaleString("en-US"),
+    );
+  }
+  await expect(
+    page.getByTestId("telemetry-gauge").getByRole("img"),
+  ).toHaveAttribute("aria-label", (final.elapsed_ns / 1e9).toFixed(1));
+  await page.screenshot({ path: info.outputPath("focus-result-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: info.outputPath("focus-result-mobile.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await openEvidence(page);
   await expect(
     page.getByRole("heading", { name: "Persistent connection verified" }),
   ).toBeVisible();
@@ -175,7 +221,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
     );
   expect(final.groups.audit.completed).toBe(final.counters.compiled_blocks);
   expect(final.groups.audit.output?.verdict).toBe("accepted");
-  await page.getByTestId("group-audit").click();
+  await openEvidence(page, "audit");
   await expect(page.getByTestId("audit-output")).toBeVisible();
   await expect(
     page.getByRole("list", { name: "Instruction policy checks" }),
@@ -196,12 +242,12 @@ test("13 groups consume real Rust server events live, recover a connection, and 
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByTestId("group-decode").click();
+  await openEvidence(page, "decode");
   await page.getByRole("button", { name: "View raw JSON" }).click();
   expect(JSON.parse(await page.getByTestId("raw-event").innerText())).toEqual(
     final.groups.decode.output,
   );
-  await page.getByTestId("group-artifacts").click();
+  await openEvidence(page, "artifacts");
   await page.getByRole("button", { name: "View output" }).click();
   const artifact = final.groups.artifacts.output!;
   const download = await page.request.get(
@@ -229,7 +275,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
     .map((l) => JSON.parse(l.slice(6)))
     .filter((e) => e.seq);
   expect(received).toEqual(journal.slice(10));
-  await page.getByTestId("group-decode").click();
+  await openEvidence(page, "decode");
   await page.getByRole("button", { name: "View output" }).click();
   await page.screenshot({
     path: info.outputPath("completed-desktop.png"),
@@ -440,7 +486,7 @@ test("shellcode policy findings show actual rejection before lowering and surviv
     "data-state",
     "Not exercised",
   );
-  await page.getByTestId("group-audit").click();
+  await openEvidence(page, "audit");
   await expect(page.getByTestId("audit-output")).toContainText(
     "Instruction policy rejected",
   );
@@ -457,7 +503,7 @@ test("shellcode policy findings show actual rejection before lowering and surviv
   const final = await snapshot(page);
   expect(final.counters.rv64_steps ?? 0).toBe(0);
   await page.reload();
-  await page.getByTestId("group-audit").click();
+  await openEvidence(page, "audit");
   await expect(page.getByTestId("audit-output")).toContainText(
     "Instruction policy rejected",
   );
@@ -485,7 +531,7 @@ test("runtime stack rejection is shown after accepted inspection and actual RV64
     "data-state",
     "Failed",
   );
-  await page.getByTestId("group-audit").click();
+  await openEvidence(page, "audit");
   await expect(page.getByTestId("audit-output")).toContainText(
     "Live stack bounds",
   );
@@ -528,7 +574,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
   const timeline = page.getByTestId("pipeline-timeline");
-  await expect(page.locator("[data-stage-visual]")).toHaveCount(13);
+  await expect(page.locator("[data-stage-visual]")).toHaveCount(0);
   await expect(
     page.locator('.timeline-step:not([data-motion="off"])'),
   ).toHaveCount(0);
@@ -586,8 +632,8 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     await expect
       .poll(() =>
         timeline.evaluate((el) => {
-          const toolbar = el
-            .querySelector(".timeline-toolbar")!
+          const footer = el
+            .querySelector(".focus-transport")!
             .getBoundingClientRect();
           return ["previous", "current", "next"].every((context) => {
             const card = el.querySelector(
@@ -596,9 +642,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
             if (!card) return false;
             const rect = card.getBoundingClientRect();
             return (
-              Math.min(rect.bottom, innerHeight) -
-                Math.max(rect.top, toolbar.bottom) >
-              35
+              Math.min(rect.bottom, footer.top) - Math.max(rect.top, 0) > 35
             );
           });
         }),
@@ -623,7 +667,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
       ).toBe(1);
     }
     const buttons = await page
-      .locator(".run-actions button, .timeline-controls button")
+      .locator(".timeline-controls button")
       .evaluateAll((elements) =>
         elements.map((el) => {
           const css = getComputedStyle(el);

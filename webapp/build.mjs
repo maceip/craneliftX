@@ -4,7 +4,7 @@ const watch = process.argv.includes("--watch");
 await mkdir("dist", { recursive: true });
 await cp("public", "dist", { recursive: true });
 const options = {
-  entryPoints: { app: "src/index.tsx", "app-style": "src/styles.css" },
+  entryPoints: { app: "src/index.tsx", "app-style": "src/app.css" },
   bundle: true,
   minify: !watch,
   sourcemap: true,

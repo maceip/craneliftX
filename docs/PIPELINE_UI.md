@@ -27,7 +27,7 @@ npm --prefix webapp run build
 .venv/bin/python webapp/server.py --port 8877
 ```
 
-Open **http://127.0.0.1:8877/**. Select **Run Rust server** or **Open binary**.
+Open **http://127.0.0.1:8877/**. Select **Run demo** or **Open binary**.
 The binary upload limit is 64 MiB. One guest process runs at a time, with a
 120-second engine deadline. A file is translated as guest control flow reaches
 its instructions; input file length is not a measure of lifted code.
@@ -104,10 +104,12 @@ span can become active again when the next block reaches that operation.
 
 ## Connected timeline and motion
 
-All thirteen groups appear on a connected vertical timeline. The selected card
-is emphasized; its previous and next neighbors remain visible with dimmed
-illustrations. Desktop keeps the event inspector alongside the timeline. On
-mobile, manually selecting a card opens its inspector inside that card.
+The dark launch screen offers **Run demo** and **Open binary**. During a run,
+all thirteen groups occupy a connected vertical timeline, centered on one large
+operation card. The preceding and following cards remain partly visible and
+dimmed. There is no navigation bar or persistent side inspector. **Evidence**
+opens an explicit modal containing the original event inspector, counters,
+network verification, activity graph and downloadable ledger.
 Cards share the same header, illustration and receipt-footer dimensions,
 padding, flat elevation and typography. Operation glyphs share one size per
 breakpoint; controls share a single height, radius and type size. Motion uses
@@ -131,10 +133,20 @@ animations leaves the live ledger and values updating. Terminal state and
 failure colors still require their actual engine/coordinator evidence.
 
 **Follow live events** samples the most recently received group every 600 ms
-and centers its card below the toolbar. The ledger still publishes its normal
+and centers its card in the viewport. The ledger still publishes its normal
 50 ms batches. Focus may skip operations that complete between samples; it never
 queues a fictional linear tour. User scrolling, selecting a stage, or pinning a
 ledger record stops following. Saved runs open with following disabled.
+
+The floating seconds dial uses `run.elapsed_ns`, the latest emitted engine
+monotonic timestamp. It does not interpolate missing engine time or imply a
+completion percentage. Its one-minute dial wraps every sixty measured seconds.
+On completion, the result card displays a multicolored LED-matrix readout of
+elapsed seconds, RV64 instruction count, compiled blocks, unique source
+instructions/bytes and cache invalidations. TCP verification comes from the
+coordinator's real test-client receipts. Missing counters display a dash; no CPU,
+RAM, throughput or other uncollected performance metric is invented. LED pixel
+patterns are display-font geometry, distinct from instruction/group sphere dots.
 
 The inspector shows emitted source addresses, decoded instructions, mappings,
 artifacts, counters, or raw JSON. Selecting a ledger record pins that exact

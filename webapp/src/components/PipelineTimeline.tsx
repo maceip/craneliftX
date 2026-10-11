@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fibDir, makeProj } from "thinking-orbs";
+import { PerformanceSummary } from "./Telemetry";
 import {
   bytes,
   duration,
@@ -450,33 +451,9 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           </small>
         </div>
       );
-    case "result": {
-      const result = run?.engine_result;
-      return result ? (
-        <div
-          className={`result-illustration ${result.status === "completed" ? "result-success" : "result-failure"}`}
-          data-source-seq={result.seq}
-        >
-          <span className="result-seal" aria-hidden="true">
-            {result.status === "completed" ? "✓" : "!"}
-          </span>
-          <div>
-            <strong>
-              {result.status === "completed"
-                ? "Execution completed"
-                : "Execution failed"}
-            </strong>
-            <span>
-              {result.report
-                ? `${number(result.report.rv64_steps)} RV64 instructions reported`
-                : result.error}
-            </span>
-            <small>
-              Terminal engine receipt #{result.seq} ·{" "}
-              {timestamp(result.timestamp_unix_ns)} UTC
-            </small>
-          </div>
-        </div>
+    case "result":
+      return run?.engine_result ? (
+        <PerformanceSummary run={run} />
       ) : (
         <Waiting kind="result">
           {run && terminal(run.status)
@@ -484,7 +461,6 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             : "Waiting for the engine's final result"}
         </Waiting>
       );
-    }
     default:
       return null;
   }
@@ -497,7 +473,6 @@ function TimelineStep({
   onSelect,
   enabled,
   liveAfter,
-  children,
 }: {
   group: Group;
   run: Run | null;
@@ -506,7 +481,6 @@ function TimelineStep({
   onSelect: () => void;
   enabled: boolean;
   liveAfter: number | null;
-  children?: React.ReactNode;
 }) {
   const element = useRef<HTMLLIElement>(null);
   const [visible, setVisible] = useState(false),
@@ -559,7 +533,7 @@ function TimelineStep({
             <strong>{group.label}</strong>
             <small>
               {group.count
-                ? `${number(group.count)} events · ${number(group.completed)} completed spans`
+                ? `${number(group.count)} ${group.count === 1 ? "event" : "events"} · ${number(group.completed)} completed ${group.completed === 1 ? "span" : "spans"}`
                 : "No events recorded"}
             </small>
           </span>
@@ -588,9 +562,6 @@ function TimelineStep({
                 : (group.last_event?.type ?? "")}
           </span>
         </div>
-        {children && (
-          <div className="timeline-inline-inspector">{children}</div>
-        )}
       </div>
     </li>
   );
@@ -604,7 +575,9 @@ export function PipelineTimeline({
   onFollow,
   connection,
   liveAfter,
-  children,
+  controls,
+  status,
+  obscured,
 }: {
   groups: Group[];
   run: Run | null;
@@ -614,57 +587,59 @@ export function PipelineTimeline({
   onFollow: (value: boolean) => void;
   connection: string;
   liveAfter: number | null;
-  children: React.ReactNode;
+  controls: React.ReactNode;
+  status: React.ReactNode;
+  obscured: boolean;
 }) {
   const [paused, setPaused] = useState(false),
     [reduced, setReduced] = useState(false),
-    [visible, setVisible] = useState(true),
-    [compact, setCompact] = useState(false);
+    [visible, setVisible] = useState(true);
   useEffect(() => {
-    const media = matchMedia("(prefers-reduced-motion: reduce)"),
-      mobile = matchMedia("(max-width: 900px)");
+    const media = matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => {
         setReduced(media.matches);
-        setCompact(mobile.matches);
       },
       visibility = () => setVisible(document.visibilityState === "visible");
     update();
     visibility();
     media.addEventListener("change", update);
-    mobile.addEventListener("change", update);
     document.addEventListener("visibilitychange", visibility);
     return () => {
       media.removeEventListener("change", update);
-      mobile.removeEventListener("change", update);
       document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
   const index = groups.findIndex((g) => g.id === selected);
+  const previousFocus = useRef({ id: "", index: -1 });
   useLayoutEffect(() => {
-    if (!following || !run) return;
+    if (!run || obscured) return;
     const step = document.getElementById(`timeline-${selected}`);
     if (!step) return;
-    // Center below the sticky toolbar, including after a receipt changes the
-    // selected card's height. Never animate a long journey through stale steps.
-    const center = () => {
-      const toolbar = document
-        .querySelector(".timeline-toolbar")!
-        .getBoundingClientRect().height;
+    // Move naturally to an adjacent observed group. A new reached block can
+    // jump back several groups; never scroll through a fictional stage tour.
+    const adjacent =
+      following &&
+      !paused &&
+      !reduced &&
+      previousFocus.current.id === run.id &&
+      Math.abs(index - previousFocus.current.index) === 1;
+    previousFocus.current = { id: run.id, index };
+    const center = (behavior: ScrollBehavior = "instant") => {
       const rect = step.getBoundingClientRect();
       window.scrollTo({
-        top:
-          window.scrollY +
-          rect.top +
-          rect.height / 2 -
-          (innerHeight + toolbar) / 2,
-        behavior: "instant",
+        top: window.scrollY + rect.top + rect.height / 2 - innerHeight / 2,
+        behavior,
       });
     };
-    center();
-    const observer = new ResizeObserver(center);
+    center(adjacent ? "smooth" : "instant");
+    let measured = false;
+    const observer = new ResizeObserver(() => {
+      if (measured) center();
+      measured = true;
+    });
     observer.observe(step);
     return () => observer.disconnect();
-  }, [following, selected, run?.id, compact]);
+  }, [following, selected, run?.id, obscured, paused, reduced]);
   useEffect(() => {
     const manual = () => onFollow(false);
     const keyboard = (e: KeyboardEvent) => {
@@ -695,6 +670,7 @@ export function PipelineTimeline({
   }, [onFollow]);
   const enabled =
     !paused &&
+    !obscured &&
     !reduced &&
     visible &&
     connection === "live" &&
@@ -708,32 +684,26 @@ export function PipelineTimeline({
       data-motion-enabled={enabled}
       data-following={following}
     >
-      <div className="timeline-toolbar">
-        <div>
-          <h2>
-            Execution timeline{" "}
-            <span className="count-label">{groups.length} groups</span>
-          </h2>
-          <p>
-            Previous, current and next operation · groups repeat as blocks are
-            reached.
-          </p>
-        </div>
+      <div className="focus-transport">
+        <div className="focus-stream-caption">{status}</div>
         <div className="timeline-controls">
           <button
             type="button"
+            aria-label="Follow live events"
             aria-pressed={following}
             onClick={() => onFollow(!following)}
           >
-            Follow live events
+            Follow live
           </button>
           <button
             type="button"
+            aria-label={paused ? "Resume animations" : "Pause animations"}
             aria-pressed={paused}
             onClick={() => setPaused(!paused)}
           >
-            {paused ? "Resume animations" : "Pause animations"}
+            {paused ? "Resume motion" : "Pause motion"}
           </button>
+          {controls}
         </div>
       </div>
       <div className="timeline-layout">
@@ -756,14 +726,11 @@ export function PipelineTimeline({
               onSelect={() => onSelect(group.id)}
               enabled={enabled}
               liveAfter={liveAfter}
-            >
-              {compact && group.id === selected && !following ? children : null}
-            </TimelineStep>
+            />
           ))}
         </ol>
-        {!compact && <div className="timeline-inspector">{children}</div>}
       </div>
-      <p className="timeline-explanation">
+      <p className="visually-hidden">
         Motion indicates an open engine span or a newly received event. Values
         advance only from the ledger.{" "}
         {reduced ? "Reduced motion is enabled." : ""}

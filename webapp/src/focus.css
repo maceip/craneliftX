@@ -1,0 +1,943 @@
+/* Focus surface: one launch decision, then a single live scene. Shared scene
+   dimensions keep every operation aligned; detailed evidence is opt-in. */
+:root {
+  color-scheme: dark;
+  color: #e4e9df;
+  background: #101310;
+  --surface: #181d18;
+  --line: #323b31;
+  --muted: #a2ad9e;
+  --accent: #f29a67;
+  --accent-soft: #30251e;
+}
+.focus-shell {
+  min-height: 100dvh;
+}
+.focus-shell button:focus-visible,
+.focus-shell select:focus-visible,
+.opcode-scroller:focus-visible {
+  outline-color: var(--accent);
+}
+.launch-screen {
+  min-height: 100dvh;
+  max-width: 880px;
+  padding: 72px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.launch-wordmark {
+  font: 12px var(--mono);
+  color: var(--accent);
+  margin-bottom: 28px;
+}
+.launch-screen h1 {
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.15;
+  font-weight: 500;
+}
+.launch-description {
+  margin-top: 18px;
+  color: var(--muted);
+  font: 12px var(--mono);
+  line-height: 1.7;
+}
+.launch-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  margin: 44px 0 24px;
+}
+.launch-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 192px;
+  padding: 28px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: inherit;
+}
+.launch-action:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.launch-primary {
+  border-color: #65513e;
+}
+.launch-symbol {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  font-size: 32px;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.launch-action strong {
+  font-size: 20px;
+  font-weight: 500;
+}
+.launch-action > span:last-child {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.launch-caption,
+.launch-history {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.launch-history {
+  margin-top: 24px;
+}
+.launch-history summary {
+  cursor: pointer;
+}
+.launch-history select {
+  margin-top: 12px;
+  max-width: 300px;
+  padding: 8px;
+  background: var(--surface);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.execution-screen {
+  max-width: none;
+  padding: 0;
+}
+.focus-error {
+  position: fixed;
+  z-index: 20;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(90vw, 650px);
+  padding: 12px 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ffb39d;
+  background: #2a211b;
+  border: 1px solid #674235;
+  border-radius: 8px;
+}
+.launch-screen .focus-error {
+  position: static;
+  transform: none;
+  margin-top: 18px;
+}
+.focus-shell .pipeline-timeline {
+  --scene-height: clamp(380px, 58dvh, 500px);
+  --stage-inset: 32px;
+  --stage-glyph: 112px;
+  --stage-panel: #1c231c;
+  --stage-stroke: #63715d;
+  --stage-fill: #b3c399;
+  margin: 0;
+}
+.focus-shell .timeline-layout {
+  display: block;
+}
+.focus-shell .timeline-list {
+  width: min(760px, calc(100% - 96px));
+  margin: auto;
+  padding: calc(50dvh - var(--scene-height) / 2) 0;
+}
+.focus-shell .timeline-step {
+  padding-bottom: 28px;
+  scroll-margin: 0;
+}
+.focus-shell .timeline-step::before {
+  left: 50%;
+  top: auto;
+  bottom: 0;
+  height: 28px;
+  border-color: #526146;
+  opacity: 0.5;
+}
+.focus-shell .timeline-step .timeline-node {
+  z-index: 1;
+  left: 28px;
+  top: 23px;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border-color: var(--stage-stroke);
+  color: var(--muted);
+}
+.focus-shell .timeline-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: none;
+  height: var(--scene-height);
+  transition:
+    opacity 200ms ease-out,
+    border-color 200ms ease-out;
+}
+.focus-shell .timeline-step.is-current .timeline-card {
+  border-color: #727c5f;
+  background: var(--surface);
+}
+.focus-shell .timeline-step.is-current .timeline-node {
+  box-shadow: none;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.focus-shell .timeline-step[data-context="previous"] .timeline-card,
+.focus-shell .timeline-step[data-context="next"] .timeline-card {
+  opacity: 0.32;
+}
+.focus-shell .timeline-step[data-context="distant"] .timeline-card {
+  opacity: 0.1;
+}
+.focus-shell .timeline-step:focus-within .timeline-card,
+.focus-shell .timeline-step:hover .timeline-card {
+  opacity: 1;
+}
+.focus-shell .timeline-stage-button {
+  height: 102px;
+  padding: 24px var(--stage-inset) 12px 76px;
+  gap: 10px 16px;
+  color: var(--muted);
+}
+.focus-shell .timeline-stage-button strong {
+  color: #e5ecdf;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+.focus-shell .timeline-step.is-current .timeline-stage-button strong {
+  color: #e5ecdf;
+}
+.focus-shell .timeline-stage-button small {
+  font-size: 10px;
+  line-height: 14px;
+}
+.focus-shell .timeline-state {
+  font-size: 10px;
+}
+.focus-shell .stage-illustration {
+  height: calc(var(--scene-height) - 146px);
+  padding: 20px var(--stage-inset);
+}
+.focus-shell .stage-illustration > div,
+.focus-shell .stage-illustration > ul {
+  opacity: 1;
+}
+.focus-shell .stage-illustration strong {
+  font-size: 17px;
+}
+.focus-shell .stage-illustration span {
+  font-size: 13px;
+}
+.focus-shell .stage-illustration code {
+  font-size: 12px;
+}
+.focus-shell .stage-illustration small {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.focus-shell .timeline-provenance {
+  height: 42px;
+  padding: 12px var(--stage-inset);
+  font-size: 10px;
+  border-color: var(--line);
+}
+.focus-shell .orb-caption,
+.focus-shell .input-illustration,
+.focus-shell .execution-illustration,
+.focus-shell .result-illustration,
+.focus-shell .decode-illustration,
+.focus-shell .visual-waiting {
+  gap: 24px;
+}
+.focus-shell .visual-waiting {
+  font-size: 15px;
+  line-height: 1.7;
+}
+.focus-shell .waiting-diagram {
+  stroke: var(--stage-stroke);
+}
+.focus-shell .orb-guide {
+  stroke: var(--line);
+}
+.focus-shell .binary-sheet {
+  border-color: var(--stage-stroke);
+  padding: 28px 20px;
+}
+.focus-shell .binary-sheet > span {
+  border-color: var(--stage-stroke);
+  margin-bottom: 14px;
+}
+.focus-shell .hash-strip {
+  color: #b9c7ac;
+}
+.focus-shell .segment-row {
+  grid-template-columns: 92px minmax(40px, 1fr) 140px;
+  gap: 14px;
+}
+.focus-shell .segment-track {
+  height: 18px;
+  background: #273123;
+}
+.focus-shell .segment-row > span {
+  font-size: 11px;
+}
+.focus-shell .register-illustration > div,
+.focus-shell .opcode-track li,
+.focus-shell .beam-end,
+.focus-shell .cache-tiles > div,
+.focus-shell .execution-register {
+  border-color: var(--line);
+  background: var(--stage-panel);
+}
+.focus-shell .register-illustration > div {
+  padding: 18px 12px;
+}
+.focus-shell .opcode-track li {
+  min-width: 150px;
+  padding: 14px;
+  gap: 10px;
+}
+.focus-shell .opcode-track li code {
+  color: var(--muted);
+}
+.focus-shell .opcode-track li strong {
+  color: var(--accent);
+  font-size: 14px;
+}
+.focus-shell .opcode-track li span {
+  font-size: 12px;
+}
+.focus-shell .policy-illustration {
+  gap: 12px;
+}
+.focus-shell .policy-illustration li {
+  padding: 14px 10px;
+  background: #202d20;
+  border-color: #3c5539;
+}
+.focus-shell .policy-illustration strong {
+  font-size: 12px;
+  white-space: normal;
+}
+.focus-shell .policy-illustration .policy-guarded {
+  background: #322c20;
+  border-color: #645638;
+}
+.focus-shell .policy-illustration .policy-rejected {
+  background: #35231d;
+  border-color: #725042;
+}
+.focus-shell .receipt-beam {
+  grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 100px;
+}
+.focus-shell .beam-end {
+  min-height: 100px;
+  padding: 18px 14px;
+  justify-content: center;
+  gap: 14px;
+}
+.focus-shell .beam-end strong {
+  font: 18px var(--mono);
+}
+.focus-shell .beam-track {
+  stroke: #4b5843;
+}
+.focus-shell .beam-wire {
+  height: 44px;
+}
+.focus-shell .visual-caption {
+  padding-top: 12px;
+}
+.focus-shell .file-illustration {
+  gap: 16px;
+}
+.focus-shell .receipt-file {
+  width: 36px;
+  height: 40px;
+  background: var(--stage-panel);
+  color: var(--accent);
+  border-color: var(--line);
+}
+.focus-shell .execution-illustration strong {
+  font: 24px var(--mono);
+  color: #d3e2c4;
+}
+.focus-shell .execution-register > span {
+  width: 9px;
+  height: 42px;
+}
+.focus-shell .execution-register > span:nth-child(2) {
+  height: 60px;
+}
+.focus-shell .cache-tiles > div {
+  padding: 14px;
+  gap: 12px;
+}
+.focus-shell .cache-tiles strong {
+  font: 18px var(--mono);
+}
+.focus-shell .receipt-glow {
+  background: #bb8c4c;
+}
+.focus-transport {
+  position: fixed;
+  z-index: 10;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #101310f5;
+}
+.focus-stream-caption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--muted);
+  max-width: 100%;
+}
+.focus-run-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-shell .timeline-controls {
+  gap: 6px;
+}
+.focus-shell .timeline-controls button,
+.evidence-heading button {
+  height: var(--control-height);
+  padding: 8px 12px;
+  border-radius: var(--control-radius);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--muted);
+  background: #191f18;
+  border: 1px solid var(--line);
+}
+.focus-shell .timeline-controls button[aria-pressed="true"] {
+  border-color: #605542;
+  color: #e3bf98;
+  background: #29251e;
+}
+.evidence-dialog {
+  width: min(1040px, calc(100% - 32px));
+  max-height: 88dvh;
+  padding: 0;
+  border: 1px solid #67745c;
+  border-radius: 12px;
+  background: var(--surface);
+  color: inherit;
+}
+.evidence-dialog::backdrop {
+  background: #060906dd;
+}
+.evidence-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 10;
+}
+.evidence-body {
+  padding: 20px;
+}
+.evidence-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+.evidence-group select {
+  padding: 8px;
+  background: #20261d;
+  color: #e0e8d9;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  max-width: 100%;
+}
+.evidence-body .detail-panel,
+.evidence-body .runtime-panel,
+.evidence-body .activity-panel,
+.evidence-body .ledger-panel,
+.evidence-body .network-panel {
+  background: var(--surface);
+  margin-bottom: 20px;
+}
+.evidence-body .detail-description,
+.evidence-body .event-provenance,
+.evidence-body .raw-output,
+.evidence-body .output-table th,
+.evidence-body .ledger-scroll th,
+.evidence-body .empty-output,
+.evidence-body .audit-output,
+.evidence-body .artifact-output,
+.evidence-body .output-toolbar,
+.evidence-body .output-values,
+.evidence-body .network-panel {
+  background: #181e16;
+  color: #c8d3bf;
+  border-color: var(--line);
+}
+.evidence-body .audit-check {
+  background: #202b1e;
+  border-color: #415d3c;
+}
+.evidence-body .audit-guarded {
+  background: #302b1d;
+  border-color: #685936;
+}
+.evidence-body .audit-rejected {
+  background: #33241c;
+  border-color: #7b4a33;
+}
+.evidence-body .audit-check p,
+.evidence-body .audit-findings,
+.evidence-body .audit-scope {
+  color: #bfc8b8;
+}
+.evidence-body .audit-verdict {
+  color: #b7dca3;
+}
+.evidence-body .audit-guarded .audit-verdict {
+  color: #edca7b;
+}
+.evidence-body .audit-rejected .audit-verdict {
+  color: #f7ac85;
+}
+.evidence-body .detail-index,
+.evidence-body .status {
+  background: #242d20;
+  color: #bdd8aa;
+  border-color: #41523a;
+}
+.evidence-body td,
+.evidence-body th,
+.evidence-body .output-values > div {
+  border-color: var(--line);
+}
+.evidence-body .text-button,
+.evidence-body .event-link {
+  color: var(--accent);
+}
+.evidence-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+.telemetry-gauge {
+  position: fixed;
+  z-index: 5;
+  right: 28px;
+  bottom: 116px;
+  width: 168px;
+  height: 168px;
+  color: #d8b579;
+  border-radius: 50%;
+  background: #111610ed;
+}
+.telemetry-dial {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.telemetry-dial line {
+  stroke: #617153;
+  stroke-width: 1;
+}
+.dial-outline {
+  stroke: #384332;
+  fill: none;
+}
+.dial-position {
+  fill: currentColor;
+}
+.dial-readout {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 38px;
+}
+.dial-readout small {
+  font: 7px var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.dial-readout span {
+  font-size: 9px;
+  color: var(--muted);
+}
+.matrix-number {
+  display: block;
+  width: 100%;
+  height: 32px;
+  overflow: visible;
+}
+.performance-summary {
+  width: 100%;
+  max-height: 100%;
+  overflow: auto;
+}
+.performance-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.performance-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.matrix-chip {
+  padding: 10px;
+  border: 1px dotted #95b580;
+  color: #95b580;
+  font: 11px var(--mono) !important;
+}
+.matrix-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px 22px;
+}
+.matrix-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.matrix-metric .matrix-number {
+  height: 25px;
+  max-width: 175px;
+  width: auto;
+  max-width: 100%;
+}
+.focus-shell .matrix-metric > span {
+  font: 10px var(--mono);
+  color: var(--muted);
+}
+.led-amber {
+  color: #e5b56c;
+}
+.led-mint {
+  color: #91d3ae;
+}
+.led-coral {
+  color: #ed9478;
+}
+.led-ice {
+  color: #93bfc7;
+}
+.led-lilac {
+  color: #bdb0d3;
+}
+.led-lime {
+  color: #bdd178;
+}
+.matrix-network {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dotted var(--line);
+}
+.matrix-network > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.focus-shell .matrix-network strong {
+  font-size: 12px;
+}
+.focus-shell .matrix-network small {
+  font-size: 10px;
+}
+.network-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: #d6ae70;
+}
+.network-led.passed {
+  background: #9ac67c;
+}
+@media (max-width: 1120px) {
+  .telemetry-gauge {
+    width: 116px;
+    height: 116px;
+    right: 20px;
+    top: 16px;
+    bottom: auto;
+  }
+  .dial-readout {
+    padding: 25px;
+    gap: 5px;
+  }
+  .dial-readout .matrix-number {
+    height: 20px;
+  }
+}
+@media (max-width: 720px) {
+  .launch-screen {
+    padding: 48px 24px;
+  }
+  .launch-actions {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-top: 32px;
+  }
+  .launch-action {
+    min-height: 152px;
+    padding: 22px;
+    gap: 8px;
+  }
+  .launch-symbol {
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    font-size: 26px;
+  }
+  .launch-action strong {
+    font-size: 18px;
+  }
+  .focus-shell .pipeline-timeline {
+    --scene-height: clamp(390px, 60dvh, 460px);
+    --stage-inset: 20px;
+    --stage-glyph: 76px;
+  }
+  .focus-shell .timeline-list {
+    width: calc(100% - 28px);
+  }
+  .focus-shell .timeline-step .timeline-node {
+    left: 16px;
+    top: 23px;
+    width: 26px;
+    height: 26px;
+    font-size: 9px;
+  }
+  .focus-shell .timeline-stage-button {
+    padding: 22px 18px 12px 52px;
+    height: 110px;
+    gap: 8px;
+  }
+  .focus-shell .timeline-stage-button strong {
+    font-size: 16px;
+  }
+  .focus-shell .timeline-stage-button small {
+    font-size: 9px;
+  }
+  .focus-shell .timeline-state {
+    font-size: 9px;
+  }
+  .focus-shell .stage-illustration {
+    height: calc(var(--scene-height) - 152px);
+    padding-block: 18px;
+  }
+  .focus-shell .timeline-provenance {
+    font-size: 8px;
+  }
+  .focus-shell .stage-illustration strong {
+    font-size: 14px;
+  }
+  .focus-shell .stage-illustration small {
+    font-size: 10px;
+  }
+  .focus-shell .stage-illustration code {
+    font-size: 10px;
+  }
+  .focus-shell .stage-illustration span {
+    font-size: 11px;
+  }
+  .focus-shell .orb-caption,
+  .focus-shell .input-illustration,
+  .focus-shell .execution-illustration,
+  .focus-shell .decode-illustration,
+  .focus-shell .visual-waiting {
+    gap: 16px;
+  }
+  .focus-shell .binary-sheet {
+    padding: 20px 12px;
+  }
+  .focus-shell .receipt-beam {
+    grid-template-columns: minmax(0, 1fr) 45px minmax(0, 1fr);
+    gap: 6px;
+  }
+  .focus-shell .beam-end {
+    padding: 12px 10px;
+    min-height: 88px;
+  }
+  .focus-shell .beam-end strong {
+    font-size: 13px;
+  }
+  .focus-shell .segment-row {
+    grid-template-columns: 66px minmax(20px, 1fr) 92px;
+    gap: 8px;
+  }
+  .focus-shell .segment-row > span {
+    font-size: 9px;
+  }
+  .focus-shell .policy-illustration strong {
+    font-size: 10px;
+  }
+  .focus-shell .policy-illustration li {
+    padding: 10px 7px;
+  }
+  .focus-shell .register-illustration > div {
+    padding: 12px 7px;
+  }
+  .focus-shell .cache-tiles > div {
+    padding: 10px;
+  }
+  .focus-shell .execution-illustration strong {
+    font-size: 22px;
+  }
+  .focus-shell .execution-register > span {
+    height: 28px;
+  }
+  .focus-shell .execution-register > span:nth-child(2) {
+    height: 40px;
+  }
+  .focus-transport {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 10px 6px;
+    gap: 8px;
+  }
+  .focus-shell .timeline-controls button {
+    padding-inline: 9px;
+    font-size: 10px;
+  }
+  .focus-run-name {
+    max-width: 115px;
+  }
+  .telemetry-gauge {
+    width: 98px;
+    height: 98px;
+    right: 16px;
+    top: 12px;
+  }
+  .dial-readout {
+    padding: 23px;
+    gap: 4px;
+  }
+  .dial-readout small {
+    font-size: 6px;
+  }
+  .dial-readout span {
+    font-size: 7px;
+  }
+  .matrix-metrics {
+    gap: 16px 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .matrix-metric .matrix-number {
+    height: 19px;
+  }
+  .focus-shell .matrix-metric > span {
+    font-size: 8px;
+  }
+  .performance-heading {
+    margin-bottom: 14px;
+    gap: 10px;
+  }
+  .performance-heading .matrix-chip {
+    padding: 8px;
+  }
+  .matrix-network {
+    margin-top: 14px;
+  }
+  .focus-shell .matrix-network strong {
+    font-size: 10px;
+  }
+  .focus-shell .matrix-network small {
+    font-size: 8px;
+  }
+  .evidence-dialog {
+    width: calc(100% - 16px);
+    max-height: 94dvh;
+  }
+  .evidence-heading {
+    padding: 12px;
+  }
+  .evidence-heading button {
+    font-size: 10px;
+    padding-inline: 8px;
+  }
+  .evidence-body {
+    padding: 12px;
+  }
+  .evidence-group {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-shell * {
+    transition: none !important;
+  }
+}
+
+.focus-shell .timeline-step[data-motion="receipt"] .receipt-glow {
+  animation-name: focus-receipt;
+}
+@keyframes focus-receipt {
+  from {
+    opacity: 0.06;
+    transform: scaleX(0.98);
+  }
+  to {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+.evidence-body .group-stats,
+.evidence-body .group-stats strong {
+  color: #bccab0;
+}
+.evidence-body .audit-verdict {
+  background: #283725;
+  border-color: #45643b;
+}
+.evidence-body .audit-guarded .audit-verdict {
+  background: #3c3320;
+  border-color: #786640;
+}
+.evidence-body .audit-rejected .audit-verdict {
+  background: #412d23;
+  border-color: #80543e;
+}
+.pipeline-timeline[data-motion-enabled="false"] .timeline-card {
+  transition: none;
+}
