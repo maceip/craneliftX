@@ -1,0 +1,773 @@
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { fibDir, makeProj } from "thinking-orbs";
+import {
+  bytes,
+  duration,
+  Group,
+  groupState,
+  LedgerEvent,
+  number,
+  Run,
+  terminal,
+  timestamp,
+} from "../pipeline";
+
+// Display only output belonging to the currently observed block. In particular,
+// never join block B's decode with block A's completed lowering/code generation.
+export function currentOutput(group?: Group): LedgerEvent | null {
+  if (!group) return null;
+  const last = group.last_event,
+    output = group.output;
+  if (
+    last?.block_id !== undefined &&
+    output?.block_id !== undefined &&
+    last.block_id !== output.block_id
+  )
+    return null;
+  return output;
+}
+function related(run: Run | null, id: string, blockId: unknown) {
+  const event = currentOutput(run?.groups[id]);
+  return blockId !== undefined && event?.block_id === blockId ? event : null;
+}
+function Orb({ items, label }: { items: string[]; label: string }) {
+  const project = makeProj(0.45, 0.25, 36, 36, 27);
+  // Reuse the recovered orb's sphere geometry. Each dot corresponds to an
+  // actual observed group/instruction; there are no decorative filler dots.
+  return (
+    <svg
+      className="ledger-orb"
+      viewBox="0 0 72 72"
+      role="img"
+      aria-label={label}
+    >
+      <circle className="orb-guide" cx="36" cy="36" r="28" />
+      <g className="orb-dots">
+        {items.map((item, index) => {
+          const [x, y, z] = project(...fibDir(index, items.length));
+          return (
+            <circle
+              key={item}
+              data-ledger-dot={item}
+              cx={x}
+              cy={y}
+              r={z > 0 ? 1.8 : 1.2}
+              opacity={z > 0 ? 1 : 0.4}
+            >
+              <title>{item}</title>
+            </circle>
+          );
+        })}
+      </g>
+    </svg>
+  );
+}
+function Beam({
+  from,
+  to,
+  source,
+  destination,
+}: {
+  from: string;
+  to: string;
+  source: string;
+  destination: string;
+}) {
+  return (
+    <div className="receipt-beam">
+      <div className="beam-end">
+        <small>{from}</small>
+        <strong>{source}</strong>
+      </div>
+      <svg viewBox="0 0 100 30" aria-hidden="true" className="beam-wire">
+        <path className="beam-track" d="M4 15H96" />
+        <path className="beam-dashes" d="M4 15H96" />
+        <circle className="beam-particle" cx="7" cy="15" r="3" />
+        <path className="beam-arrow" d="m89 9 7 6-7 6" />
+      </svg>
+      <div className="beam-end">
+        <small>{to}</small>
+        <strong>{destination}</strong>
+      </div>
+    </div>
+  );
+}
+// These outlines describe operations, not measurements. Data-bearing marks
+// (segments, opcodes, checks, dots) are rendered only from actual receipts.
+const operationOutlines = {
+  memory: "M8 9H56V53H8ZM8 23H56M8 38H56M17 15H23M17 30H30M17 45H24",
+  registers:
+    "M12 14H52V50H12ZM21 22H43V29H21ZM21 35H43V42H21ZM21 6V14M32 6V14M43 6V14M21 50V58M32 50V58M43 50V58",
+  decode:
+    "M7 14H24V27H7ZM7 37H24V50H7ZM30 32H55M47 24L55 32L47 40M39 13H57M39 51H57",
+  policy: "M8 12H56L38 34V49L26 55V34ZM17 21H47",
+  files: "M19 8H48V46H19ZM12 16V53H41M26 19H40M26 26H40M26 33H34",
+  result: "M32 8A24 24 0 1 1 31.99 8M32 18V32L41 39",
+  syscall: "M6 15H24V49H6ZM40 15H58V49H40ZM24 27H40M34 21L40 27L34 33M40 39H24",
+};
+function Waiting({
+  children,
+  kind,
+}: {
+  children: React.ReactNode;
+  kind: keyof typeof operationOutlines;
+}) {
+  return (
+    <div className="visual-waiting">
+      <svg className="waiting-diagram" viewBox="0 0 64 64" aria-hidden="true">
+        <path d={operationOutlines[kind]} />
+        <path className="operation-scan" d="M6 8H58" />
+      </svg>
+      <span>{children}</span>
+    </div>
+  );
+}
+function StageVisual({ group, run }: { group: Group; run: Run | null }) {
+  const output = currentOutput(group);
+  const event = group.active ? group.last_event : (output ?? group.last_event);
+  const complete = output?.status === "completed";
+  const blockId = group.last_event?.block_id;
+  switch (group.id) {
+    case "run": {
+      const observed = Object.values(run?.groups ?? {}).filter(
+        (g) => g.count > 0,
+      );
+      return (
+        <div className="orb-caption">
+          <Orb
+            items={observed.map((g) => g.id)}
+            label={`${observed.length} operation groups have recorded events`}
+          />
+          <div>
+            <strong>
+              {run?.engine_run_id
+                ? `${observed.length} groups recorded`
+                : "Waiting for a run"}
+            </strong>
+            <code>
+              {output?.decoder ?? "—"} · {output?.backend ?? "—"}
+            </code>
+            <small>One dot per observed group</small>
+          </div>
+        </div>
+      );
+    }
+    case "ingest":
+      return (
+        <div className="input-illustration">
+          <div className="binary-sheet" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <i className="scan-light" />
+          </div>
+          <div>
+            <strong>{run?.input_name ?? "Open a binary to begin"}</strong>
+            <span>
+              {bytes(run?.input?.bytes)}
+              {run?.input ? " read from input" : " · input size not recorded"}
+            </span>
+            <code className="hash-strip" data-testid="ingest-hash">
+              {run?.input?.sha256 ?? "Awaiting the input fingerprint"}
+            </code>
+            <small>SHA-256</small>
+          </div>
+        </div>
+      );
+    case "load": {
+      const segments = output?.details?.segments;
+      if (!Array.isArray(segments))
+        return (
+          <Waiting kind="memory">
+            {group.active
+              ? "Validating the ELF and mapping its load segments"
+              : "Load mappings have not been recorded"}
+          </Waiting>
+        );
+      const largest = Math.max(...segments.map((s) => s.memory_bytes));
+      return (
+        <div className="segment-illustration" data-source-seq={output?.seq}>
+          {segments.slice(0, 4).map((s) => (
+            <div
+              className="segment-row"
+              key={s.address}
+              data-address={s.address}
+              data-bytes={s.memory_bytes}
+            >
+              <code>{s.address}</code>
+              <div className="segment-track">
+                <span
+                  style={{
+                    width: `${largest ? (s.memory_bytes / largest) * 100 : 0}%`,
+                  }}
+                />
+                <i className="scan-light" />
+              </div>
+              <span>
+                {bytes(s.memory_bytes)} · R{s.writable ? "W" : "–"}
+                {s.executable ? "X" : "–"}
+              </span>
+            </div>
+          ))}
+          <small>
+            {segments.length} mapped segments · bars compare mapped byte lengths
+            {segments.length > 4 ? " · first four shown" : ""}
+          </small>
+        </div>
+      );
+    }
+    case "initialize":
+      return complete ? (
+        <div className="register-illustration" data-source-seq={output.seq}>
+          {[
+            ["Entry RIP", output.entry_rip],
+            ["Guest RSP", output.guest_rsp],
+            ["RV64 stack", bytes(output.rv64_stack_bytes)],
+          ].map(([key, value]) => (
+            <div key={key}>
+              <small>{key}</small>
+              <code>{value}</code>
+            </div>
+          ))}
+          <small>{number(output.state_words)} state words initialized</small>
+        </div>
+      ) : (
+        <Waiting kind="registers">
+          {group.active
+            ? "Initializing guest registers and stacks"
+            : "Guest state has not been initialized"}
+        </Waiting>
+      );
+    case "decode": {
+      const instructions =
+        output?.type === "harvest" ? output.instructions : null;
+      if (!Array.isArray(instructions))
+        return (
+          <Waiting kind="decode">
+            {group.active
+              ? `Decoding the reached block at ${group.last_event?.rip ?? "—"}`
+              : "No decoded instructions yet"}
+          </Waiting>
+        );
+      return (
+        <div
+          className="decode-illustration"
+          data-source-seq={output!.seq}
+          data-block-id={output!.block_id}
+        >
+          <Orb
+            items={instructions.map((i) => i.ip)}
+            label={`${instructions.length} dots, one per decoded instruction`}
+          />
+          <div
+            className="opcode-scroller"
+            role="region"
+            tabIndex={0}
+            aria-label="Decoded instruction bytes"
+          >
+            <ol className="opcode-track">
+              {instructions.map((i) => (
+                <li key={i.ip} data-ip={i.ip} data-bytes={i.bytes}>
+                  <code>{i.ip}</code>
+                  <strong>{i.bytes}</strong>
+                  <span>{i.asm}</span>
+                </li>
+              ))}
+            </ol>
+            <small>
+              {instructions.length} instructions · block {output!.block_id} ·
+              receipt #{output!.seq}
+            </small>
+          </div>
+        </div>
+      );
+    }
+    case "audit":
+      return Array.isArray(output?.checks) ? (
+        <ul className="policy-illustration" data-source-seq={output.seq}>
+          {output.checks.map((check: any) => (
+            <li key={check.rule} className={`policy-${check.verdict}`}>
+              <span aria-hidden="true" />
+              <strong title={check.label}>{check.label}</strong>
+              <small>
+                {check.verdict === "rejected"
+                  ? "Rejected"
+                  : check.verdict === "guarded"
+                    ? "Runtime checked"
+                    : "Passed"}
+              </small>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Waiting kind="policy">
+          {group.active
+            ? "Inspecting instruction, stack, memory and branch policy"
+            : "No instruction-policy findings recorded"}
+        </Waiting>
+      );
+    case "lower": {
+      const decoded = related(run, "decode", blockId);
+      return (
+        <div data-block-id={blockId} data-source-seq={output?.seq}>
+          <Beam
+            from="Reached x86 block"
+            to="Cranelift IR"
+            source={
+              decoded?.instructions
+                ? `${decoded.instructions.length} instructions`
+                : "—"
+            }
+            destination={complete ? bytes(output?.clif_bytes) : "Awaiting CLIF"}
+          />
+          <small className="visual-caption">
+            {group.last_event?.rip ?? "No reached block"}
+            {blockId !== undefined ? ` · block ${blockId}` : ""}
+            {complete ? ` · lowered in ${duration(output?.elapsed_ns)}` : ""}
+          </small>
+        </div>
+      );
+    }
+    case "codegen": {
+      const lowered = related(run, "lower", blockId);
+      return (
+        <div data-block-id={blockId} data-source-seq={output?.seq}>
+          <Beam
+            from="Cranelift IR"
+            to="RV64 machine code"
+            source={
+              lowered?.status === "completed" ? bytes(lowered.clif_bytes) : "—"
+            }
+            destination={complete ? bytes(output?.rv64_bytes) : "Awaiting RV64"}
+          />
+          <small className="visual-caption">
+            {complete ? output?.target : "Waiting for code-generation output"}
+            {blockId !== undefined ? ` · block ${blockId}` : ""}
+          </small>
+        </div>
+      );
+    }
+    case "artifacts": {
+      const files = [
+        ...new Map(
+          [
+            ...(run?.recent ?? []).filter((e) => e.type === "artifact"),
+            ...(output?.type === "artifact" ? [output] : []),
+          ].map((e) => [e.seq, e]),
+        ).values(),
+      ]
+        .sort((a, b) => b.seq - a.seq)
+        .slice(0, 3);
+      return files.length ? (
+        <ul className="file-illustration">
+          {files.map((file) => (
+            <li key={file.seq} data-source-seq={file.seq}>
+              <span className="receipt-file" aria-hidden="true">
+                ↳
+              </span>
+              <div>
+                <code>{file.name}</code>
+                <small>
+                  {bytes(file.bytes)} · SHA-256 {file.sha256.slice(0, 12)}…
+                </small>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Waiting kind="files">
+          {group.active
+            ? "Persisting source, CLIF and RV64 artifacts"
+            : "No artifacts saved"}
+        </Waiting>
+      );
+    }
+    case "execute":
+      return (
+        <div className="execution-illustration">
+          <div className="execution-register" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div>
+            <strong data-testid="timeline-rv64-steps">
+              {number(run?.counters.rv64_steps)}
+            </strong>
+            <span>reported RV64 instructions</span>
+            <small>
+              {number(run?.counters.block_executions)} completed block
+              executions
+            </small>
+          </div>
+        </div>
+      );
+    case "syscall":
+      return event ? (
+        <div data-source-seq={event.seq}>
+          <Beam
+            from="Guest syscall"
+            to="Host kernel bridge"
+            source={
+              event.detail?.name ??
+              (event.number !== undefined ? `#${event.number}` : "—")
+            }
+            destination={
+              event.type === "syscall_completed"
+                ? `result ${event.detail?.result ?? "—"}`
+                : event.type === "syscall_failed"
+                  ? "Failed"
+                  : "Awaiting result"
+            }
+          />
+          <small className="visual-caption">
+            {event.syscall_rip ?? event.detail?.rip ?? ""}
+            {event.elapsed_ns !== undefined
+              ? ` · ${duration(event.elapsed_ns)}`
+              : ""}{" "}
+            · receipt #{event.seq}
+          </small>
+        </div>
+      ) : (
+        <Waiting kind="syscall">No system call has been observed</Waiting>
+      );
+    case "cache":
+      return (
+        <div className="cache-illustration">
+          <div className="cache-tiles">
+            {(run?.history ?? []).slice(-4).map((p) => (
+              <div key={p.seq} data-source-seq={p.seq}>
+                <small>Compilation</small>
+                <strong>{p.blocks}</strong>
+                <code>{bytes(p.bytes)} reached</code>
+              </div>
+            ))}
+          </div>
+          <small>
+            {number(run?.counters.compiled_blocks)} compilations ·{" "}
+            {number(run?.counters.cache_invalidations)} invalidations · guest
+            state is retained
+          </small>
+        </div>
+      );
+    case "result": {
+      const result = run?.engine_result;
+      return result ? (
+        <div
+          className={`result-illustration ${result.status === "completed" ? "result-success" : "result-failure"}`}
+          data-source-seq={result.seq}
+        >
+          <span className="result-seal" aria-hidden="true">
+            {result.status === "completed" ? "✓" : "!"}
+          </span>
+          <div>
+            <strong>
+              {result.status === "completed"
+                ? "Execution completed"
+                : "Execution failed"}
+            </strong>
+            <span>
+              {result.report
+                ? `${number(result.report.rv64_steps)} RV64 instructions reported`
+                : result.error}
+            </span>
+            <small>
+              Terminal engine receipt #{result.seq} ·{" "}
+              {timestamp(result.timestamp_unix_ns)} UTC
+            </small>
+          </div>
+        </div>
+      ) : (
+        <Waiting kind="result">
+          {run && terminal(run.status)
+            ? "Run ended without a terminal engine receipt"
+            : "Waiting for the engine's final result"}
+        </Waiting>
+      );
+    }
+    default:
+      return null;
+  }
+}
+function TimelineStep({
+  group,
+  run,
+  selected,
+  context,
+  onSelect,
+  enabled,
+  liveAfter,
+  children,
+}: {
+  group: Group;
+  run: Run | null;
+  selected: boolean;
+  context: string;
+  onSelect: () => void;
+  enabled: boolean;
+  liveAfter: number | null;
+  children?: React.ReactNode;
+}) {
+  const element = useRef<HTMLLIElement>(null);
+  const [visible, setVisible] = useState(false),
+    [flash, setFlash] = useState(false);
+  const seq = group.last_event?.seq ?? 0,
+    seen = useRef(seq);
+  const state = groupState(group, run?.status);
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) =>
+      setVisible(entry.isIntersecting),
+    );
+    if (element.current) observer.observe(element.current);
+    return () => observer.disconnect();
+  }, []);
+  const motion = enabled && visible;
+  useEffect(() => {
+    const fresh = seq !== seen.current;
+    seen.current = seq;
+    setFlash(fresh && motion && liveAfter !== null && seq > liveAfter);
+    if (fresh && motion) {
+      const timer = setTimeout(() => setFlash(false), 220);
+      return () => clearTimeout(timer);
+    }
+  }, [seq, motion, liveAfter]);
+  const busy = motion && group.active > 0 && state === "Active";
+  return (
+    <li
+      ref={element}
+      id={`timeline-${group.id}`}
+      className={`timeline-step ${selected ? "is-current" : ""}`}
+      data-group={group.id}
+      data-context={context}
+      data-state={state}
+      data-motion={busy ? "active-span" : flash ? "receipt" : "off"}
+      data-motion-seq={seq || undefined}
+    >
+      <span className="timeline-node" aria-hidden="true">
+        {String(group.order).padStart(2, "0")}
+      </span>
+      <div className="timeline-card">
+        <button
+          type="button"
+          className="timeline-stage-button"
+          data-testid={`group-${group.id}`}
+          data-state={state}
+          aria-pressed={selected}
+          onClick={onSelect}
+        >
+          <span>
+            <strong>{group.label}</strong>
+            <small>
+              {group.count
+                ? `${number(group.count)} events · ${number(group.completed)} completed spans`
+                : "No events recorded"}
+            </small>
+          </span>
+          <span
+            className={`timeline-state state-${state.toLowerCase().replaceAll(" ", "-")}`}
+          >
+            <i aria-hidden="true" />
+            {state}
+          </span>
+        </button>
+        <div className="stage-illustration" data-stage-visual={group.id}>
+          <StageVisual group={group} run={run} />
+          <span key={seq} className="receipt-glow" aria-hidden="true" />
+        </div>
+        <div className="timeline-provenance">
+          <span>
+            {group.last_event
+              ? `#${seq} · ${timestamp(group.last_event.timestamp_unix_ns)} UTC`
+              : "Awaiting an engine event"}
+          </span>
+          <span>
+            {group.last_event?.block_id !== undefined
+              ? `Block ${group.last_event.block_id}`
+              : group.last_event?.type === "stage"
+                ? group.last_event.stage
+                : (group.last_event?.type ?? "")}
+          </span>
+        </div>
+        {children && (
+          <div className="timeline-inline-inspector">{children}</div>
+        )}
+      </div>
+    </li>
+  );
+}
+export function PipelineTimeline({
+  groups,
+  run,
+  selected,
+  onSelect,
+  following,
+  onFollow,
+  connection,
+  liveAfter,
+  children,
+}: {
+  groups: Group[];
+  run: Run | null;
+  selected: string;
+  onSelect: (id: string) => void;
+  following: boolean;
+  onFollow: (value: boolean) => void;
+  connection: string;
+  liveAfter: number | null;
+  children: React.ReactNode;
+}) {
+  const [paused, setPaused] = useState(false),
+    [reduced, setReduced] = useState(false),
+    [visible, setVisible] = useState(true),
+    [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const media = matchMedia("(prefers-reduced-motion: reduce)"),
+      mobile = matchMedia("(max-width: 900px)");
+    const update = () => {
+        setReduced(media.matches);
+        setCompact(mobile.matches);
+      },
+      visibility = () => setVisible(document.visibilityState === "visible");
+    update();
+    visibility();
+    media.addEventListener("change", update);
+    mobile.addEventListener("change", update);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      media.removeEventListener("change", update);
+      mobile.removeEventListener("change", update);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+  const index = groups.findIndex((g) => g.id === selected);
+  useLayoutEffect(() => {
+    if (!following || !run) return;
+    const step = document.getElementById(`timeline-${selected}`);
+    if (!step) return;
+    // Center below the sticky toolbar, including after a receipt changes the
+    // selected card's height. Never animate a long journey through stale steps.
+    const center = () => {
+      const toolbar = document
+        .querySelector(".timeline-toolbar")!
+        .getBoundingClientRect().height;
+      const rect = step.getBoundingClientRect();
+      window.scrollTo({
+        top:
+          window.scrollY +
+          rect.top +
+          rect.height / 2 -
+          (innerHeight + toolbar) / 2,
+        behavior: "instant",
+      });
+    };
+    center();
+    const observer = new ResizeObserver(center);
+    observer.observe(step);
+    return () => observer.disconnect();
+  }, [following, selected, run?.id, compact]);
+  useEffect(() => {
+    const manual = () => onFollow(false);
+    const keyboard = (e: KeyboardEvent) => {
+      if (
+        [
+          "PageDown",
+          "PageUp",
+          "Home",
+          "End",
+          "ArrowDown",
+          "ArrowUp",
+          " ",
+        ].includes(e.key) &&
+        !["INPUT", "SELECT", "BUTTON", "TEXTAREA"].includes(
+          (e.target as HTMLElement)?.tagName,
+        )
+      )
+        manual();
+    };
+    window.addEventListener("wheel", manual, { passive: true });
+    window.addEventListener("touchmove", manual, { passive: true });
+    window.addEventListener("keydown", keyboard);
+    return () => {
+      window.removeEventListener("wheel", manual);
+      window.removeEventListener("touchmove", manual);
+      window.removeEventListener("keydown", keyboard);
+    };
+  }, [onFollow]);
+  const enabled =
+    !paused &&
+    !reduced &&
+    visible &&
+    connection === "live" &&
+    !!run &&
+    !terminal(run.status);
+  return (
+    <section
+      className="pipeline-timeline"
+      aria-label="Connected pipeline timeline"
+      data-testid="pipeline-timeline"
+      data-motion-enabled={enabled}
+      data-following={following}
+    >
+      <div className="timeline-toolbar">
+        <div>
+          <h2>
+            Execution timeline{" "}
+            <span className="count-label">{groups.length} groups</span>
+          </h2>
+          <p>
+            Previous, current and next operation · groups repeat as blocks are
+            reached.
+          </p>
+        </div>
+        <div className="timeline-controls">
+          <button
+            type="button"
+            aria-pressed={following}
+            onClick={() => onFollow(!following)}
+          >
+            Follow live events
+          </button>
+          <button
+            type="button"
+            aria-pressed={paused}
+            onClick={() => setPaused(!paused)}
+          >
+            {paused ? "Resume animations" : "Pause animations"}
+          </button>
+        </div>
+      </div>
+      <div className="timeline-layout">
+        <ol className="timeline-list" aria-label="Pipeline operation groups">
+          {groups.map((group, i) => (
+            <TimelineStep
+              key={`${run?.id ?? "idle"}:${group.id}`}
+              group={group}
+              run={run}
+              selected={group.id === selected}
+              context={
+                i === index
+                  ? "current"
+                  : i === index - 1
+                    ? "previous"
+                    : i === index + 1
+                      ? "next"
+                      : "distant"
+              }
+              onSelect={() => onSelect(group.id)}
+              enabled={enabled}
+              liveAfter={liveAfter}
+            >
+              {compact && group.id === selected && !following ? children : null}
+            </TimelineStep>
+          ))}
+        </ol>
+        {!compact && <div className="timeline-inspector">{children}</div>}
+      </div>
+      <p className="timeline-explanation">
+        Motion indicates an open engine span or a newly received event. Values
+        advance only from the ledger.{" "}
+        {reduced ? "Reduced motion is enabled." : ""}
+      </p>
+    </section>
+  );
+}

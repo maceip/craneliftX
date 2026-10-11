@@ -102,7 +102,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   page.on("pageerror", (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
-  await expect(page.locator(".stage-button")).toHaveCount(13);
+  await expect(page.locator(".timeline-stage-button")).toHaveCount(13);
   await expect(page.getByTestId("group-audit")).toHaveAttribute(
     "data-state",
     "Not exercised",
@@ -176,15 +176,25 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   expect(final.groups.audit.completed).toBe(final.counters.compiled_blocks);
   expect(final.groups.audit.output?.verdict).toBe("accepted");
   await page.getByTestId("group-audit").click();
+  await expect(page.getByTestId("audit-output")).toBeVisible();
   await expect(
-    page.getByTestId("audit-output"),
+    page.getByRole("list", { name: "Instruction policy checks" }),
   ).toBeVisible();
-  await expect(page.getByRole("list", { name: "Instruction policy checks" })).toBeVisible();
-  await page.screenshot({ path: info.outputPath("audit-desktop.png"), fullPage: true });
+  await page.screenshot({
+    path: info.outputPath("audit-desktop.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("audit-output")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: info.outputPath("audit-mobile.png"), fullPage: true });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("audit-mobile.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByTestId("group-decode").click();
   await page.getByRole("button", { name: "View raw JSON" }).click();
@@ -417,41 +427,315 @@ test("unavailable execution and invalid requests are visible and rejected", asyn
   );
 });
 
-
-test("shellcode policy findings show actual rejection before lowering and survive reload", async ({ page }, info) => {
+test("shellcode policy findings show actual rejection before lowering and survive reload", async ({
+  page,
+}, info) => {
   await upload(page, "interrupt.elf", elf(Buffer.from([0xcd, 0x80])));
   await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
-  await expect(page.getByTestId("group-audit")).toHaveAttribute("data-state", "Failed");
-  await expect(page.getByTestId("group-lower")).toHaveAttribute("data-state", "Not exercised");
+  await expect(page.getByTestId("group-audit")).toHaveAttribute(
+    "data-state",
+    "Failed",
+  );
+  await expect(page.getByTestId("group-lower")).toHaveAttribute(
+    "data-state",
+    "Not exercised",
+  );
   await page.getByTestId("group-audit").click();
-  await expect(page.getByTestId("audit-output")).toContainText("Instruction policy rejected");
-  await expect(page.locator('.audit-check[data-verdict="rejected"]')).toContainText("int 80h");
-  await expect(page.locator('.audit-check[data-verdict="rejected"]')).toContainText("0x20100");
-  await page.screenshot({ path: info.outputPath("audit-rejected-desktop.png"), fullPage: true });
+  await expect(page.getByTestId("audit-output")).toContainText(
+    "Instruction policy rejected",
+  );
+  await expect(
+    page.locator('.audit-check[data-verdict="rejected"]'),
+  ).toContainText("int 80h");
+  await expect(
+    page.locator('.audit-check[data-verdict="rejected"]'),
+  ).toContainText("0x20100");
+  await page.screenshot({
+    path: info.outputPath("audit-rejected-desktop.png"),
+    fullPage: true,
+  });
   const final = await snapshot(page);
   expect(final.counters.rv64_steps ?? 0).toBe(0);
   await page.reload();
   await page.getByTestId("group-audit").click();
-  await expect(page.getByTestId("audit-output")).toContainText("Instruction policy rejected");
+  await expect(page.getByTestId("audit-output")).toContainText(
+    "Instruction policy rejected",
+  );
   await page.getByRole("button", { name: "View raw JSON" }).click();
-  expect(JSON.parse(await page.getByTestId("raw-event").innerText())).toEqual(final.groups.audit.output);
+  expect(JSON.parse(await page.getByTestId("raw-event").innerText())).toEqual(
+    final.groups.audit.output,
+  );
 });
 
-test("runtime stack rejection is shown after accepted inspection and actual RV64 execution", async ({ page }, info) => {
-  await upload(page, "transient-stack.elf", elf(Buffer.from([
-    0x48, 0x81, 0xec, 0, 0, 32, 0, 0x48, 0x81, 0xc4, 0, 0, 32, 0,
-    0x31, 0xff, 0xb8, 60, 0, 0, 0, 0x0f, 0x05,
-  ])));
+test("runtime stack rejection is shown after accepted inspection and actual RV64 execution", async ({
+  page,
+}, info) => {
+  await upload(
+    page,
+    "transient-stack.elf",
+    elf(
+      Buffer.from([
+        0x48, 0x81, 0xec, 0, 0, 32, 0, 0x48, 0x81, 0xc4, 0, 0, 32, 0, 0x31,
+        0xff, 0xb8, 60, 0, 0, 0, 0x0f, 0x05,
+      ]),
+    ),
+  );
   await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
-  await expect(page.getByTestId("group-audit")).toHaveAttribute("data-state", "Failed");
+  await expect(page.getByTestId("group-audit")).toHaveAttribute(
+    "data-state",
+    "Failed",
+  );
   await page.getByTestId("group-audit").click();
-  await expect(page.getByTestId("audit-output")).toContainText("Live stack bounds");
+  await expect(page.getByTestId("audit-output")).toContainText(
+    "Live stack bounds",
+  );
   await expect(page.getByTestId("audit-output")).toContainText("0x20100");
   const final = await snapshot(page);
   expect(final.counters.rv64_steps).toBeGreaterThan(0);
   expect(final.counters.syscalls).toBe(0);
   expect(final.groups.audit.output?.phase).toBe("execute");
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: info.outputPath("audit-runtime-rejected-mobile.png"), fullPage: true });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("audit-runtime-rejected-mobile.png"),
+    fullPage: true,
+  });
+});
+
+test("timeline motion follows real receipts, preserves neighbors and pauses independently of live values", async ({
+  page,
+  context,
+}, info) => {
+  await page.addInitScript(() => {
+    (window as any).motionReceipts = [];
+    document.addEventListener("animationstart", (event) => {
+      const step = (event.target as Element).closest<HTMLElement>(
+        ".timeline-step",
+      );
+      if (step && (window as any).motionReceipts.length < 500)
+        (window as any).motionReceipts.push({
+          group: step.dataset.group,
+          seq: Number(step.dataset.motionSeq),
+          kind: step.dataset.motion,
+          animation: event.animationName,
+        });
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+  const timeline = page.getByTestId("pipeline-timeline");
+  await expect(page.locator("[data-stage-visual]")).toHaveCount(13);
+  await expect(
+    page.locator('.timeline-step:not([data-motion="off"])'),
+  ).toHaveCount(0);
+  await expect(page.locator("[data-ledger-dot]")).toHaveCount(0);
+  // A real x86 ELF loops through close(-1). The explicit host bridge returns
+  // EBADF; durable syscall receipts keep it observable until we cancel it.
+  const program = elf(
+    Buffer.from([
+      0xb8, 3, 0, 0, 0, 0xbf, 255, 255, 255, 255, 0x0f, 0x05, 0xeb, 0xf2,
+    ]),
+  );
+  await upload(page, "timeline-syscalls.elf", program);
+  await expect.poll(() => sequence(page)).toBeGreaterThan(100);
+  expect((await runSummary(page)).status).toBe("running");
+  await page.getByTestId("group-execute").click();
+  await page
+    .locator("#timeline-execute")
+    .evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await expect(timeline).toHaveAttribute("data-following", "false");
+  await expect(page.locator("#timeline-execute")).toHaveAttribute(
+    "data-motion",
+    "active-span",
+  );
+  const runningAnimations = () =>
+    timeline.evaluate(
+      (el) =>
+        el
+          .getAnimations({ subtree: true })
+          .filter((a) => a.playState === "running").length,
+    );
+  await expect.poll(runningAnimations).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Pause animations" }).click();
+  await expect.poll(runningAnimations).toBe(0);
+  let cursor = await sequence(page);
+  await expect.poll(() => sequence(page)).toBeGreaterThan(cursor + 20);
+  await expect(page.getByTestId("group-execute")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "Resume animations" }).click();
+  await expect.poll(runningAnimations).toBeGreaterThan(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(runningAnimations).toBe(0);
+  cursor = await sequence(page);
+  await expect.poll(() => sequence(page)).toBeGreaterThan(cursor + 20);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(runningAnimations).toBeGreaterThan(0);
+  await context.setOffline(true);
+  await expect(timeline).toHaveAttribute("data-motion-enabled", "false");
+  await expect.poll(runningAnimations).toBe(0);
+  await context.setOffline(false);
+  await expect(timeline).toHaveAttribute("data-motion-enabled", "true");
+  await page.getByRole("button", { name: "Follow live events" }).click();
+  const neighborsVisible = async () => {
+    await expect
+      .poll(() =>
+        timeline.evaluate((el) => {
+          const toolbar = el
+            .querySelector(".timeline-toolbar")!
+            .getBoundingClientRect();
+          return ["previous", "current", "next"].every((context) => {
+            const card = el.querySelector(
+              `[data-context="${context}"] .timeline-card`,
+            );
+            if (!card) return false;
+            const rect = card.getBoundingClientRect();
+            return (
+              Math.min(rect.bottom, innerHeight) -
+                Math.max(rect.top, toolbar.bottom) >
+              35
+            );
+          });
+        }),
+      )
+      .toBe(true);
+  };
+  const consistentGeometry = async () => {
+    for (const selector of [
+      ".timeline-stage-button",
+      ".stage-illustration",
+      ".timeline-provenance",
+    ]) {
+      const dimensions = await page.locator(selector).evaluateAll((elements) =>
+        elements.map((el) => {
+          const rect = el.getBoundingClientRect();
+          return [rect.x, rect.width, rect.height].map((n) => Math.round(n));
+        }),
+      );
+      expect(
+        new Set(dimensions.map((d) => JSON.stringify(d))).size,
+        selector,
+      ).toBe(1);
+    }
+    const buttons = await page
+      .locator(".run-actions button, .timeline-controls button")
+      .evaluateAll((elements) =>
+        elements.map((el) => {
+          const css = getComputedStyle(el);
+          return [
+            el.getBoundingClientRect().height,
+            css.fontSize,
+            css.borderRadius,
+          ];
+        }),
+      );
+    expect(new Set(buttons.map((d) => JSON.stringify(d))).size).toBe(1);
+  };
+  await neighborsVisible();
+  await consistentGeometry();
+  await page.screenshot({ path: info.outputPath("timeline-live-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await neighborsVisible();
+  await consistentGeometry();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: info.outputPath("timeline-live-mobile.png") });
+  await page.mouse.move(200, 400);
+  await page.mouse.wheel(0, -150);
+  await expect(timeline).toHaveAttribute("data-following", "false");
+  const selected = await page
+    .locator(".timeline-step.is-current")
+    .getAttribute("data-group");
+  cursor = await sequence(page);
+  await expect.poll(() => sequence(page)).toBeGreaterThan(cursor + 20);
+  await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+    "data-group",
+    selected!,
+  );
+  await page.getByRole("button", { name: "Stop execution" }).click();
+  await expect
+    .poll(async () => (await runSummary(page)).status)
+    .toBe("cancelled");
+  const final = await snapshot(page);
+  await expect(page.getByTestId("event-sequence")).toHaveText(
+    String(final.cursor),
+  );
+  await expect.poll(runningAnimations).toBe(0);
+  await expect(page.getByTestId("ingest-hash")).toHaveText(
+    createHash("sha256").update(program).digest("hex"),
+  );
+  const decode = final.groups.decode.output!;
+  expect(
+    await page.locator(".opcode-track li").evaluateAll((items) =>
+      items.map((i) => ({
+        ip: (i as HTMLElement).dataset.ip,
+        bytes: (i as HTMLElement).dataset.bytes,
+        asm: i.querySelector("span")!.textContent,
+      })),
+    ),
+  ).toEqual(decode.instructions);
+  await expect(
+    page.locator('[data-stage-visual="decode"] [data-ledger-dot]'),
+  ).toHaveCount(decode.instructions.length);
+  expect(
+    await page.locator(".segment-row").evaluateAll((items) =>
+      items.map((i) => ({
+        address: (i as HTMLElement).dataset.address,
+        memory_bytes: Number((i as HTMLElement).dataset.bytes),
+      })),
+    ),
+  ).toEqual(
+    final.groups.load
+      .output!.details.segments.slice(0, 4)
+      .map((s: any) => ({ address: s.address, memory_bytes: s.memory_bytes })),
+  );
+  for (const group of ["lower", "codegen"]) {
+    const output = final.groups[group].output!;
+    await expect(
+      page.locator(`[data-stage-visual="${group}"] > [data-block-id]`),
+    ).toHaveAttribute("data-block-id", String(output.block_id));
+    await expect(
+      page.locator(`[data-stage-visual="${group}"] > [data-source-seq]`),
+    ).toHaveAttribute("data-source-seq", String(output.seq));
+  }
+  const journal = (
+    await (
+      await page.request.get(`/api/pipeline/runs/${final.id}/journal`)
+    ).text()
+  )
+    .trim()
+    .split("\n")
+    .map((s) => JSON.parse(s));
+  const motions = await page.evaluate(() => (window as any).motionReceipts);
+  expect(motions.length).toBeGreaterThan(0);
+  expect(motions.some((m: any) => m.kind === "active-span")).toBe(true);
+  expect(motions.some((m: any) => m.kind === "receipt")).toBe(true);
+  for (const motion of motions)
+    expect(journal[motion.seq - 1]?.group).toBe(motion.group);
+  await page.reload();
+  await expect(timeline).toHaveAttribute("data-motion-enabled", "false");
+  await expect(
+    page.locator('.timeline-step:not([data-motion="off"])'),
+  ).toHaveCount(0);
+  await expect(page.locator('[data-stage-visual="result"]')).toHaveText(
+    "Run ended without a terminal engine receipt",
+  );
+  await info.attach("timeline-receipt", {
+    body: JSON.stringify({
+      id: final.id,
+      motion_receipts: motions,
+      desktop_and_mobile_neighbors_visible: true,
+      values_match_engine: true,
+      pause_does_not_pause_events: true,
+    }),
+    contentType: "application/json",
+  });
 });

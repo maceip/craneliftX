@@ -16,6 +16,7 @@ import {
   timestamp,
 } from "./pipeline";
 import { request, usePipeline } from "./usePipeline";
+import { PipelineTimeline } from "./components/PipelineTimeline";
 
 const cn = (...values: Parameters<typeof clsx>) => twMerge(clsx(...values));
 const descriptions: Record<string, string> = {
@@ -152,28 +153,47 @@ function EventOutput({ event, runId }: { event: LedgerEvent; runId?: string }) {
     return (
       <div className="audit-output" data-testid="audit-output">
         <div className="audit-summary">
-          <strong>{event.verdict === "rejected" ? "Instruction policy rejected" : "Block accepted by policy"}</strong>
+          <strong>
+            {event.verdict === "rejected"
+              ? "Instruction policy rejected"
+              : "Block accepted by policy"}
+          </strong>
           <span className="mono">
-            {event.phase === "execute" ? "Runtime guard" : `${event.instruction_count} / ${event.max_instructions} instructions inspected`}
+            {event.phase === "execute"
+              ? "Runtime guard"
+              : `${event.instruction_count} / ${event.max_instructions} instructions inspected`}
           </span>
         </div>
         <ul className="audit-checks" aria-label="Instruction policy checks">
           {event.checks.map((check: any) => (
-            <li key={check.rule} className={`audit-check audit-${check.verdict}`} data-verdict={check.verdict}>
+            <li
+              key={check.rule}
+              className={`audit-check audit-${check.verdict}`}
+              data-verdict={check.verdict}
+            >
               <div className="audit-check-heading">
                 <strong>{check.label}</strong>
                 <span className="audit-verdict">
-                  {check.verdict === "rejected" ? "Rejected" : check.verdict === "guarded" ? "Runtime checked" : "Passed"}
+                  {check.verdict === "rejected"
+                    ? "Rejected"
+                    : check.verdict === "guarded"
+                      ? "Runtime checked"
+                      : "Passed"}
                 </span>
               </div>
               <p>{check.detail}</p>
               {check.findings?.length > 0 && (
                 <details open={check.verdict === "rejected"}>
-                  <summary>{check.findings.length} instruction {check.findings.length === 1 ? "finding" : "findings"}</summary>
+                  <summary>
+                    {check.findings.length} instruction{" "}
+                    {check.findings.length === 1 ? "finding" : "findings"}
+                  </summary>
                   <ul className="audit-findings">
                     {check.findings.map((finding: any, index: number) => (
                       <li key={index}>
-                        <code>{finding.rip} · {finding.instruction}</code>
+                        <code>
+                          {finding.rip} · {finding.instruction}
+                        </code>
                         <span>{finding.detail}</span>
                       </li>
                     ))}
@@ -183,7 +203,10 @@ function EventOutput({ event, runId }: { event: LedgerEvent; runId?: string }) {
             </li>
           ))}
         </ul>
-        <p className="audit-scope">Scope: reached instructions. Runtime checks apply when the block executes. No whole-binary taint or gadget-chain classification.</p>
+        <p className="audit-scope">
+          Scope: reached instructions. Runtime checks apply when the block
+          executes. No whole-binary taint or gadget-chain classification.
+        </p>
       </div>
     );
   const instructions = event.instructions ?? event.details?.instructions,
@@ -295,15 +318,18 @@ export function App() {
   const [id, setId] = useState<string | null>(() =>
     new URLSearchParams(location.search).get("run"),
   );
-  const [selected, setSelected] = useState("decode"),
+  const [selected, setSelected] = useState("run"),
     [inspection, setInspection] = useState<LedgerEvent | null>(null);
+  const [following, setFollowing] = useState(
+    () => !new URLSearchParams(location.search).has("run"),
+  );
   const [raw, setRaw] = useState(false),
     [filter, setFilter] = useState("all"),
     [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null),
     [setupError, setSetupError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
-    { run, connection, error } = usePipeline(id);
+    { run, connection, error, liveAfter } = usePipeline(id);
   const busy = submitting || (!!run && !terminal(run.status));
   useEffect(() => {
     let alive = true;
@@ -331,11 +357,32 @@ export function App() {
         .catch(() => {});
   }, [run?.status]);
   useEffect(() => {
-    const pop = () => setId(new URLSearchParams(location.search).get("run"));
+    const pop = () => {
+      setFollowing(false);
+      setInspection(null);
+      setId(new URLSearchParams(location.search).get("run"));
+    };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
+  const latestGroup = useRef<string | undefined>(undefined);
+  latestGroup.current = run?.recent.at(-1)?.group;
+  useEffect(() => {
+    if (!following) return;
+    // Focus samples the latest actual group; the ledger and values still render
+    // every batch. Do not queue a stage tour or chase every short-lived span.
+    const focus = () => {
+      if (latestGroup.current) {
+        setSelected(latestGroup.current);
+        setInspection(null);
+      }
+    };
+    focus();
+    const timer = setInterval(focus, 600);
+    return () => clearInterval(timer);
+  }, [following, run?.id]);
   function selectRun(next: string | null) {
+    setFollowing(false);
     setInspection(null);
     setActionError(null);
     setId(next);
@@ -347,7 +394,9 @@ export function App() {
   async function start(binary?: File) {
     setActionError(null);
     if (binary && binary.size > (config?.max_upload_bytes ?? 0)) {
-      setActionError("Choose a binary of 64 MiB or smaller.");
+      setActionError(
+        `Choose a binary of ${bytes(config?.max_upload_bytes)} or smaller.`,
+      );
       return;
     }
     setSubmitting(true);
@@ -363,7 +412,8 @@ export function App() {
         body: binary ?? JSON.stringify({ mode: "rust-server" }),
       });
       selectRun(state.id);
-      setSelected("decode");
+      setFollowing(true);
+      setSelected("ingest");
       setRaw(false);
     } catch (e) {
       setActionError((e as Error).message);
@@ -483,7 +533,7 @@ export function App() {
           <span>
             Static Linux x86-64 ELF · scalar instructions · loopback TCP
           </span>
-          <span>64 MiB input limit</span>
+          <span>{bytes(config?.max_upload_bytes)} input limit</span>
         </div>
         {(setupError || actionError || config?.error) && (
           <div className="error-banner" role="alert">
@@ -534,241 +584,194 @@ export function App() {
             {run.message}
           </div>
         )}
-        <div className="workspace" id="pipeline">
-          <aside className="stage-panel" aria-label="Pipeline operation groups">
-            <div className="stage-heading">
-              <h2>Operations</h2>
-              <span className="mono">13 groups</span>
-            </div>
-            <nav aria-label="Select an operation group">
-              <ol className="stage-list">
-                {groups.map((g) => {
-                  const state = groupState(g, run?.status);
-                  return (
-                    <li key={g.id}>
-                      <button
-                        type="button"
-                        data-testid={`group-${g.id}`}
-                        data-state={state}
-                        className={cn(
-                          "stage-button",
-                          selected === g.id && "selected",
-                          state === "Active" && "active",
-                          state === "Failed" && "failed",
-                        )}
-                        aria-pressed={selected === g.id}
-                        onClick={() => {
-                          setSelected(g.id);
-                          setInspection(null);
-                        }}
-                      >
-                        <span className="stage-index">
-                          {String(g.order).padStart(2, "0")}
-                        </span>
-                        <span className="stage-name">
-                          <strong>{g.label}</strong>
-                          <small>
-                            {state}
-                            {g.count > 0 && <> · {number(g.count)} events</>}
-                          </small>
-                        </span>
-                        <span
-                          className={cn(
-                            "stage-light",
-                            state.toLowerCase().replaceAll(" ", "-"),
-                          )}
-                          aria-hidden="true"
-                        />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            </nav>
-            <div className="stage-footnote">
-              Groups repeat as code is reached.
-              <br />
-              Sequence numbers preserve event order.
-            </div>
-          </aside>
-          <div className="main-panels">
-            <section className="runtime-panel" aria-label="Execution counters">
-              <div className="section-heading">
-                <h2>Runtime</h2>
-                <span
-                  className={cn(
-                    "connection-state",
-                    streamConnection === "live" && "is-live",
-                  )}
-                  role="status"
-                >
-                  <span aria-hidden="true" />
-                  {connectionLabel[streamConnection]}
-                </span>
-              </div>
-              <div className="metrics-grid">
-                <Metric
-                  label="Compiled blocks"
-                  value={number(run?.counters.compiled_blocks)}
-                  note="Includes recompilation"
-                  testId="compiled-blocks"
-                />
-                <Metric
-                  label="Source lifted"
-                  value={bytes(run?.counters.unique_lifted_bytes)}
-                  note={`${number(run?.counters.unique_lifted_instructions)} unique instructions`}
-                />
-                <Metric
-                  label="RV64 instructions"
-                  value={number(run?.counters.rv64_steps)}
-                  note="Executed by the interpreter"
-                  testId="rv64-steps"
-                />
-                <Metric
-                  label="Elapsed"
-                  value={duration(run?.elapsed_ns)}
-                  note="Last emitted engine timestamp"
-                />
-              </div>
-              <div className="runtime-caption">
-                <span>
-                  Active:{" "}
-                  <strong>
-                    {active.length
-                      ? active.map((g) => g.id).join(" / ")
-                      : run && terminal(run.status)
-                        ? "Execution ended"
-                        : "Awaiting events"}
-                  </strong>
-                </span>
-                <span className="mono">
-                  seq{" "}
-                  <strong data-testid="event-sequence">
-                    {run?.cursor ?? 0}
-                  </strong>
-                </span>
-              </div>
-            </section>
-            <Activity run={run} />
-            <section className="detail-panel" aria-label="Operation inspector">
-              <div className="section-heading">
-                <div className="detail-title">
-                  <span className="detail-index">
-                    {String(group?.order ?? 5).padStart(2, "0")}
-                  </span>
-                  <div>
-                    <span className="eyebrow">
-                      {inspection ? "Selected event" : "Operation inspector"}
-                    </span>
-                    <h2>{group?.label ?? "Loading operation catalog"}</h2>
-                  </div>
-                </div>
-                {group && <Status value={groupState(group, run?.status)} />}
-              </div>
-              <p className="detail-description">{descriptions[selected]}</p>
-              {group && group.count > 0 && (
-                <div className="group-stats">
-                  <span>
-                    <strong>{number(group.count)}</strong> events
-                  </span>
-                  <span>
-                    <strong>{number(group.completed)}</strong> completed spans
-                  </span>
-                  <span>
-                    <strong>{duration(group.duration_ns)}</strong> recorded span
-                    time
-                  </span>
-                  {group.active > 0 && (
-                    <span>
-                      <strong>{group.active}</strong> open spans
-                    </span>
-                  )}
-                </div>
-              )}
-              {shown ? (
-                <>
-                  <div className="output-toolbar">
-                    <div className="mono">
-                      <span>#{shown.seq}</span> {shown.type}
-                      {shown.block_id !== undefined
-                        ? ` · block ${shown.block_id}`
-                        : ""}
-                      {shown.rip ? ` · ${shown.rip}` : ""}
-                    </div>
-                    <button
-                      className="text-button"
-                      aria-pressed={raw}
-                      onClick={() => setRaw(!raw)}
-                    >
-                      {raw ? "View output" : "View raw JSON"}
-                    </button>
-                  </div>
-                  {raw ? (
-                    <pre className="raw-output" data-testid="raw-event">
-                      {JSON.stringify(shown, null, 2)}
-                    </pre>
-                  ) : (
-                    <EventOutput event={shown} runId={run?.id} />
-                  )}
-                  <div className="event-provenance">
-                    <span>
-                      Emitted {timestamp(shown.timestamp_unix_ns)} UTC
-                    </span>
-                    <span>+{duration(shown.run_elapsed_ns)}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="empty-output">
-                  <span className="empty-glyph" aria-hidden="true">
-                    {selected === "audit" ? "—" : "⌁"}
-                  </span>
-                  <h3>
-                    {selected === "audit"
-                      ? "No instruction inspection recorded"
-                      : "No events for this operation yet"}
-                  </h3>
-                  <p>
-                    {selected === "audit"
-                      ? "New process runs inspect each decoded block before lowering. Older saved runs may have no audit events."
-                      : "Actual output will appear here when the engine emits an event for this group."}
-                  </p>
-                </div>
-              )}
-            </section>
-            {run?.verification && (
-              <section
-                className="network-panel"
-                aria-label="Network verification"
+        <div className="runtime-overview" id="pipeline">
+          <section className="runtime-panel" aria-label="Execution counters">
+            <div className="section-heading">
+              <h2>Runtime</h2>
+              <span
+                className={cn(
+                  "connection-state",
+                  streamConnection === "live" && "is-live",
+                )}
+                role="status"
               >
-                <div>
-                  <span className="eyebrow">Host TCP test client</span>
-                  <h2>
-                    {run.verification.status === "passed"
-                      ? "Persistent connection verified"
-                      : terminal(run.status)
-                        ? "Stopped before verification finished"
-                        : "Exercising the Rust server"}
-                  </h2>
-                  <p>
-                    {number(run.verification.verified_responses)} responses
-                    checked · {bytes(run.verification.payload_bytes)} payload ·{" "}
-                    {run.verification.first_connection_responses} requests on
-                    the first connection
-                  </p>
-                </div>
-                <Status
-                  value={
-                    run.verification.status === "passed"
-                      ? "Passed"
-                      : terminal(run.status)
-                        ? "Interrupted"
-                        : "Running"
-                  }
-                />
-              </section>
-            )}
-          </div>
+                <span aria-hidden="true" />
+                {connectionLabel[streamConnection]}
+              </span>
+            </div>
+            <div className="metrics-grid">
+              <Metric
+                label="Compiled blocks"
+                value={number(run?.counters.compiled_blocks)}
+                note="Includes recompilation"
+                testId="compiled-blocks"
+              />
+              <Metric
+                label="Source lifted"
+                value={bytes(run?.counters.unique_lifted_bytes)}
+                note={`${number(run?.counters.unique_lifted_instructions)} unique instructions`}
+              />
+              <Metric
+                label="RV64 instructions"
+                value={number(run?.counters.rv64_steps)}
+                note="Executed by the interpreter"
+                testId="rv64-steps"
+              />
+              <Metric
+                label="Elapsed"
+                value={duration(run?.elapsed_ns)}
+                note="Last emitted engine timestamp"
+              />
+            </div>
+            <div className="runtime-caption">
+              <span>
+                Active:{" "}
+                <strong>
+                  {active.length
+                    ? active.map((g) => g.id).join(" / ")
+                    : run && terminal(run.status)
+                      ? "Execution ended"
+                      : "Awaiting events"}
+                </strong>
+              </span>
+              <span className="mono">
+                seq{" "}
+                <strong data-testid="event-sequence">{run?.cursor ?? 0}</strong>
+              </span>
+            </div>
+          </section>
+          <Activity run={run} />
         </div>
+        <PipelineTimeline
+          groups={groups}
+          run={run}
+          selected={selected}
+          onSelect={(id) => {
+            setFollowing(false);
+            setSelected(id);
+            setInspection(null);
+          }}
+          following={following}
+          onFollow={setFollowing}
+          connection={streamConnection}
+          liveAfter={liveAfter}
+        >
+          <section className="detail-panel" aria-label="Operation inspector">
+            <div className="section-heading">
+              <div className="detail-title">
+                <span className="detail-index">
+                  {String(group?.order ?? 5).padStart(2, "0")}
+                </span>
+                <div>
+                  <span className="eyebrow">
+                    {inspection ? "Selected event" : "Operation inspector"}
+                  </span>
+                  <h2>{group?.label ?? "Loading operation catalog"}</h2>
+                </div>
+              </div>
+              {group && <Status value={groupState(group, run?.status)} />}
+            </div>
+            <p className="detail-description">{descriptions[selected]}</p>
+            {group && group.count > 0 && (
+              <div className="group-stats">
+                <span>
+                  <strong>{number(group.count)}</strong> events
+                </span>
+                <span>
+                  <strong>{number(group.completed)}</strong> completed spans
+                </span>
+                <span>
+                  <strong>{duration(group.duration_ns)}</strong> recorded span
+                  time
+                </span>
+                {group.active > 0 && (
+                  <span>
+                    <strong>{group.active}</strong> open spans
+                  </span>
+                )}
+              </div>
+            )}
+            {shown ? (
+              <>
+                <div className="output-toolbar">
+                  <div className="mono">
+                    <span>#{shown.seq}</span> {shown.type}
+                    {shown.block_id !== undefined
+                      ? ` · block ${shown.block_id}`
+                      : ""}
+                    {shown.rip ? ` · ${shown.rip}` : ""}
+                  </div>
+                  <button
+                    className="text-button"
+                    aria-pressed={raw}
+                    onClick={() => setRaw(!raw)}
+                  >
+                    {raw ? "View output" : "View raw JSON"}
+                  </button>
+                </div>
+                {raw ? (
+                  <pre className="raw-output" data-testid="raw-event">
+                    {JSON.stringify(shown, null, 2)}
+                  </pre>
+                ) : (
+                  <EventOutput event={shown} runId={run?.id} />
+                )}
+                <div className="event-provenance">
+                  <span>Emitted {timestamp(shown.timestamp_unix_ns)} UTC</span>
+                  <span>+{duration(shown.run_elapsed_ns)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="empty-output">
+                <span className="empty-glyph" aria-hidden="true">
+                  {selected === "audit" ? "—" : "⌁"}
+                </span>
+                <h3>
+                  {selected === "audit"
+                    ? "No instruction inspection recorded"
+                    : "No events for this operation yet"}
+                </h3>
+                <p>
+                  {selected === "audit"
+                    ? "New process runs inspect each decoded block before lowering. Older saved runs may have no audit events."
+                    : "Actual output will appear here when the engine emits an event for this group."}
+                </p>
+              </div>
+            )}
+          </section>
+          {run?.verification && (
+            <section
+              className="network-panel"
+              aria-label="Network verification"
+            >
+              <div>
+                <span className="eyebrow">Host TCP test client</span>
+                <h2>
+                  {run.verification.status === "passed"
+                    ? "Persistent connection verified"
+                    : terminal(run.status)
+                      ? "Stopped before verification finished"
+                      : "Exercising the Rust server"}
+                </h2>
+                <p>
+                  {number(run.verification.verified_responses)} responses
+                  checked · {bytes(run.verification.payload_bytes)} payload ·{" "}
+                  {run.verification.first_connection_responses} requests on the
+                  first connection
+                </p>
+              </div>
+              <Status
+                value={
+                  run.verification.status === "passed"
+                    ? "Passed"
+                    : terminal(run.status)
+                      ? "Interrupted"
+                      : "Running"
+                }
+              />
+            </section>
+          )}
+        </PipelineTimeline>
         <section className="ledger-panel" aria-label="Live event ledger">
           <div className="section-heading">
             <div>
@@ -822,6 +825,7 @@ export function App() {
                       <button
                         className="event-link"
                         onClick={() => {
+                          setFollowing(false);
                           setSelected(e.group);
                           setInspection(e);
                           setRaw(true);

@@ -102,6 +102,40 @@ as shellcode-free. Event-only groups are **Observed**; paired
 spans can be **Active**, **Completed**, **Failed**, or **Interrupted**. A completed
 span can become active again when the next block reaches that operation.
 
+## Connected timeline and motion
+
+All thirteen groups appear on a connected vertical timeline. The selected card
+is emphasized; its previous and next neighbors remain visible with dimmed
+illustrations. Desktop keeps the event inspector alongside the timeline. On
+mobile, manually selecting a card opens its inspector inside that card.
+Cards share the same header, illustration and receipt-footer dimensions,
+padding, flat elevation and typography. Operation glyphs share one size per
+breakpoint; controls share a single height, radius and type size. Motion uses
+one accent, cycle duration and receipt-pulse duration across the timeline.
+
+Each group has an operation-specific illustration: input scanning, ELF segment
+mapping, register initialization, decoded instruction bytes, policy findings,
+x86-to-CLIF and CLIF-to-RV64 flows, artifact receipts, execution, syscall bridging,
+compilation history, and the terminal result. The recovered scanner, sphere and
+beam motifs use actual input hashes, segment addresses and lengths, instruction
+bytes, block IDs, emitted code sizes, artifact hashes, and runtime counters.
+Sphere dots correspond one-for-one to observed groups or decoded instructions.
+Related decode/CLIF/RV64 values are joined only when their block IDs match.
+
+Motion has two meanings: a repeating illustration indicates a visible, open
+engine span; a short pulse indicates a newly received event. Neither advances a
+counter, declares completion, or estimates progress. Snapshots do not replay
+old animations. Offscreen cards, hidden tabs, disconnected streams, saved runs,
+reduced-motion preferences and **Pause animations** suppress motion. Pausing
+animations leaves the live ledger and values updating. Terminal state and
+failure colors still require their actual engine/coordinator evidence.
+
+**Follow live events** samples the most recently received group every 600 ms
+and centers its card below the toolbar. The ledger still publishes its normal
+50 ms batches. Focus may skip operations that complete between samples; it never
+queues a fictional linear tour. User scrolling, selecting a stage, or pinning a
+ledger record stops following. Saved runs open with following disabled.
+
 The inspector shows emitted source addresses, decoded instructions, mappings,
 artifacts, counters, or raw JSON. Selecting a ledger record pins that exact
 record; selecting a group restores its latest output. Artifact downloads retain
@@ -157,6 +191,9 @@ It exercises:
   after an nginx restart. Padding is never counted as lifted source.
 - Browser offline recovery, unsupported instructions, invalid ELF input,
   cancellation, bounded live rows, desktop/mobile layout, and raw event replay.
+- Live timeline animations matched to journal sequence numbers, real instruction
+  and mapping values, visible previous/current/next cards on desktop and mobile,
+  and motion pause/reduced-motion/offline behavior while a real syscall loop runs.
 
 The Python suite additionally cuts a real engine SSE TCP connection and verifies
 live resubscription from the committed cursor, exact journal reconciliation,

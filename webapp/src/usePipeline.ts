@@ -13,6 +13,7 @@ export async function request<T>(
 export function usePipeline(id: string | null) {
   const [run, setRun] = useState<Run | null>(null),
     [connection, setConnection] = useState("idle");
+  const [liveAfter, setLiveAfter] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null),
     current = useRef<Run | null>(null);
   useEffect(() => {
@@ -22,6 +23,7 @@ export function usePipeline(id: string | null) {
     let queued: LedgerEvent[] = [];
     current.current = null;
     setRun(null);
+    setLiveAfter(null);
     setError(null);
     if (!id) {
       setConnection("idle");
@@ -48,10 +50,15 @@ export function usePipeline(id: string | null) {
     async function connect() {
       source?.close();
       queued = [];
+      if (!navigator.onLine) {
+        setConnection("reconnecting");
+        return;
+      }
       try {
         const snapshot = await request<Run>(`/api/pipeline/runs/${id}`);
         if (disposed) return;
         current.current = snapshot;
+        setLiveAfter(snapshot.cursor);
         publish();
         setError(null);
         if (terminal(snapshot.status)) {
@@ -105,6 +112,13 @@ export function usePipeline(id: string | null) {
         retry = setTimeout(() => void connect(), 1500);
       }
     }
+    const offline = () => {
+      source?.close();
+      setConnection("reconnecting");
+    };
+    const online = () => void connect();
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
     setConnection("connecting");
     void connect();
     const timer = setInterval(flush, 50);
@@ -113,7 +127,9 @@ export function usePipeline(id: string | null) {
       clearInterval(timer);
       clearTimeout(retry);
       source?.close();
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
     };
   }, [id]);
-  return { run, connection, error };
+  return { run, connection, error, liveAfter };
 }
