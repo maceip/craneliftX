@@ -1,5 +1,5 @@
 [Unit]
-Description=CraneliftX Multi-ISA Lowering & Visualization Daemon
+Description=Chunder live ISR demo coordinator
 After=network.target
 
 [Service]
@@ -7,10 +7,16 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/craneliftx
-Environment=PATH=/var/www/craneliftx/.venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/var/www/craneliftx/.venv/bin/python3 webapp/server.py --port 8765 --host 127.0.0.1
-Restart=always
-RestartSec=3
+Environment=ISR_STATE_DIR=/var/lib/craneliftx
+Environment=ISR_WORKER=/var/www/craneliftx/target/release/isr-demo
+ExecStart=/var/www/craneliftx/.venv/bin/python webapp/server.py --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=2
+StateDirectory=craneliftx
+KillMode=control-group
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

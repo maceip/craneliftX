@@ -1,34 +1,17 @@
 #!/usr/bin/env bash
-# Setup script for CraneliftX on Ubuntu 24.04 Linux
+# Build from the repository root on Ubuntu with stable Rust and Node 22+ installed.
 set -euo pipefail
-
-echo "==> 1. Installing Linux dependencies (QEMU user emulator & RISC-V cross-compiler)..."
+cd "$(dirname "$0")/.."
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-    build-essential \
-    clang-20 \
-    llvm-20-dev \
-    lld-20 \
-    gcc-riscv64-linux-gnu \
-    libc6-dev-riscv64-cross \
-    qemu-user-static \
-    nginx \
-    python3 \
-    python3-pip \
-    python3-venv
-
-echo "==> 2. Setting up Python virtual environment..."
+sudo apt-get install -y --no-install-recommends build-essential lld nginx python3 python3-venv
+rustup target add --toolchain stable x86_64-unknown-linux-gnu
+cargo +stable build --locked --release --bin isr-demo --bin isr-process
+python3 scripts/build_web_fixture.py
 python3 -m venv .venv
-.venv/bin/pip install --upgrade pip
-.venv/bin/pip install capstone protobuf
-
-echo "==> 3. Verifying QEMU and RISC-V toolchain..."
-riscv64-linux-gnu-gcc --version | head -n 1
-qemu-riscv64-static --version | head -n 1
-
-echo "==> 4. Building demo and executing RISC-V + Pulley lowering..."
-make demo
-
-echo "==> 5. Ready for systemd & Nginx configuration."
-echo "Copy deploy/nginx.conf to /etc/nginx/sites-available/craneliftx"
-echo "Copy deploy/craneliftx.service to /etc/systemd/system/craneliftx.service"
+.venv/bin/python -m pip install -r webapp/requirements.txt
+npm --prefix webapp ci
+npm --prefix webapp run typecheck
+npm --prefix webapp run build
+.venv/bin/python -m unittest discover -s webapp/tests -p 'test_*.py'
+echo 'Built and checked. Deploy this checkout at /var/www/craneliftx.'
+echo 'Install deploy/craneliftx.service and deploy/nginx.conf, then restart those services.'

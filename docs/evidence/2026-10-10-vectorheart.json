@@ -1,0 +1,227 @@
+{
+  "recorded_at": "2026-10-10T23:23:18.285903+00:00",
+  "deployment": {
+    "host": "vectorheart",
+    "platform": "Ubuntu 24.04 x86_64",
+    "release": "20261010T231447Z-887282e67516",
+    "source_digest": "887282e67516781448dc2251ca3661fc7f94196c3b29a552c6cb6e7f95fecc1b",
+    "source_files_verified": 42,
+    "runtime_path": "/srv/craneliftx/current",
+    "service": "craneliftx.service",
+    "service_user": "craneliftx",
+    "listen": "127.0.0.1:8879",
+    "public_url": null,
+    "public_status": "Awaiting the requested website hostname; DNS, TLS, and public proxy are not configured or verified",
+    "verification_transport": "SSH tunnel at http://127.0.0.1:8890",
+    "rustc": "1.96.0 stable",
+    "node": "22.22.1",
+    "python": "3.12.3"
+  },
+  "checks": {
+    "rust_native_x86_tests": 19,
+    "rust_warnings": "denied; build, tests, clippy passed",
+    "rustfmt": "passed",
+    "typescript": "passed",
+    "frontend_build": "passed",
+    "python_supervisor_tests": 6,
+    "browser_tests_passed": 5,
+    "browser_tests_skipped": 1,
+    "skip_reason": "Disposable-stack coordinator crash test is intentionally skipped for external sites",
+    "systemd_crash_recovery": "Verified separately: SIGKILL to the demo main process, automatic restart, Interrupted in the browser, no orphan workers, previous Large report survives",
+    "memory_peak_bytes_observed_before_restart": 38309888
+  },
+  "deployment_files": {
+    "deploy/craneliftx.service": "6421d1528311910d08160b17583763948f1ab53dc4adad89e199ab1c4ef10bde",
+    "deploy/vectorheart.override.conf": "220a22043cd5b8c8dab7b7235eb51a3c9500972d908cf543d99884ca55d829b9"
+  },
+  "runtime_artifacts": {
+    "target/release/isr-demo": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+    "webapp/dist/app.js": "3ce8a03c754971e73452b3f56433dd013a8d1adfc5e18de44c5270f9d2f49d00",
+    "webapp/dist/app-style.css": "fe31c989ee1cbb98911e7026c64902e94b39b0a4998e49ca11c34c4d9830a3ac"
+  },
+  "live_browser_proof": {
+    "first_visible_bytes": 311508992,
+    "later_visible_bytes": 311771136,
+    "full_payload": 536870912,
+    "browser_errors": []
+  },
+  "recovery_run_id": "ad3f497241b54619853d2e859fc423c3",
+  "runs": [
+    {
+      "id": "d1786e36a0c342d797d31337f993b120",
+      "tier": "baby",
+      "status": "completed",
+      "cursor": 18,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 64,
+        "total_bytes": 64,
+        "verified": 1,
+        "riscv_steps": 71,
+        "connections": 0,
+        "elapsed_ms": 0,
+        "run_id": "d1786e36a0c342d797d31337f993b120",
+        "seq": 15,
+        "time": 1791674183.3165116
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 1,
+        "bytes": 64,
+        "riscv_steps": 71,
+        "mismatches": 0,
+        "trace_executions": 1,
+        "compilation_ns": 989073,
+        "execution_ns": 43169,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "d1786e36a0c342d797d31337f993b120",
+        "seq": 17,
+        "time": 1791674183.3189483
+      }
+    },
+    {
+      "id": "30a9526f270f46aca5548b9fb420bf34",
+      "tier": "medium",
+      "status": "completed",
+      "cursor": 61,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 8388608,
+        "total_bytes": 8388608,
+        "verified": 131072,
+        "riscv_steps": 1191182336,
+        "connections": 4,
+        "elapsed_ms": 2699,
+        "run_id": "30a9526f270f46aca5548b9fb420bf34",
+        "seq": 58,
+        "time": 1791674196.8987484
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 131072,
+        "bytes": 8388608,
+        "riscv_steps": 1191182336,
+        "mismatches": 0,
+        "trace_executions": 16777216,
+        "compilation_ns": 1578690,
+        "execution_ns": 2699682752,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "30a9526f270f46aca5548b9fb420bf34",
+        "seq": 60,
+        "time": 1791674196.9015338
+      }
+    },
+    {
+      "id": "efbfe8af60bb4d39bfba5af04b6e4d3c",
+      "tier": "large",
+      "status": "cancelled",
+      "cursor": 70,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 6815744,
+        "total_bytes": 536870912,
+        "verified": 106496,
+        "riscv_steps": 1935671296,
+        "connections": 16,
+        "elapsed_ms": 4198,
+        "run_id": "efbfe8af60bb4d39bfba5af04b6e4d3c",
+        "seq": 69,
+        "time": 1791674207.189112
+      },
+      "result": null
+    },
+    {
+      "id": "20c123b5b3c74512b7047706fd8235e5",
+      "tier": "large",
+      "status": "completed",
+      "cursor": 2116,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 536870912,
+        "total_bytes": 536870912,
+        "verified": 8388608,
+        "riscv_steps": 152471339008,
+        "connections": 16,
+        "elapsed_ms": 312650,
+        "run_id": "20c123b5b3c74512b7047706fd8235e5",
+        "seq": 2113,
+        "time": 1791674524.9500933
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 8388608,
+        "bytes": 536870912,
+        "riscv_steps": 152471339008,
+        "mismatches": 0,
+        "trace_executions": 2147483648,
+        "compilation_ns": 1488651,
+        "execution_ns": 312650879522,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "20c123b5b3c74512b7047706fd8235e5",
+        "seq": 2115,
+        "time": 1791674524.9546404
+      }
+    },
+    {
+      "id": "4ebd9ae3d88348518678919b4ec02ebd",
+      "tier": "large",
+      "status": "interrupted",
+      "cursor": 60,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 3555328,
+        "total_bytes": 536870912,
+        "verified": 55552,
+        "riscv_steps": 1009713152,
+        "connections": 16,
+        "elapsed_ms": 2883,
+        "run_id": "4ebd9ae3d88348518678919b4ec02ebd",
+        "seq": 59,
+        "time": 1791674539.6861122
+      },
+      "result": null
+    },
+    {
+      "id": "ad3f497241b54619853d2e859fc423c3",
+      "tier": "large",
+      "status": "interrupted",
+      "cursor": 64,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 5947392,
+        "total_bytes": 536870912,
+        "verified": 92928,
+        "riscv_steps": 1689059328,
+        "connections": 16,
+        "elapsed_ms": 3476,
+        "run_id": "ad3f497241b54619853d2e859fc423c3",
+        "seq": 63,
+        "time": 1791674563.951289
+      },
+      "result": null
+    }
+  ],
+  "evidence_directory": ".isr-state/deploy/",
+  "notes": [
+    "The first systemctl kill --kill-whom=all command returned an auxiliary-process EINVAL although the service restarted correctly. The complete browser recovery check was rerun successfully with --kill-whom=main.",
+    "This is server-side staging evidence, not public website verification."
+  ]
+}

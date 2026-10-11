@@ -1,0 +1,866 @@
+{
+  "recorded_at": "2026-10-11T04:12:10.366952+00:00",
+  "project": "Chunder",
+  "deployment": {
+    "host": "vectorheart",
+    "platform": "Ubuntu 24.04 x86_64",
+    "ip": "78.141.219.102",
+    "public_url": "https://chunder.public.computer/",
+    "release": "20261011T040216Z-880b009502e2",
+    "runtime_path": "/srv/craneliftx/releases/20261011T040216Z-880b009502e2",
+    "service": "craneliftx.service",
+    "service_user": "craneliftx",
+    "coordinator_listen": "127.0.0.1:8879",
+    "verification_transport": "Public HTTPS through the shared Caddy proxy, with normal certificate verification",
+    "source_state": "uncommitted workspace, selected files recorded exactly",
+    "github_ci_executed": false
+  },
+  "checks": {
+    "public_browser_tests_passed": 5,
+    "public_browser_tests_skipped": 1,
+    "skip_reason": "Disposable-stack crash test skipped in external-site mode; real systemd recovery independently verified through public browser",
+    "public_browser_command": "ISR_BASE_URL=https://chunder.public.computer npx playwright test",
+    "public_systemd_recovery": "passed",
+    "new_baby_run_after_recovery": "passed",
+    "completed_large_report_survived_restart": true,
+    "orphan_workers": false,
+    "public_visible_progress_before_completion": true,
+    "reload_replay_last_event_id_future_cursor_background_offline_cancel": "passed",
+    "input_constraints": "passed",
+    "desktop_mobile_rendering": "passed, screenshots inspected",
+    "brand_canonical_favicon_social_image": "passed",
+    "browser_errors": [],
+    "source_files_verified": 49,
+    "source_mismatches": [],
+    "public_assets_match_deployed_files": true,
+    "local_selected_sources_match_deployed_manifest": true,
+    "memory_peak_bytes_observed_during_public_large_before_restart": 38318080
+  },
+  "build_validation": {
+    "engine": "Exact Linux worker from the earlier staging receipt, unchanged engine source and binary; 19 Rust tests, rustfmt and clippy with warnings denied passed there",
+    "engine_validation_receipt": "2026-10-10-vectorheart.json",
+    "branding_release": "TypeScript, frontend build, six Python supervisor tests, and pip dependency check passed before publication",
+    "final_public_browser_results": "5 passed, 1 intentionally skipped; separate systemd recovery passed"
+  },
+  "dns": {
+    "record": "chunder.public.computer. 3600 IN A 78.141.219.102",
+    "answers": {
+      "ns1.stare.network": "78.141.219.102",
+      "ns2.stare.network": "78.141.219.102",
+      "1.1.1.1": "78.141.219.102",
+      "8.8.8.8": "78.141.219.102"
+    },
+    "authoritative_nameservers": [
+      "ns1.stare.network",
+      "ns2.stare.network"
+    ],
+    "deployment_modified_dns": false
+  },
+  "https": {
+    "root_status": 200,
+    "http_redirect_to_https": true,
+    "tls": {
+      "version": "TLSv1.3",
+      "peer": [
+        "78.141.219.102",
+        443
+      ],
+      "certificate": {
+        "subject": [
+          [
+            [
+              "commonName",
+              "chunder.public.computer"
+            ]
+          ]
+        ],
+        "issuer": [
+          [
+            [
+              "countryName",
+              "US"
+            ]
+          ],
+          [
+            [
+              "organizationName",
+              "Let's Encrypt"
+            ]
+          ],
+          [
+            [
+              "commonName",
+              "YE2"
+            ]
+          ]
+        ],
+        "version": 3,
+        "serialNumber": "0696E572D28669BE068D80DE892B53403A93",
+        "notBefore": "Oct 11 03:06:07 2026 GMT",
+        "notAfter": "Jan  9 03:06:06 2027 GMT",
+        "subjectAltName": [
+          [
+            "DNS",
+            "chunder.public.computer"
+          ]
+        ],
+        "caIssuers": [
+          "http://ye2.i.lencr.org/"
+        ],
+        "crlDistributionPoints": [
+          "http://ye2.c.lencr.org/20.crl"
+        ]
+      },
+      "der_sha256": "b53fc154425c60b17012bc6b1f3772a978d6a8e5afbb2058f0f65509d6cd2740"
+    },
+    "assets": {
+      "app.js": {
+        "status": 200,
+        "sha256": "d82ce99821b726305c7d70aaecc45c44ecaf06918408a71c91057e2c4fb98676",
+        "content_type": "text/javascript; charset=utf-8",
+        "cache_control": "no-cache",
+        "bytes": 236940
+      },
+      "app-style.css": {
+        "status": 200,
+        "sha256": "fe31c989ee1cbb98911e7026c64902e94b39b0a4998e49ca11c34c4d9830a3ac",
+        "content_type": "text/css; charset=utf-8",
+        "cache_control": "no-cache",
+        "bytes": 6919
+      },
+      "social-card.png": {
+        "status": 200,
+        "sha256": "3133757301fc721920f8dbae4483ebd00a2c3a3af2525d1b82c7e0c0493838ce",
+        "content_type": "image/png",
+        "cache_control": "no-cache",
+        "bytes": 41246
+      },
+      "favicon.svg": {
+        "status": 200,
+        "sha256": "d6b97b83b096cb46da9210ddd6e7e464c92395caaf74aa8663cbc7c358c5028c",
+        "content_type": "image/svg+xml",
+        "cache_control": "no-cache",
+        "bytes": 228
+      }
+    },
+    "title": "Chunder \u2014 Live ISR Engine",
+    "metadata_image": "https://chunder.public.computer/dist/social-card.png",
+    "image_dimensions": {
+      "width": 1200,
+      "height": 630
+    }
+  },
+  "live_progress_sample": {
+    "url": "https://chunder.public.computer",
+    "run": "cab4d532d06c4776a299d4ad1f1a385d",
+    "headers": {
+      "Cache-Control": "no-cache, no-transform",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Date": "Sun, 11 Oct 2026 04:07:23 GMT",
+      "Server": "uvicorn",
+      "Via": "1.1 Caddy",
+      "X-Accel-Buffering": "no",
+      "X-Content-Type-Options": "nosniff",
+      "Connection": "close",
+      "Transfer-Encoding": "chunked"
+    },
+    "initial_cursor": 879,
+    "events": [
+      {
+        "received_ms": 527.57,
+        "seq": 880,
+        "type": "progress",
+        "bytes": 221134848
+      },
+      {
+        "received_ms": 528.48,
+        "seq": 881,
+        "type": "progress",
+        "bytes": 221396992
+      },
+      {
+        "received_ms": 528.49,
+        "seq": 882,
+        "type": "progress",
+        "bytes": 221642752
+      },
+      {
+        "received_ms": 545.57,
+        "seq": 883,
+        "type": "progress",
+        "bytes": 221954048
+      },
+      {
+        "received_ms": 692.53,
+        "seq": 884,
+        "type": "progress",
+        "bytes": 222183424
+      },
+      {
+        "received_ms": 843.64,
+        "seq": 885,
+        "type": "progress",
+        "bytes": 222445568
+      },
+      {
+        "received_ms": 1023.46,
+        "seq": 886,
+        "type": "progress",
+        "bytes": 222724096
+      },
+      {
+        "received_ms": 1143.28,
+        "seq": 887,
+        "type": "progress",
+        "bytes": 222986240
+      },
+      {
+        "received_ms": 1294.63,
+        "seq": 888,
+        "type": "progress",
+        "bytes": 223215616
+      },
+      {
+        "received_ms": 1452.49,
+        "seq": 889,
+        "type": "progress",
+        "bytes": 223494144
+      },
+      {
+        "received_ms": 1606.67,
+        "seq": 890,
+        "type": "progress",
+        "bytes": 223789056
+      },
+      {
+        "received_ms": 1755.44,
+        "seq": 891,
+        "type": "progress",
+        "bytes": 224034816
+      },
+      {
+        "received_ms": 1902.65,
+        "seq": 892,
+        "type": "progress",
+        "bytes": 224296960
+      },
+      {
+        "received_ms": 2071.77,
+        "seq": 893,
+        "type": "progress",
+        "bytes": 224559104
+      },
+      {
+        "received_ms": 2203.34,
+        "seq": 894,
+        "type": "progress",
+        "bytes": 224821248
+      },
+      {
+        "received_ms": 2356.14,
+        "seq": 895,
+        "type": "progress",
+        "bytes": 225099776
+      },
+      {
+        "received_ms": 2509.84,
+        "seq": 896,
+        "type": "progress",
+        "bytes": 225345536
+      },
+      {
+        "received_ms": 2656.42,
+        "seq": 897,
+        "type": "progress",
+        "bytes": 225591296
+      },
+      {
+        "received_ms": 2813.26,
+        "seq": 898,
+        "type": "progress",
+        "bytes": 225869824
+      },
+      {
+        "received_ms": 2959.13,
+        "seq": 899,
+        "type": "progress",
+        "bytes": 226131968
+      },
+      {
+        "received_ms": 3120.41,
+        "seq": 900,
+        "type": "progress",
+        "bytes": 226394112
+      },
+      {
+        "received_ms": 3262.12,
+        "seq": 901,
+        "type": "progress",
+        "bytes": 226689024
+      },
+      {
+        "received_ms": 3409.56,
+        "seq": 902,
+        "type": "progress",
+        "bytes": 226918400
+      },
+      {
+        "received_ms": 3560.12,
+        "seq": 903,
+        "type": "progress",
+        "bytes": 227229696
+      },
+      {
+        "received_ms": 3713.55,
+        "seq": 904,
+        "type": "progress",
+        "bytes": 227442688
+      }
+    ],
+    "steady_interarrival_ms": {
+      "median": 151.68,
+      "min": 131.57,
+      "max": 169.12
+    },
+    "measurement_note": "First eight events excluded from cadence calculation because reconnect replay can arrive in a burst. This is event interarrival in one sample, not end-to-end latency or an SLA."
+  },
+  "proxy_change": {
+    "release": "20261011T040216Z-880b009502e2",
+    "site": "https://chunder.public.computer/",
+    "config_backup": "/etc/caddy/Caddyfile.before-chunder-20261011T040216Z-880b009502e2",
+    "existing_routes_preserved": 46,
+    "routes_added": 1,
+    "before_sha256": "fcbba4e78b05d58edbad5cf1840b40f1e4743189c026b1fbff67276d703171c7",
+    "after_sha256": "403f72167bec91211b4fe4fcb86b40a927c52d3c9b946ceeb234370a53f6daaf",
+    "site_config_sha256": "36a6a77a4850d5ee39b65e412d3d8280703698f06c3a53c974c88bccdadfb457",
+    "reload": "success"
+  },
+  "source_manifest": {
+    "project": "Chunder",
+    "public_url": "https://chunder.public.computer/",
+    "release": "20261011T040216Z-880b009502e2",
+    "source_digest": "880b009502e299d03c43ff146dc1160862d8db0746c15aa8cb0600bf799232dc",
+    "git_base": "9bb1ecc069b12a0b109ff9d2c7863f0ea7873b2a",
+    "source_state": "uncommitted workspace, selected files recorded exactly",
+    "files": {
+      "Cargo.lock": "20e41b4839600d9e94d292bf262e1cabc4a461791422e02bf1d96ff828c0ba0d",
+      "Cargo.toml": "8a2aa846e6162daa01774cd3373b2b96ac611bc45b0a05b3a52faa5fe5c87bb1",
+      "Makefile": "ef04790a8d855f6e21f6fb7e260bf293feb3390e8f240c9f8314e4e38c1865af",
+      "README.md": "11931ba97741de99b715d8528b6d99c7472431ad222ba4fe20dae872c69e502c",
+      "deploy/chunder.caddy": "36a6a77a4850d5ee39b65e412d3d8280703698f06c3a53c974c88bccdadfb457",
+      "deploy/craneliftx.service": "8bc2fd8b42d3a599257fbcbacfd12e8d1f719474c0c7bae5235ba96069e68698",
+      "deploy/nginx.conf": "900b817a409eacb5730a15e879ae84d07da8b79668d3e9b9d6481c76370a31d5",
+      "deploy/setup_linux.sh": "d3320b39be4f9e74ad66d51974061808147910ffe0081417961244c1a05d371c",
+      "deploy/vectorheart.override.conf": "220a22043cd5b8c8dab7b7235eb51a3c9500972d908cf543d99884ca55d829b9",
+      "rust-toolchain.toml": "3e18e70208ee460635e239a91c142cf67371feafb718b05617ff06f388bf96df",
+      "src/audit.rs": "96f4eec54147d30815d30c4b4e29b9a4c1625da2e5a74055e50d1675bf119793",
+      "src/bin/isr-demo.rs": "cd05c96944f4c6b3283054039f2f109177f0693018f2ab6153826f3af02189bf",
+      "src/codegen.rs": "350ae94e7a368353aae8578e44b68d3816708c3a68a942468261f5bbb6cb2da8",
+      "src/context.rs": "862dc1f985b00915cbffd5cb4f5b432475b0971bce5eaba6f1a91658891563e7",
+      "src/error.rs": "6dc23a09256f86821a976f871fbe5d3368e44b61325c9479c6747d582427a38b",
+      "src/harvest.rs": "5b5c8abebcc121cd61df924362f4159c57b4a7bde71597291ccf7bcc6c90531b",
+      "src/lib.rs": "5e59b31907bf50b5045010ff47ab6b32bd50270049c5907d4be5b6c9c79e5ec4",
+      "src/lower.rs": "2186da2b96b5ad56677e9736c78a751919a9f4208c8983dcc5e4bbd1f1cd286e",
+      "src/main.rs": "f58564756798fa75c1160e846b010202cbc78a8fd3c54ca1a2fe37f54d8d1f1f",
+      "src/pipeline.rs": "94f40d3cf03cf745884ea0bd1a8268ea3412c23f2111bf1320ee668f58f95bfc",
+      "src/riscv_exec.rs": "3a85cc2328d7b38d5b2c8d7475487cc583fac3c5ceccb8ecc20e0b45deba1c7b",
+      "src/x86.rs": "2e47c46bf2aa07f6f24eca698d532eb515a32e359b105ab799a8e0729b4a442a",
+      "tests/native_x86.rs": "945c2b09757f99347cfbfae612594be7ca0d2ae7af32b7c0f61b1b5bb6685226",
+      "tests/pipeline.rs": "cf5b0458396a16af07f72196533fc525964205aedc5599de9fa620866891760f",
+      "tests/prepared.rs": "7f602315a7062057da14c643b41838524767fd6a8b406bba474b77e0cc1ae6e1",
+      "webapp/build.mjs": "7de6633237cff738230930e69c531cf124290ee92c818036dc78205e7480fd55",
+      "webapp/index.html": "7969c31281969b28ac1ce7483418b542feec3df614fa56eac38a5f0fda32fd2c",
+      "webapp/package-lock.json": "ea43247f08217610630c32c5348a234b3710ae5d64252be84518d64b69d7c75a",
+      "webapp/package.json": "ff16ed3f845bf7a698434a37acef74363b317669dbac45abe85c85fe05112a6e",
+      "webapp/playwright.config.ts": "41ae2b96bfd607d37e66ec49e92fd9e7b1e0c033b518b3d728281e5965066893",
+      "webapp/public/assets/DepartureMono-Regular.otf": "4d53f663155cf8bf7ffc8e688776e719625f7bbb80a8d90073438b249261a2e0",
+      "webapp/public/assets/DepartureMono-Regular.woff": "8ede4e8a40475d440389d1bb44201bd3067129a62c718158921b111ceb52fca5",
+      "webapp/public/assets/DepartureMono-Regular.woff2": "5b4fed1daa90708aa9c6ee1190abca9dc22164a1c1def0020386e46b61038cfb",
+      "webapp/public/favicon.svg": "d6b97b83b096cb46da9210ddd6e7e464c92395caaf74aa8663cbc7c358c5028c",
+      "webapp/public/social-card.png": "3133757301fc721920f8dbae4483ebd00a2c3a3af2525d1b82c7e0c0493838ce",
+      "webapp/requirements.in": "cb9331ea28c7a293b102c8c24eb6a86e1c44cc3ff09af93cd3e05e4f7edac7e9",
+      "webapp/requirements.txt": "a4dd6997884c8e8b1edbbde29467c84f9dfa3cfcfa98314eee66e3baa0c9dad0",
+      "webapp/server.py": "f3851f86013d8845fbcc18fbce2bcd0830d2e82fa4f76f87fbdf738fe66b32b9",
+      "webapp/src/App.tsx": "d92368c39a5167e96bdac5fb640c6ddabe152cb51f5e04206abc4d034d0b39cd",
+      "webapp/src/assets/DepartureMono-Regular.otf": "4d53f663155cf8bf7ffc8e688776e719625f7bbb80a8d90073438b249261a2e0",
+      "webapp/src/assets/DepartureMono-Regular.woff": "8ede4e8a40475d440389d1bb44201bd3067129a62c718158921b111ceb52fca5",
+      "webapp/src/assets/DepartureMono-Regular.woff2": "5b4fed1daa90708aa9c6ee1190abca9dc22164a1c1def0020386e46b61038cfb",
+      "webapp/src/index.tsx": "4597d35382a7248e414bf171425d003863266c83d82f7a5c4db46a1988e9377b",
+      "webapp/src/protocol.ts": "0693e2f0379be17b8566db193ca514c1033a8c4dd2c11fd921f07364fe697489",
+      "webapp/src/styles.css": "bb4040256ab8ca773d4e571191e354fb077ca347d1be89766da34ac8fcc41d9b",
+      "webapp/tests/demo.spec.ts": "7a2cfe0bbfe6e27803b7e1b1a3e965ab72d5f2c69c0af3e602df511676f58678",
+      "webapp/tests/serve.py": "fd7b5df94c369f42c8d70192ad5acb355267c6abd2d67b324146e9c4b3e3cd73",
+      "webapp/tests/test_server.py": "9a4c3ca3dedda60fe04047e8f6ca1bda56655c0aca603c6059886a4803bea28b",
+      "webapp/tsconfig.json": "8893288e28d2a0462fe835b43379095d6d2db64c8dfe1f386527db5ef68f2b1e"
+    }
+  },
+  "runtime_sha256": {
+    "target/release/isr-demo": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+    "webapp/dist/app.js": "d82ce99821b726305c7d70aaecc45c44ecaf06918408a71c91057e2c4fb98676",
+    "webapp/dist/app-style.css": "fe31c989ee1cbb98911e7026c64902e94b39b0a4998e49ca11c34c4d9830a3ac",
+    "webapp/dist/social-card.png": "3133757301fc721920f8dbae4483ebd00a2c3a3af2525d1b82c7e0c0493838ce",
+    "webapp/dist/favicon.svg": "d6b97b83b096cb46da9210ddd6e7e464c92395caaf74aa8663cbc7c358c5028c"
+  },
+  "deployed_configuration_sha256": {
+    "/etc/caddy/chunder.caddy": "36a6a77a4850d5ee39b65e412d3d8280703698f06c3a53c974c88bccdadfb457",
+    "/etc/caddy/Caddyfile": "403f72167bec91211b4fe4fcb86b40a927c52d3c9b946ceeb234370a53f6daaf",
+    "/etc/systemd/system/craneliftx.service": "8bc2fd8b42d3a599257fbcbacfd12e8d1f719474c0c7bae5235ba96069e68698",
+    "/etc/systemd/system/craneliftx.service.d/deployment.conf": "220a22043cd5b8c8dab7b7235eb51a3c9500972d908cf543d99884ca55d829b9"
+  },
+  "service_after_recovery": {
+    "MainPID": "316076",
+    "NRestarts": "1",
+    "MemoryCurrent": "22614016",
+    "MemoryPeak": "26054656",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "health_after_recovery": {
+    "ok": true,
+    "engine": "in-process ISR",
+    "backend": "riscv64gc-unknown-none-elf",
+    "tiers": {
+      "baby": {
+        "bytes": 64,
+        "connections": 0,
+        "kernels": 1,
+        "rounds": 1
+      },
+      "medium": {
+        "bytes": 8388608,
+        "connections": 4,
+        "kernels": 4,
+        "rounds": 128
+      },
+      "large": {
+        "bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256
+      }
+    }
+  },
+  "recovery": {
+    "interrupted_run": "cf34e53fd6ca47e99689ea0284cc0708",
+    "interrupted_has_result": false,
+    "previous_completed_large": "cab4d532d06c4776a299d4ad1f1a385d",
+    "new_baby_run": "b899c0b3c49c4faabf89864d2b5e4f02",
+    "service": "active",
+    "orphan_workers": false
+  },
+  "runs": [
+    {
+      "id": "210df634575748f1b413298d2c859906",
+      "tier": "baby",
+      "status": "completed",
+      "cursor": 18,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "requested": {
+        "bytes": 64,
+        "connections": 0,
+        "kernels": 1,
+        "rounds": 1
+      },
+      "engine": {
+        "v": 1,
+        "type": "started",
+        "tier": "baby",
+        "seed": "42",
+        "total_bytes": 64,
+        "connections": 0,
+        "kernels": 1,
+        "rounds": 1,
+        "oracle": "native-x86-and-rust-reference",
+        "host_arch": "x86_64",
+        "backend": "riscv64gc-unknown-none-elf",
+        "network": "none",
+        "run_id": "210df634575748f1b413298d2c859906",
+        "seq": 2,
+        "time": 1791691501.2507179
+      },
+      "security": {
+        "v": 1,
+        "type": "security",
+        "syscall_rejected": true,
+        "stage": "audit",
+        "codegen_invoked": false,
+        "run_id": "210df634575748f1b413298d2c859906",
+        "seq": 12,
+        "time": 1791691501.2578092
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 64,
+        "total_bytes": 64,
+        "verified": 1,
+        "riscv_steps": 71,
+        "connections": 0,
+        "elapsed_ms": 0,
+        "run_id": "210df634575748f1b413298d2c859906",
+        "seq": 15,
+        "time": 1791691501.2602248
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 1,
+        "bytes": 64,
+        "riscv_steps": 71,
+        "mismatches": 0,
+        "trace_executions": 1,
+        "compilation_ns": 1047481,
+        "execution_ns": 50828,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "210df634575748f1b413298d2c859906",
+        "seq": 17,
+        "time": 1791691501.2624695
+      },
+      "url": "https://chunder.public.computer/?run=210df634575748f1b413298d2c859906"
+    },
+    {
+      "id": "a13a021fd9f84943b1d651eba5e48453",
+      "tier": "medium",
+      "status": "completed",
+      "cursor": 61,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "requested": {
+        "bytes": 8388608,
+        "connections": 4,
+        "kernels": 4,
+        "rounds": 128
+      },
+      "engine": {
+        "v": 1,
+        "type": "started",
+        "tier": "medium",
+        "seed": "42",
+        "total_bytes": 8388608,
+        "connections": 4,
+        "kernels": 4,
+        "rounds": 128,
+        "oracle": "native-x86-and-rust-reference",
+        "host_arch": "x86_64",
+        "backend": "riscv64gc-unknown-none-elf",
+        "network": "real TCP / 127.0.0.1",
+        "run_id": "a13a021fd9f84943b1d651eba5e48453",
+        "seq": 2,
+        "time": 1791691505.7373652
+      },
+      "security": {
+        "v": 1,
+        "type": "security",
+        "syscall_rejected": true,
+        "stage": "audit",
+        "codegen_invoked": false,
+        "run_id": "a13a021fd9f84943b1d651eba5e48453",
+        "seq": 39,
+        "time": 1791691505.767956
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 8388608,
+        "total_bytes": 8388608,
+        "verified": 131072,
+        "riscv_steps": 1191182336,
+        "connections": 4,
+        "elapsed_ms": 2700,
+        "run_id": "a13a021fd9f84943b1d651eba5e48453",
+        "seq": 58,
+        "time": 1791691508.4415061
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 131072,
+        "bytes": 8388608,
+        "riscv_steps": 1191182336,
+        "mismatches": 0,
+        "trace_executions": 16777216,
+        "compilation_ns": 2702557,
+        "execution_ns": 2700553014,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "a13a021fd9f84943b1d651eba5e48453",
+        "seq": 60,
+        "time": 1791691508.444187
+      },
+      "url": "https://chunder.public.computer/?run=a13a021fd9f84943b1d651eba5e48453"
+    },
+    {
+      "id": "9e0e4460a62346ae8a20e5a9afa8f10f",
+      "tier": "large",
+      "status": "cancelled",
+      "cursor": 63,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "requested": {
+        "bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256
+      },
+      "engine": {
+        "v": 1,
+        "type": "started",
+        "tier": "large",
+        "seed": "42",
+        "total_bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256,
+        "oracle": "native-x86-and-rust-reference",
+        "host_arch": "x86_64",
+        "backend": "riscv64gc-unknown-none-elf",
+        "network": "real TCP / 127.0.0.1",
+        "run_id": "9e0e4460a62346ae8a20e5a9afa8f10f",
+        "seq": 2,
+        "time": 1791691511.6511354
+      },
+      "security": {
+        "v": 1,
+        "type": "security",
+        "syscall_rejected": true,
+        "stage": "audit",
+        "codegen_invoked": false,
+        "run_id": "9e0e4460a62346ae8a20e5a9afa8f10f",
+        "seq": 39,
+        "time": 1791691511.7351737
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 5341184,
+        "total_bytes": 536870912,
+        "verified": 83456,
+        "riscv_steps": 1516896256,
+        "connections": 16,
+        "elapsed_ms": 3144,
+        "run_id": "9e0e4460a62346ae8a20e5a9afa8f10f",
+        "seq": 62,
+        "time": 1791691514.7973342
+      },
+      "result": null,
+      "url": "https://chunder.public.computer/?run=9e0e4460a62346ae8a20e5a9afa8f10f"
+    },
+    {
+      "id": "cab4d532d06c4776a299d4ad1f1a385d",
+      "tier": "large",
+      "status": "completed",
+      "cursor": 2093,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "requested": {
+        "bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256
+      },
+      "engine": {
+        "v": 1,
+        "type": "started",
+        "tier": "large",
+        "seed": "42",
+        "total_bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256,
+        "oracle": "native-x86-and-rust-reference",
+        "host_arch": "x86_64",
+        "backend": "riscv64gc-unknown-none-elf",
+        "network": "real TCP / 127.0.0.1",
+        "run_id": "cab4d532d06c4776a299d4ad1f1a385d",
+        "seq": 2,
+        "time": 1791691516.9890592
+      },
+      "security": {
+        "v": 1,
+        "type": "security",
+        "syscall_rejected": true,
+        "stage": "audit",
+        "codegen_invoked": false,
+        "run_id": "cab4d532d06c4776a299d4ad1f1a385d",
+        "seq": 39,
+        "time": 1791691517.0237582
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 536870912,
+        "total_bytes": 536870912,
+        "verified": 8388608,
+        "riscv_steps": 152471339008,
+        "connections": 16,
+        "elapsed_ms": 309267,
+        "run_id": "cab4d532d06c4776a299d4ad1f1a385d",
+        "seq": 2090,
+        "time": 1791691826.2579763
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 8388608,
+        "bytes": 536870912,
+        "riscv_steps": 152471339008,
+        "mismatches": 0,
+        "trace_executions": 2147483648,
+        "compilation_ns": 1368631,
+        "execution_ns": 309267077899,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "cab4d532d06c4776a299d4ad1f1a385d",
+        "seq": 2092,
+        "time": 1791691826.2604957
+      },
+      "url": "https://chunder.public.computer/?run=cab4d532d06c4776a299d4ad1f1a385d"
+    },
+    {
+      "id": "cf34e53fd6ca47e99689ea0284cc0708",
+      "tier": "large",
+      "status": "interrupted",
+      "cursor": 60,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "requested": {
+        "bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256
+      },
+      "engine": {
+        "v": 1,
+        "type": "started",
+        "tier": "large",
+        "seed": "42",
+        "total_bytes": 536870912,
+        "connections": 16,
+        "kernels": 4,
+        "rounds": 256,
+        "oracle": "native-x86-and-rust-reference",
+        "host_arch": "x86_64",
+        "backend": "riscv64gc-unknown-none-elf",
+        "network": "real TCP / 127.0.0.1",
+        "run_id": "cf34e53fd6ca47e99689ea0284cc0708",
+        "seq": 2,
+        "time": 1791691839.5160868
+      },
+      "security": {
+        "v": 1,
+        "type": "security",
+        "syscall_rejected": true,
+        "stage": "audit",
+        "codegen_invoked": false,
+        "run_id": "cf34e53fd6ca47e99689ea0284cc0708",
+        "seq": 39,
+        "time": 1791691839.5640075
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 4915200,
+        "total_bytes": 536870912,
+        "verified": 76800,
+        "riscv_steps": 1395916800,
+        "connections": 16,
+        "elapsed_ms": 2875,
+        "run_id": "cf34e53fd6ca47e99689ea0284cc0708",
+        "seq": 59,
+        "time": 1791691842.3930676
+      },
+      "result": null,
+      "url": "https://chunder.public.computer/?run=cf34e53fd6ca47e99689ea0284cc0708"
+    },
+    {
+      "id": "b899c0b3c49c4faabf89864d2b5e4f02",
+      "tier": "baby",
+      "status": "completed",
+      "cursor": 18,
+      "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
+      "requested": {
+        "bytes": 64,
+        "connections": 0,
+        "kernels": 1,
+        "rounds": 1
+      },
+      "engine": {
+        "v": 1,
+        "type": "started",
+        "tier": "baby",
+        "seed": "42",
+        "total_bytes": 64,
+        "connections": 0,
+        "kernels": 1,
+        "rounds": 1,
+        "oracle": "native-x86-and-rust-reference",
+        "host_arch": "x86_64",
+        "backend": "riscv64gc-unknown-none-elf",
+        "network": "none",
+        "run_id": "b899c0b3c49c4faabf89864d2b5e4f02",
+        "seq": 2,
+        "time": 1791691846.922283
+      },
+      "security": {
+        "v": 1,
+        "type": "security",
+        "syscall_rejected": true,
+        "stage": "audit",
+        "codegen_invoked": false,
+        "run_id": "b899c0b3c49c4faabf89864d2b5e4f02",
+        "seq": 12,
+        "time": 1791691846.9265704
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 64,
+        "total_bytes": 64,
+        "verified": 1,
+        "riscv_steps": 71,
+        "connections": 0,
+        "elapsed_ms": 0,
+        "run_id": "b899c0b3c49c4faabf89864d2b5e4f02",
+        "seq": 15,
+        "time": 1791691846.9278696
+      },
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 1,
+        "bytes": 64,
+        "riscv_steps": 71,
+        "mismatches": 0,
+        "trace_executions": 1,
+        "compilation_ns": 975379,
+        "execution_ns": 54740,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "b899c0b3c49c4faabf89864d2b5e4f02",
+        "seq": 17,
+        "time": 1791691846.9289684
+      },
+      "url": "https://chunder.public.computer/?run=b899c0b3c49c4faabf89864d2b5e4f02"
+    }
+  ],
+  "evidence": {
+    "directory": ".isr-state/deploy",
+    "full_reports": "chunder-public-runs.json",
+    "browser_report": "chunder-public-browser-report/index.html",
+    "screenshots": "chunder-public-screenshots/",
+    "recovery_screenshots": [
+      "chunder-public-systemd-interrupted.png",
+      "chunder-after-restart-baby.png"
+    ],
+    "sqlite_backup": "chunder-public-verified.sqlite",
+    "sqlite_backup_integrity": "ok",
+    "sqlite_backup_sha256": "494cbd7d03349c5a40097a288b011d773cfbc28de0f4c0f21fd26a346cc91a18",
+    "sqlite_rows": {
+      "runs": 12,
+      "events": 4702
+    }
+  },
+  "scope": [
+    "Medium and Large use real TCP connections to loopback on the worker host; they do not generate traffic to external targets.",
+    "The curated workload executes translated arithmetic in the RISC-V interpreter; the host owns network sockets and workload loops.",
+    "The public progress measurement is one event-interarrival sample, not an end-to-end latency guarantee.",
+    "The shared Caddy service remained running during recovery testing; only the demo coordinator main process was killed."
+  ]
+}

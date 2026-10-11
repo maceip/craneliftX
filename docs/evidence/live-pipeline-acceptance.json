@@ -1,0 +1,231 @@
+{
+  "status": "passed",
+  "scope": "Grouped pipeline events and live committed-journal SSE during dynamic x86-to-RV64 translation; local macOS ARM64 acceptance.",
+  "runner_sha256": "7b82913c064b049fdc3a6d8129a64b106e8111431de55c1eb4b00a9529705607",
+  "groups": [
+    {
+      "id": "run",
+      "label": "Run setup",
+      "order": 1
+    },
+    {
+      "id": "ingest",
+      "label": "Read and identify input",
+      "order": 2
+    },
+    {
+      "id": "load",
+      "label": "Validate and map image",
+      "order": 3
+    },
+    {
+      "id": "initialize",
+      "label": "Initialize guest state",
+      "order": 4
+    },
+    {
+      "id": "decode",
+      "label": "Decode x86 instructions",
+      "order": 5
+    },
+    {
+      "id": "audit",
+      "label": "Audit trace policy",
+      "order": 6
+    },
+    {
+      "id": "lower",
+      "label": "Lower x86 semantics to CLIF",
+      "order": 7
+    },
+    {
+      "id": "codegen",
+      "label": "Generate RV64 code",
+      "order": 8
+    },
+    {
+      "id": "artifacts",
+      "label": "Persist code artifacts",
+      "order": 9
+    },
+    {
+      "id": "execute",
+      "label": "Execute and resume guest",
+      "order": 10
+    },
+    {
+      "id": "syscall",
+      "label": "Bridge operating-system services",
+      "order": 11
+    },
+    {
+      "id": "cache",
+      "label": "Manage compiled blocks",
+      "order": 12
+    },
+    {
+      "id": "result",
+      "label": "Finalize run result",
+      "order": 13
+    }
+  ],
+  "checks": {
+    "arm64_format_clippy_and_tests": "passed, 40 tests; warnings denied",
+    "x86_64_rosetta_tests": "passed, 43 tests; warnings denied",
+    "python_syntax": "passed",
+    "ci": "both probes configured; remote CI not run in this session"
+  },
+  "network": {
+    "source_report": ".isr-state/rv64-network/1791702440946634000-84e70c66/report.json",
+    "input": {
+      "source": "/Users/mac/craneliftX/tests/fixtures/rv64_network_server.rs",
+      "source_sha256": "b835e352cba3dbd66752d6dd73d57b127d78d9fd380d0c1478130950bf6bd17c",
+      "binary": "/Users/mac/craneliftX/.isr-state/rv64-network/1791702440946634000-84e70c66/rust-network-server-x86_64.elf",
+      "binary_sha256": "aab2485c0d97c9e2162cfe22a5befb611cc8293f6f13fa2e4a7b71de27081c99",
+      "runner": "/Users/mac/craneliftX/target/release/isr-process",
+      "runner_sha256": "7b82913c064b049fdc3a6d8129a64b106e8111431de55c1eb4b00a9529705607",
+      "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "profile": "static Linux x86-64, freestanding Rust, scalar codegen"
+    },
+    "ledger": "/Users/mac/craneliftX/.isr-state/rv64-network/1791702440946634000-84e70c66/pipeline/1791702441184309000-72132-0/events.jsonl",
+    "verified_responses": 15,
+    "verified_payload_bytes": 74835,
+    "persistent_connection": {
+      "status": "passed",
+      "reconnects": 0,
+      "peer": [
+        "127.0.0.1",
+        65034
+      ],
+      "local": [
+        "127.0.0.1",
+        65051
+      ],
+      "client_fd": 8,
+      "connected_unix_ns": "1791702443656430000",
+      "disconnected_unix_ns": "1791702460770323000",
+      "verified_responses": 12,
+      "request_sequence_preserved": true,
+      "cache_invalidations_while_open": 2,
+      "blocks_compiled_while_open": 107
+    },
+    "runtime_counters": {
+      "accepted_connections": 3,
+      "block_executions": 37894,
+      "cache_invalidations": 3,
+      "compiled_blocks": 170,
+      "emitted_rv64_bytes": 101572,
+      "exit_code": 0,
+      "native_x86_instructions_executed": 0,
+      "network_read_bytes": 74899,
+      "network_written_bytes": 75015,
+      "rv64_steps": 19180667,
+      "syscalls": 92,
+      "unique_lifted_bytes": 1117,
+      "unique_lifted_instructions": 299,
+      "x86_instructions_executed": 750318
+    },
+    "artifact_hashes_verified": 510,
+    "observed_partial_reads": 2,
+    "live_events": {
+      "status": "passed",
+      "endpoint": "http://127.0.0.1:65027/events",
+      "capture": "/Users/mac/craneliftX/.isr-state/rv64-network/1791702440946634000-84e70c66/live-events.jsonl",
+      "events_received": 2841,
+      "reconnections": 1,
+      "gaps": 0,
+      "duplicates": 0,
+      "matches_durable_journal": true,
+      "compilation_updates_before_result": 170,
+      "first_compilation_received_unix_ns": "1791702441390927000",
+      "last_compilation_received_unix_ns": "1791702467941961000",
+      "compilation_updates_while_guest_connected": 106,
+      "stalled_subscriber_present": true
+    },
+    "native_fallback": false,
+    "unsupported_instruction_fails_closed": {
+      "status": "passed",
+      "ledger": "/Users/mac/craneliftX/.isr-state/rv64-network/1791702440946634000-84e70c66/negative/1791702468050441000-72189-0/events.jsonl"
+    }
+  },
+  "large_input": {
+    "scope": "16 MiB synthetic ELF with 1024 arithmetic blocks plus entry/exit; padding is not translated",
+    "input_bytes": 16777216,
+    "input_sha256": "be604c8ce3d0abaf4aedd64c68aabe14a7e88b45c01a901a7d3216a1af191f94",
+    "reachable_source_bytes": 132110,
+    "padding_bytes": 16644850,
+    "ledger": "/Users/mac/craneliftX/.isr-state/live-translation/1791702440946704000-2d3b1042/pipeline/1791702441184298000-72120-0/events.jsonl",
+    "runtime_counters": {
+      "accepted_connections": 0,
+      "block_executions": 1026,
+      "cache_invalidations": 0,
+      "compiled_blocks": 1026,
+      "emitted_rv64_bytes": 4604612,
+      "exit_code": 0,
+      "native_x86_instructions_executed": 0,
+      "network_read_bytes": 0,
+      "network_written_bytes": 0,
+      "rv64_steps": 1151148,
+      "syscalls": 1,
+      "unique_lifted_bytes": 132110,
+      "unique_lifted_instructions": 32772,
+      "x86_instructions_executed": 32772
+    },
+    "source_report": ".isr-state/live-translation/1791702440946704000-2d3b1042/report.json",
+    "live_events": {
+      "status": "passed",
+      "endpoint": "http://127.0.0.1:65028/events",
+      "capture": "/Users/mac/craneliftX/.isr-state/live-translation/1791702440946704000-2d3b1042/live-events.jsonl",
+      "events_received": 15707,
+      "reconnections": 1,
+      "gaps": 0,
+      "duplicates": 0,
+      "matches_durable_journal": true,
+      "compilation_updates_before_result": 1026,
+      "first_compilation_received_unix_ns": "1791702441438236000",
+      "last_compilation_received_unix_ns": "1791702533777337000",
+      "execution_updates_before_result": 302,
+      "stalled_subscriber_present": true
+    }
+  },
+  "standalone_replay": {
+    "status": "passed",
+    "command": [
+      "target/release/isr-events",
+      "/Users/mac/craneliftX/.isr-state/rv64-network/1791702440946634000-84e70c66/pipeline/1791702441184309000-72132-0/events.jsonl"
+    ],
+    "replayer_sha256": "f84cdf5a1556d075c70ade6b8a7b15bafc4e5a308adf0d6529627a090e7ae147",
+    "group_catalog_matches": true,
+    "replayed_terminal_seq": 2841,
+    "replayed_terminal_matches": true
+  },
+  "limitations": [
+    "The Rust network server is a static scalar freestanding x86-64 ELF; arbitrary std/Tokio binaries remain unsupported.",
+    "The large-input probe is synthetic: 16 MiB input, 132110 reached source bytes; padding is not counted as translated.",
+    "Slow clients are disconnected with bounded deadlines and can replay the retained journal; this is not an indefinitely buffered subscriber queue."
+  ],
+  "source_sha256": {
+    "scripts/live_probe.py": "092e78567423e4230f7aea46a283ca246e5cc34dcc9a49ae656fb54a1dcbd717",
+    "scripts/verify_live_translation.py": "affeb397df1130833c295363c491e0cdc68ec838d64c68c394cff922796eb320",
+    "scripts/verify_rv64_network_server.py": "73951823bd0d5a3f80a7bc49497b1aedd7e95f9c1d94ac3f65538d3eab9461ca",
+    "src/bin/isr-demo.rs": "e70f5b20253c7f7380e7f591510c71ab10231cc13f8ff3bb22aaab72d26e6f6f",
+    "src/bin/isr-events.rs": "093651373a1edbadc51bf009e30fead4844c018ddb2380d519e61696ace2ba97",
+    "src/bin/isr-process.rs": "e503bb47ee95a3521b117e2d429d74fe315e940bcf2b2f6dc97dfdae5aef38ee",
+    "src/groups.rs": "cf525530f690dcd40fe0562a81704420bdf3fbbda290fb30dcef5f7017925465",
+    "src/ledger.rs": "36ed4d4ea85b26fc4bbcb8df639c2fc676638b1ab372f304c53b26eb59fe0040",
+    "src/live.rs": "7512f9f8d06b038992b1054108bb5e22443ca813398743662412c8543ae37ec0",
+    "src/pipeline.rs": "2743ab65b675729452f59470e258d3bdabb53f40f71d8e38be0f2b101ca64311",
+    "src/process/cache.rs": "9f5e82667f87966c1a71bbbd99105ebfcd40817c5362d5fe722e41c8dde9c3c0",
+    "src/process/compile.rs": "ff06715c069647143764c5a9cbce1510dbd4cd8bee0d24272881ae42287efe0f",
+    "src/process/input.rs": "2e2eff68acbab1470f4943aa24fdf02e277b164609e8fb5f5aaa8728e29c0d90",
+    "src/process/lower.rs": "c393e06fdb9c76e46b4986fed6def286e403a83a82d043efa04b9dd2414d48ae",
+    "src/process/memory.rs": "2b18476d88a0e1f222c651a4d867634e743d92c38d7a7346beeba6b7ed550dcc",
+    "src/process/mod.rs": "624a20344d7488ba463eafc7fd8f37d075d61ce9a3106a2504e822dda0edf9d0",
+    "src/process/observe.rs": "d800c4f535aeac018396097fea63c3d9766e72027c0d19ccce99a12113e17d69",
+    "src/process/runtime.rs": "84ae4794ac9d2297ee3f36b55a9912262d8b7e71adfa2be414dade1b63b572da",
+    "src/process/syscall.rs": "7659902ffd56f3cd3ce727b765e20d00befe49ac527ca9bac34a8b32e23f9746",
+    "src/process/tests.rs": "20d65cb3c72750b9e9e9d585f8f868bdca268ec3c4c8f945c173b6e5748a02e4",
+    "tests/live_events.rs": "358972ef2f1e8351e7e6cb1eb100c81fb26d4c8f35877f65cdf21e06b0e08b96",
+    "tests/process_cli.rs": "33608540a4f8ec8f938fbbb18f8af12119a9819d5ebdc8c3f552187a246797b3"
+  }
+}

@@ -1,0 +1,89 @@
+name: In-process ISR
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stable Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Format
+        run: cargo +stable fmt --all -- --check
+      - name: Clippy
+        run: cargo +stable clippy --locked --all-targets -- -D warnings
+      - name: Build and test (native x86 comparison runs on the Linux x86 runner)
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo +stable test --locked --all-targets
+      - name: Exercise live-pointer demo
+        run: cargo +stable run --locked --quiet
+      - name: Build static Rust TCP server and verify RV64 connection continuity
+        run: |
+          rustup target add --toolchain stable x86_64-unknown-linux-gnu
+          cargo +stable build --locked --release --bin isr-process
+          python3 scripts/verify_rv64_network_server.py
+      - name: Verify live translation delivery and replay with a large ELF
+        run: python3 scripts/verify_live_translation.py
+      - name: Retain RV64 network execution ledgers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv64-network-${{ matrix.os }}
+          path: |
+            .isr-state/rv64-network
+            .isr-state/live-translation
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build the process runtime and Rust server fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld nginx
+          rustup toolchain install stable --profile minimal
+          rustup target add --toolchain stable x86_64-unknown-linux-gnu
+          cargo +stable build --locked --release --bin isr-demo --bin isr-process
+          python3 scripts/build_web_fixture.py
+      - name: Install web and proxy dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r webapp/requirements.txt
+          npm --prefix webapp ci
+          cd webapp
+          npx playwright install --with-deps chromium
+      - name: Web types, build, and supervisor failure checks
+        run: |
+          npm --prefix webapp run typecheck
+          npm --prefix webapp run build
+          npm --prefix webapp run test:server
+      - name: Live pipeline browser checks through actual nginx
+        run: npm --prefix webapp run test:e2e
+      - name: Retain pipeline browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-demo-evidence
+          path: |
+            webapp/test-results
+            webapp/playwright-report

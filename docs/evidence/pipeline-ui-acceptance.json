@@ -1,0 +1,278 @@
+{
+  "captured_at_utc": "2026-10-11T07:43:26.045455+00:00",
+  "scope": "Local built frontend, actual process runner, and real nginx proxy; public deployment not changed",
+  "preview": "http://127.0.0.1:8879/?run=74066bbc787348b2bb75f1b812fc63a5",
+  "browser": {
+    "startTime": "2026-10-11T07:42:22.434Z",
+    "duration": 39991.69,
+    "expected": 5,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "browser_checks": [
+    {
+      "test": "13 groups consume real Rust server events live, recover a connection, and reconcile exact evidence",
+      "status": "passed",
+      "duration_ms": 16012
+    },
+    {
+      "test": "unsupported uploaded instructions fail at lowering without advancing later groups",
+      "status": "passed",
+      "duration_ms": 638
+    },
+    {
+      "test": "cancellation interrupts open spans and never manufactures an engine result",
+      "status": "passed",
+      "duration_ms": 660
+    },
+    {
+      "test": "16 MiB input keeps the browser live through hundreds of lazy compilations and an nginx restart",
+      "status": "passed",
+      "duration_ms": 21697
+    },
+    {
+      "test": "unavailable execution and invalid requests are visible and rejected",
+      "status": "passed",
+      "duration_ms": 531
+    }
+  ],
+  "backend": {
+    "command": ".venv/bin/python -m unittest discover -s webapp/tests -p 'test_*.py'",
+    "passed": 11,
+    "includes": "Real engine TCP stream interruption and cursor resume"
+  },
+  "rust": {
+    "command": "make check with rustup stable",
+    "passed": 40,
+    "host": "macOS aarch64",
+    "fmt": "passed",
+    "clippy": "passed"
+  },
+  "frontend": {
+    "typecheck": "passed",
+    "build": "passed",
+    "served_assets_match_build": true
+  },
+  "network_server": {
+    "id": "5e14fd74c2ad49e891b6f04c97ede491",
+    "first_live_cursor": 188,
+    "terminal_cursor": 2826,
+    "live_status": "running",
+    "verification": {
+      "source": "host TCP test client",
+      "verified_responses": 15,
+      "payload_bytes": 74835,
+      "first_connection_responses": 12,
+      "reconnects_on_first_connection": 0,
+      "status": "passed"
+    },
+    "counters": {
+      "accepted_connections": 3,
+      "block_executions": 37918,
+      "cache_invalidations": 3,
+      "compiled_blocks": 171,
+      "emitted_rv64_bytes": 101540,
+      "exit_code": 0,
+      "native_x86_instructions_executed": 0,
+      "network_read_bytes": 74899,
+      "network_written_bytes": 75015,
+      "rv64_steps": 19183859,
+      "syscalls": 98,
+      "unique_lifted_bytes": 1117,
+      "unique_lifted_instructions": 299,
+      "x86_instructions_executed": 750408
+    },
+    "exact_replay": true,
+    "disconnected_browser_recovered": true,
+    "artifact_hash_verified": true
+  },
+  "large_input": {
+    "first_live_cursor": 368,
+    "final_cursor": 3950,
+    "input_bytes": 16777216,
+    "actual_source_bytes": 33038,
+    "counters": {
+      "accepted_connections": 0,
+      "block_executions": 258,
+      "cache_invalidations": 0,
+      "compiled_blocks": 258,
+      "emitted_rv64_bytes": 1151688,
+      "exit_code": 0,
+      "native_x86_instructions_executed": 0,
+      "network_read_bytes": 0,
+      "network_written_bytes": 0,
+      "rv64_steps": 287917,
+      "syscalls": 1,
+      "unique_lifted_bytes": 33038,
+      "unique_lifted_instructions": 8196,
+      "x86_instructions_executed": 8196
+    },
+    "nginx_restart": true
+  },
+  "runs": [
+    {
+      "id": "5e14fd74c2ad49e891b6f04c97ede491",
+      "input_name": "rust-network-server.elf",
+      "input_sha256": "aab2485c0d97c9e2162cfe22a5befb611cc8293f6f13fa2e4a7b71de27081c99",
+      "status": "completed",
+      "events": 2826,
+      "groups": {
+        "run": 1,
+        "ingest": 3,
+        "load": 2,
+        "initialize": 2,
+        "decode": 513,
+        "audit": 0,
+        "lower": 342,
+        "codegen": 342,
+        "artifacts": 855,
+        "execute": 53,
+        "syscall": 196,
+        "cache": 516,
+        "result": 1
+      },
+      "journal": ".isr-state/ui-acceptance/2026-10-11/runs/5e14fd74c2ad49e891b6f04c97ede491/ledger/events.jsonl"
+    },
+    {
+      "id": "0213bddea4cd4c14a91ff3988ed43417",
+      "input_name": "unsupported.elf",
+      "input_sha256": "2ab90a894aa77f2aa41de17a04de487eaa1f431ede7be1da80cb321663ba367f",
+      "status": "failed",
+      "events": 20,
+      "groups": {
+        "run": 1,
+        "ingest": 3,
+        "load": 2,
+        "initialize": 2,
+        "decode": 3,
+        "audit": 0,
+        "lower": 2,
+        "codegen": 0,
+        "artifacts": 0,
+        "execute": 4,
+        "syscall": 0,
+        "cache": 2,
+        "result": 1
+      },
+      "journal": ".isr-state/ui-acceptance/2026-10-11/runs/0213bddea4cd4c14a91ff3988ed43417/ledger/events.jsonl"
+    },
+    {
+      "id": "9780645ddd9e4f0eb7749f30f9410c8d",
+      "input_name": "loop.elf",
+      "input_sha256": "2bff3716256e164721299fc72915c543da49755cb81efd905061856864f1ce79",
+      "status": "cancelled",
+      "events": 25,
+      "groups": {
+        "run": 1,
+        "ingest": 3,
+        "load": 2,
+        "initialize": 2,
+        "decode": 3,
+        "audit": 0,
+        "lower": 2,
+        "codegen": 2,
+        "artifacts": 5,
+        "execute": 2,
+        "syscall": 0,
+        "cache": 3,
+        "result": 0
+      },
+      "journal": ".isr-state/ui-acceptance/2026-10-11/runs/9780645ddd9e4f0eb7749f30f9410c8d/ledger/events.jsonl"
+    },
+    {
+      "id": "c6ed3f9d73634d5c94d414c15637c35a",
+      "input_name": "large-lazy.elf",
+      "input_sha256": "7f9b99b9fc877fd9ff8fea88820583de8718631da0956d346647709aa14c4668",
+      "status": "completed",
+      "events": 3950,
+      "groups": {
+        "run": 1,
+        "ingest": 3,
+        "load": 2,
+        "initialize": 2,
+        "decode": 774,
+        "audit": 0,
+        "lower": 516,
+        "codegen": 516,
+        "artifacts": 1290,
+        "execute": 69,
+        "syscall": 2,
+        "cache": 774,
+        "result": 1
+      },
+      "journal": ".isr-state/ui-acceptance/2026-10-11/runs/c6ed3f9d73634d5c94d414c15637c35a/ledger/events.jsonl"
+    },
+    {
+      "id": "b43e715135684cef8a35caad8c470c0a",
+      "input_name": "wrong-format.elf",
+      "input_sha256": "567a2190a932282e9d5acd9e209edd335e5505b630c10ab20219d5d5be8ba33b",
+      "status": "failed",
+      "events": 7,
+      "groups": {
+        "run": 1,
+        "ingest": 3,
+        "load": 2,
+        "initialize": 0,
+        "decode": 0,
+        "audit": 0,
+        "lower": 0,
+        "codegen": 0,
+        "artifacts": 0,
+        "execute": 0,
+        "syscall": 0,
+        "cache": 0,
+        "result": 1
+      },
+      "journal": ".isr-state/ui-acceptance/2026-10-11/runs/b43e715135684cef8a35caad8c470c0a/ledger/events.jsonl"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": ".isr-state/ui-acceptance/2026-10-11/screenshots/failed-desktop.png",
+      "sha256": "9f5dbd603efd9b8a5a6b502dcbbe3905669b996711b8a5e47460754d25ddc677"
+    },
+    {
+      "path": ".isr-state/ui-acceptance/2026-10-11/screenshots/completed-desktop.png",
+      "sha256": "7fb1c70f9ef070565ad2231d45aa85f8a55454b1674de0fa0bb6adb0ae7f9ac5"
+    },
+    {
+      "path": ".isr-state/ui-acceptance/2026-10-11/screenshots/idle-desktop.png",
+      "sha256": "042231bffe026f0700dde84fed2b4bf2c02071d185b338bcd09d60bb61b89fe8"
+    },
+    {
+      "path": ".isr-state/ui-acceptance/2026-10-11/screenshots/live-desktop.png",
+      "sha256": "df90a61b136372d945db6bc6fe5aa2ed4f451410607adaf39aa57c384ad0d83e"
+    },
+    {
+      "path": ".isr-state/ui-acceptance/2026-10-11/screenshots/completed-mobile.png",
+      "sha256": "c90d35f156d7ca4819fdcdcc82ce96684a3b6f7a3898a2768131dd6de2657929"
+    },
+    {
+      "path": ".isr-state/ui-acceptance/2026-10-11/screenshots/large-live.png",
+      "sha256": "21dba3c889f3ea6f84ee003f2f85c70fff92bc6c486911fb28a4abfd0e468602"
+    }
+  ],
+  "source_and_artifact_sha256": {
+    "webapp/src/App.tsx": "f85ade27c0ee1f4f2eb2d9119bd8f66a49a84c585025622c783f32d8e8ad246f",
+    "webapp/src/styles.css": "11c50c720958594d96c0b5d46c93809adf4c5f55daea48c5fdb661c92f204409",
+    "webapp/src/pipeline.ts": "7b95391c0a9912c1a9329606cc505d0dce6fafddc9ec28222ea5492c537a71c0",
+    "webapp/src/usePipeline.ts": "7cc82b9777b586869b544cacdf8cb46d852a214547aac71068ebd09b2d26c8c7",
+    "webapp/pipeline.py": "4558edcca01453e787b6254c47edab29bfeaaab57e6782551c3d97a841be044b",
+    "webapp/server.py": "ff1f68ba6c8b3bbc0c1693c4e5bd3592173ff221b7e2d874fdb86c1168cd79e4",
+    "webapp/tests/pipeline.spec.ts": "76779ae2a8fcd2f4b36a501033cb9bd3a48c396d8441fc77102953792f6419a2",
+    "webapp/tests/test_pipeline.py": "7f024e312185f2e0931af06e899a1d3ff9fe54dfbe2d37bfadcfef34facb9934",
+    "src/bin/isr-process.rs": "8f6e4f2dadb940731df9626c7e419866bc34395c110e6633895feb0beb2a50ac",
+    "src/groups.rs": "cf525530f690dcd40fe0562a81704420bdf3fbbda290fb30dcef5f7017925465",
+    "src/live.rs": "7512f9f8d06b038992b1054108bb5e22443ca813398743662412c8543ae37ec0",
+    "src/ledger.rs": "36ed4d4ea85b26fc4bbcb8df639c2fc676638b1ab372f304c53b26eb59fe0040",
+    "tests/fixtures/rv64_network_server.rs": "b835e352cba3dbd66752d6dd73d57b127d78d9fd380d0c1478130950bf6bd17c",
+    "scripts/build_web_fixture.py": "df90095637bb393d9f88e35edfce5f369c6be190dc71827f34b2f78901c55a49",
+    "deploy/nginx.conf": "2807597bbf6f446cae5ccf0be40c4c81aaaabe9596c059a103c97ee29dead340",
+    "webapp/dist/app.js": "3ab430263a24f5eb065588ca0e43cb30f916cb2f019c68d04f8bf316aba2db40",
+    "webapp/dist/app-style.css": "99556d80830c1778f202232a5359cfc3dcac30457bd28b60725f2237cc654a2d",
+    "target/release/isr-process": "e57fd09a15ce26ec72a3f60491d704570d0c29c5b7c2a656a25aef00c023b7bf",
+    "target/fixtures/rust-network-server.elf": "aab2485c0d97c9e2162cfe22a5befb611cc8293f6f13fa2e4a7b71de27081c99"
+  },
+  "local_evidence_directory": ".isr-state/ui-acceptance/2026-10-11"
+}

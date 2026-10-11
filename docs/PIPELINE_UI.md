@@ -1,0 +1,161 @@
+# Chunder live execution pipeline
+
+The frontend displays the current state of the actual `isr-process` runtime.
+It accepts a static Linux x86-64 ELF or starts the repository's freestanding
+Rust TCP server. Reached x86 instructions are decoded by **iced-x86**, lowered
+to CLIF, compiled by Cranelift to RV64, and executed by the embedded RV64
+interpreter. Loopback networking goes through the explicit host syscall bridge.
+
+The supported profile is scalar instructions, static linking, bounded guest
+memory, and the implemented Linux syscalls. It does not promise arbitrary Rust
+applications, dynamically linked binaries, Tokio, or physical RISC-V execution.
+
+## Run locally
+
+Use stable Rust, Python 3.11+, Node 22+, and an LLVM linker (`ld.lld`, provided
+by `lld` on Ubuntu). From the repository root:
+
+```sh
+rustup target add --toolchain stable x86_64-unknown-linux-gnu
+cargo +stable build --locked --release --bin isr-demo --bin isr-process
+python3 scripts/build_web_fixture.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r webapp/requirements.txt
+npm --prefix webapp ci
+npm --prefix webapp run typecheck
+npm --prefix webapp run build
+.venv/bin/python webapp/server.py --port 8877
+```
+
+Open **http://127.0.0.1:8877/**. Select **Run Rust server** or **Open binary**.
+The binary upload limit is 64 MiB. One guest process runs at a time, with a
+120-second engine deadline. A file is translated as guest control flow reaches
+its instructions; input file length is not a measure of lifted code.
+
+`ISR_PROCESS` overrides `target/release/isr-process`; `ISR_SERVER_FIXTURE`
+overrides `target/fixtures/rust-network-server.elf`. `ISR_STATE_DIR` selects the
+state root (default `.isr-state`), with these runs under `pipeline-ui/`.
+Missing runtime/fixture builds are visible in the UI. Requests do not build code.
+`deploy/setup_linux.sh` builds both runtimes, the fixture, and the frontend.
+The nginx and Caddy configurations permit the 64 MiB upload size and disable
+buffering for the event stream. Local tests exercise nginx; this work does not
+establish the state of any public deployment.
+
+## Original events, two replayable streams
+
+```text
+isr-process → committed events.jsonl → engine SSE /events?after=N
+                                            ↓
+                            Python coordinator → SQLite event journal
+                                            ↓
+                          browser SSE → ordered reducer → 13-group UI
+```
+
+The coordinator obtains the group catalog from `isr-process --groups`.
+It retains original engine payloads, `run_id`, `seq`, wall-clock nanosecond
+timestamp strings, and monotonic elapsed nanoseconds. Engine subscriptions
+resume from the last stored sequence after a transport disconnect. Conflicting
+replays, sequence gaps, and changed run identities fail instead of advancing
+the display. The retained engine journal is reconciled after process exit.
+
+The browser first loads a bounded snapshot, then consumes `event: ledger` over
+SSE. It applies each event in sequence and publishes batches every 50 ms (or
+128 queued events). This batches rendering, not translation. Reconnects use
+`Last-Event-ID`; reloads resume from the saved snapshot. A sequence gap triggers
+snapshot recovery. No stage is advanced by a timer or estimated percentage.
+
+`event: coordinator` carries process lifecycle and host test-client results
+separately, without impersonating an engine event or consuming an engine
+sequence number. If the coordinator restarts, an unconfirmed run is marked
+interrupted; it does not pretend to resume the terminated guest. The UI
+distinguishes stream reconnection, saved journals, engine failures, and stopped
+runs. An open span remains interrupted after cancellation.
+
+## Operation groups
+
+These are stable grouping identifiers, not a promise of 13 sequential steps.
+Nested operations overlap and compilation groups recur for newly reached blocks.
+
+| Order | ID | Operation |
+| ---: | --- | --- |
+| 1 | `run` | Run setup |
+| 2 | `ingest` | Read and identify input |
+| 3 | `load` | Validate and map image |
+| 4 | `initialize` | Initialize guest state |
+| 5 | `decode` | Decode x86 instructions |
+| 6 | `audit` | Audit trace policy |
+| 7 | `lower` | Lower x86 semantics to CLIF |
+| 8 | `codegen` | Generate RV64 code |
+| 9 | `artifacts` | Persist code artifacts |
+| 10 | `execute` | Execute and resume guest |
+| 11 | `syscall` | Bridge operating-system services |
+| 12 | `cache` | Manage compiled blocks |
+| 13 | `result` | Finalize run result |
+
+`audit` belongs to the single-trace path and is **Not exercised** by this process
+runner. Loading, lowering, and runtime checks report through their own groups.
+The UI never invents an audit pass. Event-only groups are **Observed**; paired
+spans can be **Active**, **Completed**, **Failed**, or **Interrupted**. A completed
+span can become active again when the next block reaches that operation.
+
+The inspector shows emitted source addresses, decoded instructions, mappings,
+artifacts, counters, or raw JSON. Selecting a ledger record pins that exact
+record; selecting a group restores its latest output. Artifact downloads retain
+their engine byte lengths and SHA-256 hashes. Full JSONL is downloadable.
+
+The browser keeps 120 recent events, displays at most 60 ledger rows, and keeps
+180 compilation graph samples. Full events remain in SQLite and the engine
+journal. Saved runs list the latest 30; on-disk journals are not automatically
+pruned. Span timings overlap and must not be summed into wall-clock time. The
+elapsed counter is the latest emitted engine time. The legacy report field
+`native_x86_instructions_executed` is a default value, not an independent native
+execution detector; it is not used as a UI proof metric.
+
+## API
+
+| Request | Result |
+| --- | --- |
+| `GET /api/pipeline/config` | Runner readiness and authoritative group catalog |
+| `POST /api/pipeline/runs` with `{"mode":"rust-server"}` | Start the actual Rust fixture |
+| `POST /api/pipeline/runs` with `application/octet-stream` | Upload and execute an ELF; optional encoded `X-Binary-Name` |
+| `GET /api/pipeline/runs` | Recent run metadata |
+| `GET /api/pipeline/runs/{id}` | Projected snapshot with event cursor |
+| `GET /api/pipeline/runs/{id}/events?after=N` | Replay/follow engine and coordinator events |
+| `POST /api/pipeline/runs/{id}/cancel` | Stop and reap the guest process |
+| `GET /api/pipeline/runs/{id}/journal` | Original engine JSONL |
+| `GET /api/pipeline/runs/{id}/artifacts/{name}` | Original x86/CLIF/RV64 artifact |
+
+`Last-Event-ID` overrides `after`. Invalid cursors are rejected. Replay reads
+64 rows at a time; slow browser sends have a 10-second timeout. The API accepts
+same-origin writes; guest network destinations remain constrained by the
+runtime's loopback syscall profile.
+
+## Exercised verification
+
+```sh
+.venv/bin/python -m unittest discover -s webapp/tests -p 'test_*.py'
+# Install nginx, and Playwright's browser once:
+cd webapp
+npx playwright install chromium
+npm run test:e2e
+```
+
+The browser suite starts the real ASGI server behind the actual nginx config.
+It exercises:
+
+- All 13 group controls, changing event cursors before execution completes,
+  exact engine-to-browser projection, artifact hashes, and saved-run reload.
+- The real Rust server: 15 independently checked responses, 12 on one persistent
+  connection, partial headers, an idle interval, EOF, oversized input rejection,
+  and guest cache invalidations during the run.
+- A 16 MiB uploaded ELF containing 256 arithmetic blocks plus entry/exit blocks:
+  258 actual compilations and 33,038 reached source bytes, with updates continuing
+  after an nginx restart. Padding is never counted as lifted source.
+- Browser offline recovery, unsupported instructions, invalid ELF input,
+  cancellation, bounded live rows, desktop/mobile layout, and raw event replay.
+
+The Python suite additionally cuts a real engine SSE TCP connection and verifies
+live resubscription from the committed cursor, exact journal reconciliation,
+process reaping, coordinator interruption, and the legacy worker supervisor.
+Positive runtime tests use real binaries and emitted events. Synthetic ELF test
+inputs are executable test programs, not simulated telemetry.

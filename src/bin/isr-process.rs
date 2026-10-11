@@ -1,0 +1,91 @@
+//! Static x86-64 ELF process -> Cranelift RV64 -> interpreter -> syscall bridge.
+use cranelift_isr::{
+    ledger::RunLedger,
+    process::{self, Options},
+};
+use serde_json::json;
+use std::path::PathBuf;
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("isr-process: {e}");
+        std::process::exit(1);
+    }
+}
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = std::env::args().skip(1);
+    let mut options = Options::default();
+    let mut file = None;
+    let mut events_bind = None;
+    let mut root = std::env::var_os("ISR_LEDGER_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".isr-state/process"));
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--groups" => {
+                println!("{}", cranelift_isr::groups::PipelineGroup::catalog());
+                return Ok(());
+            }
+            "--help" => {
+                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0]\nisr-process --groups\nRuns a static Linux x86-64 ELF through RV64. Loopback TCP syscall profile; no native fallback.");
+                return Ok(());
+            }
+            "--events-bind" => {
+                events_bind = Some(
+                    args.next()
+                        .ok_or("missing event bind address")?
+                        .parse::<std::net::SocketAddr>()?,
+                )
+            }
+            "--ledger-dir" => root = PathBuf::from(args.next().ok_or("missing ledger directory")?),
+            "--max-rv64-steps" => {
+                options.max_rv64_steps = args.next().ok_or("missing step budget")?.parse()?
+            }
+            "--max-seconds" => {
+                options.max_seconds = args.next().ok_or("missing deadline")?.parse()?
+            }
+            "--recompile-every-syscalls" => {
+                options.recompile_every_syscalls =
+                    args.next().ok_or("missing recompile interval")?.parse()?
+            }
+            _ if !a.starts_with('-') && file.is_none() => file = Some(PathBuf::from(a)),
+            _ => return Err(format!("unknown or duplicate input: {a}").into()),
+        }
+    }
+    let file = file.ok_or("expected a static x86-64 ELF file; use --help")?;
+    if options.max_seconds == 0 || options.max_seconds > 3600 || options.max_rv64_steps == 0 {
+        return Err("invalid execution budget".into());
+    }
+    let mut ledger = RunLedger::create(&root)?;
+    eprintln!(
+        "ledger: {}",
+        ledger.directory().join("events.jsonl").display()
+    );
+    let live_feed = events_bind
+        .map(|address| ledger.serve_events(address))
+        .transpose()?;
+    if let Some(feed) = &live_feed {
+        eprintln!("events: {}", feed.endpoint());
+    }
+    ledger.event(
+        "started",
+        json!({"mode":"static ELF process","decoder":"iced-x86","backend":"Cranelift RV64",
+        "live_events":live_feed.as_ref().map(|feed|feed.endpoint()),"native_fallback":false,"host_arch":std::env::consts::ARCH,"options":options}),
+    )?;
+    let result = process::run_file(&file, &options, &mut ledger);
+    match result {
+        Ok(report) => {
+            ledger.event(
+                "result",
+                json!({"status":if report.exit_code==Some(0){"completed"}else{"failed"},"report":report}),
+            )?;
+            if report.exit_code != Some(0) {
+                return Err(format!("guest exited with code {:?}", report.exit_code).into());
+            }
+        }
+        Err(e) => {
+            ledger.event("result", json!({"status":"failed","error":e.to_string()}))?;
+            return Err(e);
+        }
+    }
+    Ok(())
+}

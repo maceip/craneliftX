@@ -54,3 +54,8 @@ webapp/dist/
 
 # Local agent skill packs / editor tooling (not project deliverables)
 .agents/
+
+# Durable local demo journals and browser evidence
+/.isr-state/
+/webapp/test-results/
+/webapp/playwright-report/

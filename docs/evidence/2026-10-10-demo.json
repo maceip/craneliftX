@@ -1,0 +1,326 @@
+{
+  "date": "2026-10-10",
+  "environment": {
+    "host": "Apple M5 Max",
+    "worker_arch": "x86_64 via Rosetta",
+    "proxy": "real nginx",
+    "oracle": "native-x86-and-rust-reference"
+  },
+  "checks": {
+    "rust_arm_tests": 17,
+    "rust_x86_tests": 19,
+    "python_supervisor_tests": 6,
+    "browser_proxy_tests": 6,
+    "production_deployment": "not performed"
+  },
+  "runs": [
+    {
+      "id": "59849a7566c8415182eed65502f82ba1",
+      "tier": "baby",
+      "status": "completed",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 1,
+        "bytes": 64,
+        "riscv_steps": 74,
+        "mismatches": 0,
+        "trace_executions": 1,
+        "compilation_ns": 1195125,
+        "execution_ns": 25917,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "59849a7566c8415182eed65502f82ba1",
+        "seq": 17,
+        "time": 1791672087.462872
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 64,
+        "total_bytes": 64,
+        "verified": 1,
+        "riscv_steps": 74,
+        "connections": 0,
+        "elapsed_ms": 0,
+        "run_id": "59849a7566c8415182eed65502f82ba1",
+        "seq": 15,
+        "time": 1791672087.462404
+      }
+    },
+    {
+      "id": "7219a55285464dbfbdc55dd920eab8d3",
+      "tier": "medium",
+      "status": "completed",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 131072,
+        "bytes": 8388608,
+        "riscv_steps": 1241513984,
+        "mismatches": 0,
+        "trace_executions": 16777216,
+        "compilation_ns": 1997498,
+        "execution_ns": 2590350292,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "7219a55285464dbfbdc55dd920eab8d3",
+        "seq": 59,
+        "time": 1791672090.429416
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 8388608,
+        "total_bytes": 8388608,
+        "verified": 131072,
+        "riscv_steps": 1241513984,
+        "connections": 4,
+        "elapsed_ms": 2590,
+        "run_id": "7219a55285464dbfbdc55dd920eab8d3",
+        "seq": 57,
+        "time": 1791672090.4279099
+      }
+    },
+    {
+      "id": "82fb2e4991d34b34ac4b46bda3e01fca",
+      "tier": "large",
+      "status": "cancelled",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": null,
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 17891328,
+        "total_bytes": 536870912,
+        "verified": 279552,
+        "riscv_steps": 5295833088,
+        "connections": 16,
+        "elapsed_ms": 3013,
+        "run_id": "82fb2e4991d34b34ac4b46bda3e01fca",
+        "seq": 61,
+        "time": 1791672093.768002
+      }
+    },
+    {
+      "id": "f54c09cc04d34d9ba27099be92740a0c",
+      "tier": "large",
+      "status": "interrupted",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": null,
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 2146304,
+        "total_bytes": 536870912,
+        "verified": 33536,
+        "riscv_steps": 635305984,
+        "connections": 16,
+        "elapsed_ms": 310,
+        "run_id": "f54c09cc04d34d9ba27099be92740a0c",
+        "seq": 42,
+        "time": 1791672094.280977
+      }
+    },
+    {
+      "id": "b5b16478c69f4f2ca21ccc8f477fb102",
+      "tier": "large",
+      "status": "completed",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 8388608,
+        "bytes": 536870912,
+        "riscv_steps": 158913789952,
+        "mismatches": 0,
+        "trace_executions": 2147483648,
+        "compilation_ns": 1408958,
+        "execution_ns": 86473130375,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "b5b16478c69f4f2ca21ccc8f477fb102",
+        "seq": 605,
+        "time": 1791672183.42863
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 536870912,
+        "total_bytes": 536870912,
+        "verified": 8388608,
+        "riscv_steps": 158913789952,
+        "connections": 16,
+        "elapsed_ms": 86473,
+        "run_id": "b5b16478c69f4f2ca21ccc8f477fb102",
+        "seq": 603,
+        "time": 1791672183.425909
+      }
+    }
+  ],
+  "source_sha256": {
+    "src/bin/isr-demo.rs": "cd05c96944f4c6b3283054039f2f109177f0693018f2ab6153826f3af02189bf",
+    "src/pipeline.rs": "94f40d3cf03cf745884ea0bd1a8268ea3412c23f2111bf1320ee668f58f95bfc",
+    "src/riscv_exec.rs": "3a85cc2328d7b38d5b2c8d7475487cc583fac3c5ceccb8ecc20e0b45deba1c7b",
+    "webapp/server.py": "f3851f86013d8845fbcc18fbce2bcd0830d2e82fa4f76f87fbdf738fe66b32b9",
+    "webapp/src/App.tsx": "e940d38e14d7de33b1a68f1c01fbe96078f44ac94b23d33b4fcd08615cbb370a",
+    "webapp/src/protocol.ts": "0693e2f0379be17b8566db193ca514c1033a8c4dd2c11fd921f07364fe697489",
+    "webapp/src/styles.css": "bb4040256ab8ca773d4e571191e354fb077ca347d1be89766da34ac8fcc41d9b",
+    "deploy/nginx.conf": "900b817a409eacb5730a15e879ae84d07da8b79668d3e9b9d6481c76370a31d5",
+    "webapp/tests/serve.py": "fd7b5df94c369f42c8d70192ad5acb355267c6abd2d67b324146e9c4b3e3cd73"
+  },
+  "final_recheck_runs": [
+    {
+      "id": "9e6d04f78c244b1e974b50a901f4efbc",
+      "tier": "baby",
+      "status": "completed",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 1,
+        "bytes": 64,
+        "riscv_steps": 74,
+        "mismatches": 0,
+        "trace_executions": 1,
+        "compilation_ns": 1209083,
+        "execution_ns": 28459,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "9e6d04f78c244b1e974b50a901f4efbc",
+        "seq": 17,
+        "time": 1791672344.3414679
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 64,
+        "total_bytes": 64,
+        "verified": 1,
+        "riscv_steps": 74,
+        "connections": 0,
+        "elapsed_ms": 0,
+        "run_id": "9e6d04f78c244b1e974b50a901f4efbc",
+        "seq": 15,
+        "time": 1791672344.341032
+      },
+      "retained_chart_samples": 1
+    },
+    {
+      "id": "e1c806127a134ccf866ba7899fdf6bb4",
+      "tier": "medium",
+      "status": "completed",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 131072,
+        "bytes": 8388608,
+        "riscv_steps": 1241513984,
+        "mismatches": 0,
+        "trace_executions": 16777216,
+        "compilation_ns": 1405082,
+        "execution_ns": 2151801667,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "e1c806127a134ccf866ba7899fdf6bb4",
+        "seq": 56,
+        "time": 1791672346.866698
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 8388608,
+        "total_bytes": 8388608,
+        "verified": 131072,
+        "riscv_steps": 1241513984,
+        "connections": 4,
+        "elapsed_ms": 2151,
+        "run_id": "e1c806127a134ccf866ba7899fdf6bb4",
+        "seq": 54,
+        "time": 1791672346.865226
+      },
+      "retained_chart_samples": 14
+    },
+    {
+      "id": "6be2b1b4328249ad9182887b7d837a2d",
+      "tier": "large",
+      "status": "cancelled",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": null,
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 19677184,
+        "total_bytes": 536870912,
+        "verified": 307456,
+        "riscv_steps": 5824446464,
+        "connections": 16,
+        "elapsed_ms": 2951,
+        "run_id": "6be2b1b4328249ad9182887b7d837a2d",
+        "seq": 61,
+        "time": 1791672350.0961962
+      },
+      "retained_chart_samples": 20
+    },
+    {
+      "id": "50ccb51ee2a940bfbee7eaa45db1f5e3",
+      "tier": "large",
+      "status": "interrupted",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": null,
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 2097152,
+        "total_bytes": 536870912,
+        "verified": 32768,
+        "riscv_steps": 620756992,
+        "connections": 16,
+        "elapsed_ms": 308,
+        "run_id": "50ccb51ee2a940bfbee7eaa45db1f5e3",
+        "seq": 42,
+        "time": 1791672350.6135921
+      },
+      "retained_chart_samples": 2
+    },
+    {
+      "id": "d0dae9d1cc6d44bda4ffd105d138f9ea",
+      "tier": "large",
+      "status": "completed",
+      "worker_sha256": "f1f0b1291348750d609c1d30ea85196364d2b964f5111b76dbf7ff1f4e962e41",
+      "result": {
+        "v": 1,
+        "type": "result",
+        "verified": 8388608,
+        "bytes": 536870912,
+        "riscv_steps": 158913789952,
+        "mismatches": 0,
+        "trace_executions": 2147483648,
+        "compilation_ns": 1409542,
+        "execution_ns": 88265567458,
+        "oracle": "native-x86-and-rust-reference",
+        "syscall_rejected": true,
+        "run_id": "d0dae9d1cc6d44bda4ffd105d138f9ea",
+        "seq": 617,
+        "time": 1791672441.545525
+      },
+      "progress": {
+        "v": 1,
+        "type": "progress",
+        "bytes": 536870912,
+        "total_bytes": 536870912,
+        "verified": 8388608,
+        "riscv_steps": 158913789952,
+        "connections": 16,
+        "elapsed_ms": 88265,
+        "run_id": "d0dae9d1cc6d44bda4ffd105d138f9ea",
+        "seq": 615,
+        "time": 1791672441.543797
+      },
+      "retained_chart_samples": 120
+    }
+  ]
+}

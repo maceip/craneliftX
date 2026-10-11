@@ -1,0 +1,72 @@
+{
+  "status": "passed",
+  "scope": "entire freestanding Rust server: Linux entry, accept loop, framing, transformation and state through RV64; host kernel bridges socket syscalls",
+  "started_unix_ns": "1791701764000889000",
+  "completed_unix_ns": "1791701774235337000",
+  "input": {
+    "source": "/Users/mac/craneliftX/tests/fixtures/rv64_network_server.rs",
+    "source_sha256": "b835e352cba3dbd66752d6dd73d57b127d78d9fd380d0c1478130950bf6bd17c",
+    "binary": "/Users/mac/craneliftX/.isr-state/rv64-network/1791701764000790000-809ca0a7/rust-network-server-x86_64.elf",
+    "binary_sha256": "aab2485c0d97c9e2162cfe22a5befb611cc8293f6f13fa2e4a7b71de27081c99",
+    "runner": "/Users/mac/craneliftX/target/release/isr-process",
+    "runner_sha256": "460735c67f10331247e10aa0e1f27000a9525313ab7f2fc6d512a740dfb6de85",
+    "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "profile": "static Linux x86-64, freestanding Rust, scalar codegen"
+  },
+  "persistent_connection": {
+    "status": "passed",
+    "reconnects": 0,
+    "peer": [
+      "127.0.0.1",
+      64359
+    ],
+    "local": [
+      "127.0.0.1",
+      64361
+    ],
+    "client_fd": 5,
+    "connected_unix_ns": "1791701765121139000",
+    "disconnected_unix_ns": "1791701771361242000",
+    "verified_responses": 12,
+    "request_sequence_preserved": true,
+    "cache_invalidations_while_open": 2,
+    "blocks_compiled_while_open": 108
+  },
+  "runtime_counters": {
+    "accepted_connections": 3,
+    "block_executions": 37898,
+    "cache_invalidations": 3,
+    "compiled_blocks": 171,
+    "emitted_rv64_bytes": 101972,
+    "exit_code": 0,
+    "native_x86_instructions_executed": 0,
+    "network_read_bytes": 74899,
+    "network_written_bytes": 75015,
+    "rv64_steps": 19181161,
+    "syscalls": 93,
+    "unique_lifted_bytes": 1117,
+    "unique_lifted_instructions": 299,
+    "x86_instructions_executed": 750331
+  },
+  "verified_payload_bytes": 74835,
+  "observed_partial_reads": 3,
+  "artifact_hashes_verified": 513,
+  "native_fallback": false,
+  "unsupported_instruction_fails_closed": {
+    "status": "passed",
+    "ledger": "/Users/mac/craneliftX/.isr-state/rv64-network/1791701764000790000-809ca0a7/negative/1791701774185152000-67674-0/events.jsonl"
+  },
+  "source_report": ".isr-state/rv64-network/1791701764000790000-809ca0a7/report.json",
+  "ledger": ".isr-state/rv64-network/1791701764000790000-809ca0a7/pipeline/1791701764356423000-67670-0/events.jsonl",
+  "verified_responses": 15,
+  "checks": {
+    "arm64_format_clippy_and_tests": "passed, 36 tests",
+    "x86_64_rosetta_tests": "passed, 39 tests",
+    "ci": "workflow configured; remote CI not executed in this session"
+  },
+  "limitations": [
+    "Static scalar freestanding Linux x86-64 ELF profile; no general std/Tokio, dynamic loader, TLS, threading, or heap runtime.",
+    "Guest application runs as interpreted RV64; host bridges loopback TCP syscalls.",
+    "No native execution or hot handoff of the earlier std::net Mach-O server was established."
+  ]
+}

@@ -1,37 +1,33 @@
 {
-  "name": "craneliftx-webapp",
+  "name": "chunder-webapp",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:server": "../.venv/bin/python -m unittest discover -s tests -p 'test_*.py'"
   },
   "dependencies": {
     "@graundtech/fluent2-react-kit": "^0.6.0",
     "@visx/gradient": "^4.0.0",
     "@visx/group": "^4.0.0",
-    "@visx/responsive": "^4.0.0",
     "@visx/scale": "^4.0.0",
     "@visx/shape": "^4.0.0",
-    "@visx/tooltip": "^4.0.0",
-    "@visx/voronoi": "^4.0.0",
-    "bot-avatars": "^0.2.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.54.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.7.0",
     "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.3.3",
+    "@playwright/test": "^1.64.0",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "esbuild": "^0.25.0",
-    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.3"
   }
 }
