@@ -1,7 +1,7 @@
-//! Decode -> lower -> generate -> persist. The outer `lift` event remains the
+//! Decode -> audit -> lower -> generate -> persist. The outer `lift` event remains the
 //! cache-miss compilation span; leaf operations each have their own group.
 use super::{
-    lower,
+    audit, lower,
     memory::{error, GuestMemory},
     observe::operation,
     Result,
@@ -14,6 +14,7 @@ use crate::{
 use cranelift_codegen::ir::Function;
 use iced_x86::{Formatter, Instruction, IntelFormatter, Mnemonic};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 pub(super) struct CompiledBlock {
     pub id: u64,
@@ -109,6 +110,7 @@ fn persist(
 }
 pub(super) fn prepare(
     memory: &GuestMemory,
+    known: &BTreeMap<u64, usize>,
     rip: u64,
     id: u64,
     ledger: &mut RunLedger,
@@ -120,6 +122,13 @@ pub(super) fn prepare(
         context.clone(),
         |ledger| {
             let decoded = decode(memory, rip, id, ledger)?;
+            audit::inspect(
+                memory,
+                known,
+                &decoded.instructions,
+                context.clone(),
+                ledger,
+            )?;
             let function = lower(&decoded, context.clone(), ledger)?;
             let code = generate(&function, context.clone(), ledger)?;
             persist(&decoded, &function, &code, context.clone(), ledger)?;

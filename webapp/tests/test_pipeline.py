@@ -40,7 +40,9 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(self.runs.tasks[state["id"]], 10)
         self.assertEqual(state["status"], "completed", state["message"])
         self.assertEqual(len(state["groups"]), 13)
-        self.assertEqual(state["groups"]["audit"]["count"], 0)
+        self.assertGreater(state["groups"]["audit"]["count"], 0)
+        self.assertEqual(state["groups"]["audit"]["output"]["type"], "security")
+        self.assertEqual(state["groups"]["audit"]["output"]["verdict"], "accepted")
         self.assertGreater(state["counters"]["rv64_steps"], 0)
         engine = [json.loads(s) for s in Path(state["ledger"]).read_text().splitlines()]
         copied = [json.loads(row[0]) for row in self.runs.db.execute("SELECT body FROM events WHERE run_id=? ORDER BY seq", (state["id"],))]
@@ -54,7 +56,7 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runs.snapshot(state["id"]), state)
 
     async def test_failure_is_at_actual_group_with_unreached_groups_empty(self):
-        for code, group in [(b"\x0f\x0b", "lower"), (None, "load")]:
+        for code, group in [(b"\x0f\x0b", "lower"), (b"\xcd\x80", "audit"), (None, "load")]:
             state = self.runs.create("upload", "invalid.elf", elf(code) if code else b"not an ELF")
             await asyncio.wait_for(self.runs.tasks[state["id"]], 10)
             self.assertEqual(state["status"], "failed", state)
@@ -115,7 +117,12 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
                 for socket in [upstream, writer]:
                     if socket:
                         socket.close()
-                        await socket.wait_closed()
+                        try:
+                            await socket.wait_closed()
+                        except OSError:
+                            # The first transport is deliberately severed.
+                            # A reset must not prevent closing the other half.
+                            pass
                 peers.discard(task)
 
         server = await asyncio.start_server(proxy, "127.0.0.1", 0)
@@ -130,8 +137,12 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
         self.runs._subscribe = redirected
         try:
             state = self.runs.create("upload", "loop.elf", elf(b"\xeb\xfe"))
-            for _ in range(500):
+            # Durable journal fsyncs can contend with other acceptance probes.
+            # Still require a live resumed stream, never terminal disk replay.
+            for _ in range(1500):
                 if len(requests) >= 2 and state["cursor"] > 20:
+                    break
+                if state["status"] in {"completed", "failed", "cancelled", "interrupted"}:
                     break
                 await asyncio.sleep(.01)
             self.assertEqual(requests[:2], [b"GET /events?after=0 HTTP/1.1", b"GET /events?after=1 HTTP/1.1"])

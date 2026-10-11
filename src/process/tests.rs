@@ -1,5 +1,5 @@
 use super::memory::{GuestMemory, ProcessBus, CONTEXT_BASE, RV_STACK_BASE};
-use super::memory::{ADDRESS_LIMIT, GUEST_BIAS};
+use super::memory::{ADDRESS_LIMIT, GUEST_BIAS, STACK_TOP};
 use super::*;
 use crate::EngineError;
 use crate::{
@@ -129,10 +129,12 @@ fn calls_stack_loop_branch_and_indirect_return_execute_in_rv64() {
     let mut memory = GuestMemory::default();
     memory.map(0x20000, 4096, false, true).unwrap();
     memory.regions[0].data[..bytes.len()].copy_from_slice(&bytes);
-    memory.map(0x30000, 4096, true, false).unwrap();
-    memory.write(0x30ff0, &0x40000u64.to_le_bytes()).unwrap();
+    memory.map(STACK_TOP - 4096, 4096, true, false).unwrap();
+    memory
+        .write(STACK_TOP - 16, &0x40000u64.to_le_bytes())
+        .unwrap();
     let mut state = [0u64; 18];
-    state[7] = 0x30ff0;
+    state[7] = STACK_TOP - 16;
     state[16] = 0x20000;
     state[17] = 2;
     state[1] = 0x12345678;
@@ -151,7 +153,7 @@ fn calls_stack_loop_branch_and_indirect_return_execute_in_rv64() {
     assert_eq!(state[16], 0x40000);
     assert_eq!(state[0], 15);
     assert_eq!(state[1], 0x12345678);
-    assert_eq!(state[7], 0x30ff8);
+    assert_eq!(state[7], STACK_TOP - 8);
     assert!(total_steps > 100);
 }
 

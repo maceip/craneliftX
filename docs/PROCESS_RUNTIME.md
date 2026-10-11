@@ -2,7 +2,7 @@
 
 `isr-process` runs a static Linux x86-64 ELF from its entry point. It maps the
 ELF's load segments and a guest stack, decodes basic blocks with **iced-x86**,
-lifts their semantics into CLIF, compiles them with Cranelift's RV64 backend,
+inspects each block with a lightweight instruction policy, lifts its semantics into CLIF, compiles them with Cranelift's RV64 backend,
 and interprets the emitted RV64 instructions. There is no Icicle dependency
 and no native x86 execution fallback.
 
@@ -104,7 +104,11 @@ stack occupy distinct interpreter address spaces. Generated guest memory
 operations check the guest address limit before applying their mapping bias;
 the interpreter then checks region bounds and write permissions. Guest values
 never become host pointers. Calls and returns use the mapped guest stack.
-The existing unsafe live-pointer trace API remains a separate contract.
+Every generated RSP write also checks the 1 MiB guest-stack bounds before
+continuing, including transient adjustments within a block. The
+[lightweight shellcode-oriented filter](INSTRUCTION_FILTER.md) rejects
+forbidden instruction forms before lowering. The existing unsafe live-pointer
+trace API remains a separate contract.
 
 The scalar lowerer currently supports integer MOV/MOVZX/MOVSX/MOVSXD, LEA,
 ADD/SUB/CMP/TEST/AND/OR/XOR, INC/DEC/NEG/NOT, two/three-operand IMUL, immediate
@@ -138,7 +142,8 @@ connection continuity, including a disconnected and a stalled subscriber.
 
 Every process run records its full input hash, load mappings, entry address,
 options, and host architecture. Each compilation records decoded instruction
-addresses/bytes/assembly, lowering and codegen start/end/failure timestamps,
+addresses/bytes/assembly, instruction-policy findings, audit/lowering/codegen
+start/end/failure timestamps,
 block ID, source length, emitted length/hash, and three artifacts. Blocks end
 at the first control-flow/syscall boundary or 32 instructions. Unlike the
 single-trace API, the process runtime **executes the boundary** and resumes at

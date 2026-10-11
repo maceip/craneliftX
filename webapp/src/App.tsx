@@ -27,7 +27,7 @@ const descriptions: Record<string, string> = {
   decode:
     "Instructions reached by the guest and decoded by iced-x86, with their original addresses and bytes.",
   audit:
-    "The single-trace policy audit. The process runtime enforces its policy during loading, lowering, and execution.",
+    "A lightweight inspection of each reached block before compilation: instruction policy, stack operations, memory bounds, and known branch boundaries.",
   lower: "x86 instruction semantics lowered into Cranelift IR for this block.",
   codegen: "Machine code emitted by Cranelift for the RV64 interpreter.",
   artifacts:
@@ -148,6 +148,44 @@ function Activity({ run }: { run: Run | null }) {
   );
 }
 function EventOutput({ event, runId }: { event: LedgerEvent; runId?: string }) {
+  if (event.type === "security" && Array.isArray(event.checks))
+    return (
+      <div className="audit-output" data-testid="audit-output">
+        <div className="audit-summary">
+          <strong>{event.verdict === "rejected" ? "Instruction policy rejected" : "Block accepted by policy"}</strong>
+          <span className="mono">
+            {event.phase === "execute" ? "Runtime guard" : `${event.instruction_count} / ${event.max_instructions} instructions inspected`}
+          </span>
+        </div>
+        <ul className="audit-checks" aria-label="Instruction policy checks">
+          {event.checks.map((check: any) => (
+            <li key={check.rule} className={`audit-check audit-${check.verdict}`} data-verdict={check.verdict}>
+              <div className="audit-check-heading">
+                <strong>{check.label}</strong>
+                <span className="audit-verdict">
+                  {check.verdict === "rejected" ? "Rejected" : check.verdict === "guarded" ? "Runtime checked" : "Passed"}
+                </span>
+              </div>
+              <p>{check.detail}</p>
+              {check.findings?.length > 0 && (
+                <details open={check.verdict === "rejected"}>
+                  <summary>{check.findings.length} instruction {check.findings.length === 1 ? "finding" : "findings"}</summary>
+                  <ul className="audit-findings">
+                    {check.findings.map((finding: any, index: number) => (
+                      <li key={index}>
+                        <code>{finding.rip} · {finding.instruction}</code>
+                        <span>{finding.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="audit-scope">Scope: reached instructions. Runtime checks apply when the block executes. No whole-binary taint or gadget-chain classification.</p>
+      </div>
+    );
   const instructions = event.instructions ?? event.details?.instructions,
     mappings = event.details?.segments;
   if (Array.isArray(instructions))
@@ -686,12 +724,12 @@ export function App() {
                   </span>
                   <h3>
                     {selected === "audit"
-                      ? "Not exercised by this runtime"
+                      ? "No instruction inspection recorded"
                       : "No events for this operation yet"}
                   </h3>
                   <p>
                     {selected === "audit"
-                      ? "The separate trace runner emits audit events. Process policy checks appear under load, lower, and execute."
+                      ? "New process runs inspect each decoded block before lowering. Older saved runs may have no audit events."
                       : "Actual output will appear here when the engine emits an event for this group."}
                   </p>
                 </div>

@@ -173,11 +173,19 @@ test("13 groups consume real Rust server events live, recover a connection, and 
       "data-state",
       groupState(group, final.status),
     );
-  expect(final.groups.audit.count).toBe(0);
+  expect(final.groups.audit.completed).toBe(final.counters.compiled_blocks);
+  expect(final.groups.audit.output?.verdict).toBe("accepted");
   await page.getByTestId("group-audit").click();
   await expect(
-    page.getByRole("heading", { name: "Not exercised by this runtime" }),
+    page.getByTestId("audit-output"),
   ).toBeVisible();
+  await expect(page.getByRole("list", { name: "Instruction policy checks" })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("audit-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("audit-output")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("audit-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByTestId("group-decode").click();
   await page.getByRole("button", { name: "View raw JSON" }).click();
   expect(JSON.parse(await page.getByTestId("raw-event").innerText())).toEqual(
@@ -260,7 +268,7 @@ test("unsupported uploaded instructions fail at lowering without advancing later
   );
   await expect(page.getByTestId("group-audit")).toHaveAttribute(
     "data-state",
-    "Not exercised",
+    "Completed",
   );
   await page.getByTestId("group-lower").click();
   await expect(page.getByRole("alert")).toContainText("unsupported");
@@ -407,4 +415,43 @@ test("unavailable execution and invalid requests are visible and rejected", asyn
     "data-state",
     "Not exercised",
   );
+});
+
+
+test("shellcode policy findings show actual rejection before lowering and survive reload", async ({ page }, info) => {
+  await upload(page, "interrupt.elf", elf(Buffer.from([0xcd, 0x80])));
+  await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
+  await expect(page.getByTestId("group-audit")).toHaveAttribute("data-state", "Failed");
+  await expect(page.getByTestId("group-lower")).toHaveAttribute("data-state", "Not exercised");
+  await page.getByTestId("group-audit").click();
+  await expect(page.getByTestId("audit-output")).toContainText("Instruction policy rejected");
+  await expect(page.locator('.audit-check[data-verdict="rejected"]')).toContainText("int 80h");
+  await expect(page.locator('.audit-check[data-verdict="rejected"]')).toContainText("0x20100");
+  await page.screenshot({ path: info.outputPath("audit-rejected-desktop.png"), fullPage: true });
+  const final = await snapshot(page);
+  expect(final.counters.rv64_steps ?? 0).toBe(0);
+  await page.reload();
+  await page.getByTestId("group-audit").click();
+  await expect(page.getByTestId("audit-output")).toContainText("Instruction policy rejected");
+  await page.getByRole("button", { name: "View raw JSON" }).click();
+  expect(JSON.parse(await page.getByTestId("raw-event").innerText())).toEqual(final.groups.audit.output);
+});
+
+test("runtime stack rejection is shown after accepted inspection and actual RV64 execution", async ({ page }, info) => {
+  await upload(page, "transient-stack.elf", elf(Buffer.from([
+    0x48, 0x81, 0xec, 0, 0, 32, 0, 0x48, 0x81, 0xc4, 0, 0, 32, 0,
+    0x31, 0xff, 0xb8, 60, 0, 0, 0, 0x0f, 0x05,
+  ])));
+  await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
+  await expect(page.getByTestId("group-audit")).toHaveAttribute("data-state", "Failed");
+  await page.getByTestId("group-audit").click();
+  await expect(page.getByTestId("audit-output")).toContainText("Live stack bounds");
+  await expect(page.getByTestId("audit-output")).toContainText("0x20100");
+  const final = await snapshot(page);
+  expect(final.counters.rv64_steps).toBeGreaterThan(0);
+  expect(final.counters.syscalls).toBe(0);
+  expect(final.groups.audit.output?.phase).toBe("execute");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("audit-runtime-rejected-mobile.png"), fullPage: true });
 });

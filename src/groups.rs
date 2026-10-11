@@ -63,7 +63,7 @@ impl PipelineGroup {
             Self::Load => "Validate and map image",
             Self::Initialize => "Initialize guest state",
             Self::Decode => "Decode x86 instructions",
-            Self::Audit => "Audit trace policy",
+            Self::Audit => "Inspect instruction policy",
             Self::Lower => "Lower x86 semantics to CLIF",
             Self::Codegen => "Generate RV64 code",
             Self::Artifacts => "Persist code artifacts",

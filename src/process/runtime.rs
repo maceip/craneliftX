@@ -1,6 +1,7 @@
 //! Guest initialization, RV64 execution and syscall continuation. Translation
 //! cache operations never replace this state or its descriptor table.
 use super::{
+    audit,
     cache::CachedBlock,
     memory::{self, GuestMemory, ProcessBus, CONTEXT_BASE, RV_STACK_BASE, STACK_TOP},
     observe::operation,
@@ -67,6 +68,7 @@ impl Runtime {
         options: &Options,
         ledger: &mut RunLedger,
     ) -> Result<()> {
+        audit::check_stack(&self.state, block.compiled.id, ledger)?;
         let mut cpu = RiscvCpu::default();
         cpu.regs[1] = RETURN_ADDRESS;
         cpu.regs[2] = RV_STACK_BASE + self.stack.len() as u64;
@@ -86,10 +88,11 @@ impl Runtime {
             )
         }?;
         report.rv64_steps += steps;
+        block.rv64_steps += steps;
+        audit::check_stack(&self.state, block.compiled.id, ledger)?;
         report.block_executions += 1;
         report.x86_instructions_executed += block.compiled.source_instructions.len() as u64;
         block.executions += 1;
-        block.rv64_steps += steps;
         // Bounded, time-based progress for hot cached code. No per-instruction I/O.
         if self.last_progress.elapsed() >= Duration::from_millis(250) {
             self.update_network_counters(report);

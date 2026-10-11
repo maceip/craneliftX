@@ -64,7 +64,7 @@ def apply_event(state, event):
     if status == "failed" or kind == "syscall_failed":
         group["failed"] += 1
     if not start:
-        preferred = {"decode": "harvest", "ingest": "input", "cache": "compilation_progress", "artifacts": "artifact"}
+        preferred = {"audit": "security", "decode": "harvest", "ingest": "input", "cache": "compilation_progress", "artifacts": "artifact"}
         if not group["output"] or preferred.get(event["group"]) in (None, kind) or group["output"]["type"] != preferred.get(event["group"]):
             group["output"] = event
     state["recent"] = (state["recent"] + [event])[-120:]

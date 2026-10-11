@@ -117,6 +117,7 @@ fn process_exit_receipt_matches_actual_rv64_execution() {
         ("load", "load"),
         ("initialize", "initialize"),
         ("decode", "decode"),
+        ("audit", "audit"),
         ("lower", "lower"),
         ("codegen", "codegen"),
         ("artifacts", "artifacts"),
@@ -131,17 +132,130 @@ fn process_exit_receipt_matches_actual_rv64_execution() {
         assert_eq!(spans[0]["status"], "started");
         assert_eq!(spans[1]["status"], "completed");
         assert!(spans.iter().all(|e| e["group"] == group));
-        if ["decode", "lower", "codegen", "artifacts", "lift"].contains(&stage) {
+        if ["decode", "audit", "lower", "codegen", "artifacts", "lift"].contains(&stage) {
             assert_eq!(spans[0]["block_id"], spans[1]["block_id"]);
             assert!(spans[0]["block_id"].is_u64());
         }
     }
+    let audit = events.iter().find(|e| e["type"] == "security").unwrap();
+    assert_eq!(audit["verdict"], "accepted");
+    assert_eq!(audit["instruction_count"], 3);
+    assert_eq!(audit["checks"][0]["verdict"], "guarded");
+    assert!(
+        audit["seq"].as_u64().unwrap()
+            < events.iter().find(|e| e["stage"] == "lower").unwrap()["seq"]
+                .as_u64()
+                .unwrap()
+    );
+}
+
+#[test]
+fn process_policy_rejects_before_lowering_with_exact_findings() {
+    let fixture = Fixture::new();
+    for (code, rule) in [
+        (&[0xcd, 0x80][..], "privileged_control"), // int 80h
+        (&[0xf4][..], "privileged_control"),       // hlt
+        (&[0x48, 0x89, 0xc4][..], "stack_policy"), // mov rsp,rax
+        (&[0x48, 0x87, 0xc4][..], "stack_policy"), // xchg rsp,rax
+        (
+            &[0x48, 0xa1, 0xff, 0xff, 0xff, 0x7, 0, 0, 0, 0][..],
+            "memory_policy",
+        ),
+        (&[0x48, 0xa3, 0, 0, 2, 0, 0, 0, 0, 0][..], "memory_policy"), // write RX image
+        (&[0xeb, 0xff][..], "control_flow"),                          // jump into this instruction
+        (&[0xe9, 0, 0, 0, 4][..], "control_flow"),                    // jump to unmapped address
+    ] {
+        let (output, events) = fixture.run(&elf(code, false), &[]);
+        assert!(!output.status.success(), "{rule}");
+        let audit = events.iter().find(|e| e["type"] == "security").unwrap();
+        assert_eq!(audit["verdict"], "rejected", "{rule}: {audit}");
+        let check = audit["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["rule"] == rule)
+            .unwrap();
+        assert_eq!(check["verdict"], "rejected");
+        assert_eq!(check["findings"][0]["rip"], "0x20100");
+        assert!(!events
+            .iter()
+            .any(|e| e["stage"] == "lower" || e["stage"] == "codegen"));
+        assert_eq!(
+            events.iter().find(|e| e["type"] == "execution").unwrap()["counters"]["rv64_steps"],
+            0
+        );
+    }
+}
+
+#[test]
+fn process_policy_accepts_stack_reads_frames_and_address_calculation() {
+    let fixture = Fixture::new();
+    // push rbp; mov rbp,rsp; sub rsp,32; cmp rsp,0; lea rax,[rip+64MiB];
+    // mov rsp,rbp; pop rbp; exit(0). LEA does not access its unmapped target.
+    let mut code = vec![
+        0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 32, 0x48, 0x83, 0xfc, 0, 0x48, 0x8d, 0x05, 0, 0,
+        0, 4, 0x48, 0x89, 0xec, 0x5d,
+    ];
+    code.extend([0x31, 0xff, 0xb8, 60, 0, 0, 0, 0x0f, 0x05]);
+    let (output, events) = fixture.run(&elf(&code, false), &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(events.last().unwrap()["report"]["syscalls"], 1);
+    let audit = events.iter().find(|e| e["type"] == "security").unwrap();
+    assert_eq!(audit["checks"][1]["findings"].as_array().unwrap().len(), 2);
+    assert_eq!(audit["checks"][2]["verdict"], "passed");
+}
+
+#[test]
+fn rv64_guard_stops_transient_stack_escape_before_restore_or_syscall() {
+    let fixture = Fixture::new();
+    // Both adjustments are allowed statically. The first leaves the 1MiB stack;
+    // execution must stop there even though the next instruction restores RSP.
+    let code = [
+        0x48, 0x81, 0xec, 0, 0, 32, 0, 0x48, 0x81, 0xc4, 0, 0, 32, 0, 0x31, 0xff, 0xb8, 60, 0, 0,
+        0, 0x0f, 0x05,
+    ];
+    let (output, events) = fixture.run(&elf(&code, false), &[]);
+    assert!(!output.status.success());
+    let audits: Vec<_> = events.iter().filter(|e| e["type"] == "security").collect();
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[0]["verdict"], "accepted");
+    assert_eq!(audits[1]["phase"], "execute");
+    assert_eq!(audits[1]["verdict"], "rejected");
+    assert_eq!(audits[1]["rip"], "0x20100");
+    let report = &events.iter().find(|e| e["type"] == "execution").unwrap()["counters"];
+    assert!(report["rv64_steps"].as_u64().unwrap() > 0);
+    assert_eq!(report["syscalls"], 0);
+    assert_eq!(report["block_executions"], 0);
+}
+
+#[test]
+fn known_instruction_boundaries_survive_cache_invalidation() {
+    let fixture = Fixture::new();
+    // close(-1) creates a syscall boundary; the following jump targets byte 2
+    // of the previously compiled MOV. Recompilation must retain that boundary.
+    let code = [
+        0xb8, 3, 0, 0, 0, 0xbf, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x05, 0xeb, 0xf3,
+    ];
+    let (output, events) = fixture.run(&elf(&code, false), &["--recompile-every-syscalls", "1"]);
+    assert!(!output.status.success());
+    assert!(events.iter().any(|e| e["type"] == "cache_invalidation"));
+    let rejected = events
+        .iter()
+        .find(|e| e["type"] == "security" && e["verdict"] == "rejected")
+        .unwrap();
+    assert_eq!(rejected["checks"][3]["rule"], "control_flow");
+    assert_eq!(rejected["checks"][3]["verdict"], "rejected");
+    assert_eq!(rejected["checks"][3]["findings"][0]["rip"], "0x2010c");
 }
 #[test]
 fn process_failures_close_their_stage_and_never_fall_back() {
     let fixture = Fixture::new();
     for (code, dynamic, args, stage) in [
-        (&[0x0f, 0x0b][..], false, &[][..], "lower"),
+        (&[0x0f, 0x0b, 0xf4][..], false, &[][..], "lower"), // UD2 stops before HLT
         (&[0xc3][..], true, &[][..], "load"),
         (
             &[0xb8, 0xe7, 3, 0, 0, 0x0f, 0x05][..],

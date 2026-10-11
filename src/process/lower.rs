@@ -1,14 +1,14 @@
 //! Basic-block lowering for the isolated process runtime. Every reached x86
 //! instruction, including branches/calls/returns and flag effects, runs as RV64.
-use super::memory::{ADDRESS_LIMIT, GUEST_BIAS};
+use super::memory::{ADDRESS_LIMIT, GUEST_BIAS, STACK_BOTTOM, STACK_TOP};
 use crate::{
     x86::{immediate, register_view},
     EngineError,
 };
 use cranelift_codegen::{
     ir::{
-        condcodes::IntCC, types, AbiParam, Function, InstBuilder, MemFlags, Signature, TrapCode,
-        Type, Value,
+        condcodes::IntCC, types, AbiParam, Block, Function, InstBuilder, MemFlags, Signature,
+        TrapCode, Type, Value,
     },
     isa::CallConv,
 };
@@ -31,6 +31,8 @@ fn ty(width: u16) -> Type {
 }
 struct Lower<'a> {
     b: FunctionBuilder<'a>,
+    stack_fault: Option<Block>,
+    rip: u64,
 }
 impl Lower<'_> {
     fn c(&mut self, v: u64) -> Value {
@@ -40,6 +42,31 @@ impl Lower<'_> {
         self.b.use_var(Variable::from_u32(index as u32))
     }
     fn set(&mut self, index: usize, v: Value) {
+        if index == 7 {
+            // Stop at the first invalid RSP, including transient pivots that a
+            // later instruction would restore. The failure exit saves the
+            // offending RSP/RIP; the runtime rejects it before any syscall.
+            let fault = *self.stack_fault.get_or_insert_with(|| {
+                let block = self.b.create_block();
+                self.b.append_block_param(block, types::I64);
+                self.b.append_block_param(block, types::I64);
+                block
+            });
+            let below = self
+                .b
+                .ins()
+                .icmp_imm(IntCC::UnsignedLessThan, v, STACK_BOTTOM as i64);
+            let above = self
+                .b
+                .ins()
+                .icmp_imm(IntCC::UnsignedGreaterThan, v, STACK_TOP as i64);
+            let bad = self.b.ins().bor(below, above);
+            let rip = self.c(self.rip);
+            let resume = self.b.create_block();
+            self.b.ins().brif(bad, fault, &[v, rip], resume, &[]);
+            self.b.switch_to_block(resume);
+            self.b.seal_block(resume);
+        }
         self.b.def_var(Variable::from_u32(index as u32), v);
     }
     fn mask(&mut self, v: Value, w: u16) -> Value {
@@ -281,8 +308,8 @@ impl Lower<'_> {
     fn push(&mut self, v: Value) {
         let sp = self.var(7);
         let sp = self.b.ins().iadd_imm(sp, -8);
-        self.store(sp, 64, v);
         self.set(7, sp);
+        self.store(sp, 64, v);
     }
     fn pop(&mut self) -> Result<Value, EngineError> {
         let sp = self.var(7);
@@ -312,9 +339,14 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
             .load(types::I64, MemFlags::new(), ctx, (j * 8) as i32);
         b.def_var(var, v);
     }
-    let mut l = Lower { b };
+    let mut l = Lower {
+        b,
+        stack_fault: None,
+        rip: 0,
+    };
     for i in trace {
         use Mnemonic::*;
+        l.rip = i.ip();
         let next = l.c(i.next_ip());
         l.set(16, next);
         if i.mnemonic() == Nop {
@@ -508,6 +540,15 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
         l.b.ins().store(MemFlags::new(), v, ctx, (j * 8) as i32);
     }
     l.b.ins().return_(&[]);
+    if let Some(fault) = l.stack_fault {
+        l.b.switch_to_block(fault);
+        l.b.seal_block(fault);
+        let rsp = l.b.block_params(fault)[0];
+        let rip = l.b.block_params(fault)[1];
+        l.b.ins().store(MemFlags::new(), rsp, ctx, 7 * 8);
+        l.b.ins().store(MemFlags::new(), rip, ctx, 16 * 8);
+        l.b.ins().return_(&[]);
+    }
     l.b.finalize();
     Ok(function)
 }

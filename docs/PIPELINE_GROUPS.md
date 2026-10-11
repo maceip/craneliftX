@@ -13,7 +13,7 @@ process runner, trace runner, library stage observer and demo worker.
 | 3 | `load` | [input::load / memory](../src/process/memory.rs): validate static ELF and map segments | Load span, entry, region permissions and addresses |
 | 4 | `initialize` | [Runtime::initialize](../src/process/runtime.rs): guest registers, stacks, syscall state | Initial RIP/RSP, state and stack sizes, budgets |
 | 5 | `decode` | [compile::decode](../src/process/compile.rs): iced-x86 basic-block decoding | Decode/harvest events; address, exact bytes and assembly per instruction |
-| 6 | `audit` | [audit](../src/audit.rs): single-trace security policy | Audit spans and security results |
+| 6 | `audit` | [process/audit](../src/process/audit.rs): bounded instruction policy | Audit spans and security results |
 | 7 | `lower` | [compile::lower / lower_block](../src/process/lower.rs): x86 semantics to CLIF | Lower span, CLIF size or unsupported-instruction failure |
 | 8 | `codegen` | [compile::generate / codegen](../src/codegen.rs): Cranelift RV64 backend | Target, emitted bytes/hash and codegen span |
 | 9 | `artifacts` | [compile::persist](../src/process/compile.rs): save x86, CLIF and RV64 | Artifact span and each file's path, size and SHA-256 |
@@ -23,15 +23,16 @@ process runner, trace runner, library stage observer and demo worker.
 | 13 | `result` | CLI finalization | Terminal completed/failed result; errors/cancellation in the demo |
 
 These are logical groups, not thirteen mandatory sequential phases. Decode,
-lower, codegen and artifacts recur on each reached cache miss; execution and
+audit, lower, codegen and artifacts recur on each reached cache miss; execution and
 syscalls alternate. The existing `lift` stage is the outer cache-miss span and
 contains those compilation operations. Its elapsed time overlaps its children;
 do not add parent and child durations. `group_order` is a display order, while
 `seq` is execution order. Process spans use `status`; legacy trace/demo spans
 retain `state`, so a shared consumer reads `event.status ?? event.state`.
-The isolated process enforces its memory policy in
-loading, lowering and checked execution; the single-trace `audit` group does
-not imply a separate process audit that was never performed.
+The process `audit` group inspects each decoded block before lowering and
+emits address-linked `security` findings. Green means the static check passed,
+amber means a runtime check still applies, and red means rejection. See the
+[exact policy and limits](INSTRUCTION_FILTER.md).
 
 The orchestrator is [process/mod.rs](../src/process/mod.rs). Input, compilation,
 cache and guest runtime have separate modules. Guest memory, registers and
@@ -85,7 +86,7 @@ duration of their run, or use `LiveFeed::from_file(path, address)`.
 
 ## Progress and correlation
 
-For each newly compiled block, consumers receive decode, lower, codegen and
+For each newly compiled block, consumers receive decode, audit, lower, codegen and
 artifact start/end or failure events plus a `compilation_progress` record.
 Stages and progress carry `block_id` and source `rip`; recompiling the same
 address gets a new block ID. `harvest` contains the precise source instructions,

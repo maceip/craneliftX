@@ -83,7 +83,7 @@ Nested operations overlap and compilation groups recur for newly reached blocks.
 | 3 | `load` | Validate and map image |
 | 4 | `initialize` | Initialize guest state |
 | 5 | `decode` | Decode x86 instructions |
-| 6 | `audit` | Audit trace policy |
+| 6 | `audit` | Inspect instruction policy |
 | 7 | `lower` | Lower x86 semantics to CLIF |
 | 8 | `codegen` | Generate RV64 code |
 | 9 | `artifacts` | Persist code artifacts |
@@ -92,9 +92,13 @@ Nested operations overlap and compilation groups recur for newly reached blocks.
 | 12 | `cache` | Manage compiled blocks |
 | 13 | `result` | Finalize run result |
 
-`audit` belongs to the single-trace path and is **Not exercised** by this process
-runner. Loading, lowering, and runtime checks report through their own groups.
-The UI never invents an audit pass. Event-only groups are **Observed**; paired
+`audit` consumes actual per-block `security` events from the process runner.
+The inspector shows green **Passed**, amber **Runtime checked**, and red
+**Rejected** checks with instruction addresses, assembly and reasons. Runtime
+stack violations replace the latest audit output with the failure finding.
+Older saved runs without inspection events remain **Not exercised**.
+See [policy scope](INSTRUCTION_FILTER.md); accepted blocks are not classified
+as shellcode-free. Event-only groups are **Observed**; paired
 spans can be **Active**, **Completed**, **Failed**, or **Interrupted**. A completed
 span can become active again when the next block reaches that operation.
 

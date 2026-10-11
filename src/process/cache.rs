@@ -31,7 +31,8 @@ impl BlockCache {
             if self.entries.len() >= 4096 {
                 return Err(error("compiled block cache limit reached").into());
             }
-            let compiled = compile::prepare(memory, rip, report.compiled_blocks, ledger)?;
+            let compiled =
+                compile::prepare(memory, &self.unique, rip, report.compiled_blocks, ledger)?;
             for &(ip, len) in &compiled.source_instructions {
                 self.unique.insert(ip, len);
             }

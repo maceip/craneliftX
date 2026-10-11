@@ -187,3 +187,8 @@ is documented separately in [the legacy demo guide](docs/WEB_DEMO.md).
 The old LLVM/remill/anvill/Pulley source directories are preserved but are not
 part of this crate, its dependency graph, Makefile, or CI. Former root plans,
 Makefile, release workflow, and obsolete web analysis components are in [`archived/pre-isr`](archived/pre-isr).
+
+The RV64 process path includes a [lightweight instruction filter](docs/INSTRUCTION_FILTER.md)
+for shellcode-oriented screening, with live address-linked findings in the
+`audit` group. The dashboard distinguishes static passes, runtime checks, and
+rejections; this is not a general shellcode or taint classifier.

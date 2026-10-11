@@ -10,6 +10,7 @@ pub const GUEST_BIAS: u64 = 0x1_0000_0000;
 pub const CONTEXT_BASE: u64 = 0x2_0000_0000;
 pub const RV_STACK_BASE: u64 = 0x3_0000_0000;
 pub const STACK_TOP: u64 = 0x0700_0000;
+pub const STACK_BOTTOM: u64 = STACK_TOP - 1024 * 1024;
 const MAX_MAPPED: u64 = 64 * 1024 * 1024;
 
 pub(super) fn error(message: impl ToString) -> EngineError {
@@ -85,7 +86,7 @@ impl GuestMemory {
                 "file_bytes":data.len(),"file_offset":segment.file_range().0,"writable":p_flags & 2 != 0,"executable":p_flags & 1 != 0}));
         }
         memory.fetch(file.entry())?;
-        memory.map(STACK_TOP - 1024 * 1024, 1024 * 1024, true, false)?;
+        memory.map(STACK_BOTTOM, STACK_TOP - STACK_BOTTOM, true, false)?;
         // argc=0, argv/envp NULL and AT_NULL. No host pointers enter guest state.
         Ok((
             memory,

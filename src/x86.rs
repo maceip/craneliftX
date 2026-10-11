@@ -118,5 +118,9 @@ pub(crate) fn control_boundary(insn: &Instruction) -> bool {
 }
 
 pub(crate) fn boundary(insn: &Instruction) -> bool {
-    control_boundary(insn) || privileged(insn)
+    // Exception instructions terminate a reached block too. Keep them for
+    // lowering to reject, but do not inspect unreachable bytes after UD2.
+    control_boundary(insn)
+        || privileged(insn)
+        || insn.flow_control() == iced_x86::FlowControl::Exception
 }

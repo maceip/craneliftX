@@ -1,5 +1,6 @@
 //! Isolated process orchestration. Major operations live in input, compile,
 //! cache and runtime; stable ledger groups are defined in `crate::groups`.
+mod audit;
 mod cache;
 mod compile;
 mod input;

@@ -120,6 +120,7 @@ export function applyLedger(state: Run, event: LedgerEvent): Run {
   }
   if (status === "failed" || kind === "syscall_failed") group.failed++;
   const preferred: Record<string, string> = {
+    audit: "security",
     decode: "harvest",
     ingest: "input",
     cache: "compilation_progress",

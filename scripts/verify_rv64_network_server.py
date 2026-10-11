@@ -165,6 +165,10 @@ def verify(args, out, report):
     assert received_while_connected, "no live translation updates while guest connection was open"
     report["live_events"].update({"compilation_updates_while_guest_connected": len(received_while_connected),
         "stalled_subscriber_present": True})
+    live_audits = [r for r in consumer.receipts if r["event"]["type"] == "security"
+        and connected < int(r["received_unix_ns"]) < disconnected]
+    assert live_audits, "no live inspection findings while guest connection was open"
+    report["live_events"]["inspection_updates_while_guest_connected"] = len(live_audits)
     report["ledger"] = str(ledger)
     terminal = events[-1]
     assert terminal["type"] == "result" and terminal["status"] == "completed", terminal
@@ -176,6 +180,15 @@ def verify(args, out, report):
     totals = [block for e in events if e["type"] == "block_execution_totals" for block in e["blocks"]]
     assert sum(b["rv64_steps"] for b in totals) == counters["rv64_steps"]
     assert sum(b["executions"] for b in totals) == counters["block_executions"]
+    audits = [e for e in events if e["type"] == "security"]
+    assert len(audits) == counters["compiled_blocks"]
+    assert all(e["verdict"] == "accepted" and e["policy"] == "process-block-v1"
+        and 0 < e["instruction_count"] <= 32 for e in audits)
+    lower_starts = {e["block_id"]: e["seq"] for e in events
+        if e["type"] == "stage" and e["stage"] == "lower" and e["status"] == "started"}
+    assert all(e["seq"] < lower_starts[e["block_id"]] for e in audits)
+    report["instruction_policy"] = {"policy": "process-block-v1", "blocks_inspected": len(audits),
+        "all_accepted": True, "before_lowering": True}
     artifacts = [e for e in events if e["type"] == "artifact"]
     assert len(artifacts) == counters["compiled_blocks"] * 3
     unique = {}
@@ -191,7 +204,7 @@ def verify(args, out, report):
                    and 0 < e["detail"]["result"] < int(e["detail"]["args"][2], 16)]
     assert short_reads, "fragmentation did not exercise a partial guest read"
     report["observed_partial_reads"] = len(short_reads)
-    for stage in ("ingest", "load", "initialize", "decode", "lift", "lower", "codegen", "artifacts", "execute"):
+    for stage in ("ingest", "load", "initialize", "decode", "audit", "lift", "lower", "codegen", "artifacts", "execute"):
         starts = sum(e["type"] == "stage" and e["stage"] == stage and e["status"] == "started" for e in events)
         ends = sum(e["type"] == "stage" and e["stage"] == stage and e["status"] == "completed" for e in events)
         assert starts == ends and starts > 0, stage
