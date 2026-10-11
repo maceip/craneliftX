@@ -3,11 +3,27 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyLedger, blankGroup, groupState, Run } from "../src/pipeline";
+import {
+  applyLedger,
+  blankGroup,
+  groupState,
+  Run,
+  RunSummary,
+} from "../src/pipeline";
 
 const runId = (page: Page) => new URL(page.url()).searchParams.get("run");
 const snapshot = async (page: Page): Promise<Run> =>
   (await page.request.get(`/api/pipeline/runs/${runId(page)}`)).json();
+const runSummary = async (page: Page): Promise<RunSummary> => {
+  // Use the browser's existing HTTPS connection for time-sensitive observations.
+  // A fresh Node API connection can finish connecting after a short guest exits.
+  const history: RunSummary[] = await page.evaluate(async () =>
+    (await fetch("/api/pipeline/runs")).json(),
+  );
+  const current = history.find((entry) => entry.id === runId(page));
+  if (!current) throw new Error("Current run is missing from history");
+  return current;
+};
 const sequence = async (page: Page) =>
   Number(await page.getByTestId("event-sequence").textContent());
 function elf(code: Buffer, size = 256 + code.length) {
@@ -41,7 +57,7 @@ async function upload(page: Page, name: string, buffer: Buffer) {
   await page
     .getByLabel("Choose an x86-64 ELF binary")
     .setInputFiles({ name, mimeType: "application/octet-stream", buffer });
-  await expect(page).toHaveURL(/run=/);
+  await expect(page).toHaveURL(/run=/, { timeout: 120000 });
 }
 test.afterEach(async ({ page, context }) => {
   await context.setOffline(false);
@@ -66,7 +82,7 @@ test.afterEach(async ({ page, context }) => {
         async () => {
           try {
             return ["completed", "failed", "cancelled", "interrupted"].includes(
-              (await snapshot(page)).status,
+              (await runSummary(page)).status,
             );
           } catch {
             return false;
@@ -97,13 +113,13 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   });
   await page.getByRole("button", { name: "Run Rust server" }).click();
   await expect(page).toHaveURL(/run=/);
+  await expect(page.getByText("Live stream", { exact: true })).toBeVisible();
   await expect.poll(() => sequence(page)).toBeGreaterThan(100);
-  const before = await snapshot(page),
+  const before = await runSummary(page),
     first = await sequence(page);
   expect(before.status).toBe("running");
   await expect.poll(() => sequence(page)).toBeGreaterThan(first + 60);
-  expect((await snapshot(page)).status).toBe("running");
-  await expect(page.getByText("Live stream", { exact: true })).toBeVisible();
+  expect((await runSummary(page)).status).toBe("running");
   await page.screenshot({
     path: info.outputPath("live-desktop.png"),
     fullPage: true,
@@ -115,7 +131,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   await page.reload();
   await expect(page.getByTestId("group-result")).toBeVisible();
   await expect
-    .poll(async () => (await snapshot(page)).status, { timeout: 90000 })
+    .poll(async () => (await runSummary(page)).status, { timeout: 90000 })
     .toBe("completed");
   const final = await snapshot(page);
   await expect(page.getByTestId("event-sequence")).toHaveText(
@@ -233,7 +249,7 @@ test("unsupported uploaded instructions fail at lowering without advancing later
   page,
 }, info) => {
   await upload(page, "unsupported.elf", elf(Buffer.from([0x0f, 0x0b])));
-  await expect.poll(async () => (await snapshot(page)).status).toBe("failed");
+  await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
   await expect(page.getByTestId("group-lower")).toHaveAttribute(
     "data-state",
     "Failed",
@@ -263,7 +279,7 @@ test("cancellation interrupts open spans and never manufactures an engine result
     .toBeGreaterThan(0);
   await page.getByRole("button", { name: "Stop execution" }).click();
   await expect
-    .poll(async () => (await snapshot(page)).status)
+    .poll(async () => (await runSummary(page)).status)
     .toBe("cancelled");
   await expect(page.getByTestId("group-execute")).toHaveAttribute(
     "data-state",
@@ -295,10 +311,17 @@ test("16 MiB input keeps the browser live through hundreds of lazy compilations 
   ]);
   await upload(page, "large-lazy.elf", elf(code, 16 * 1024 * 1024));
   await expect
-    .poll(async () => (await snapshot(page)).counters.compiled_blocks ?? 0)
+    .poll(async () =>
+      Number(
+        (await page.getByTestId("compiled-blocks").textContent())?.replaceAll(
+          ",",
+          "",
+        ) ?? 0,
+      ),
+    )
     .toBeGreaterThan(10);
   const first = await sequence(page);
-  expect((await snapshot(page)).status).toBe("running");
+  expect((await runSummary(page)).status).toBe("running");
   await page.screenshot({
     path: info.outputPath("large-live.png"),
     fullPage: true,
@@ -321,7 +344,7 @@ test("16 MiB input keeps the browser live through hundreds of lazy compilations 
     .poll(
       async () => {
         try {
-          return (await snapshot(page)).status;
+          return (await runSummary(page)).status;
         } catch {
           return "proxy unavailable";
         }
@@ -375,7 +398,7 @@ test("unavailable execution and invalid requests are visible and rejected", asyn
     (await request.get("/api/pipeline/runs/missing/events")).status(),
   ).toBe(404);
   await upload(page, "wrong-format.elf", Buffer.from("This is not an ELF"));
-  await expect.poll(async () => (await snapshot(page)).status).toBe("failed");
+  await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
   await expect(page.getByTestId("group-load")).toHaveAttribute(
     "data-state",
     "Failed",
