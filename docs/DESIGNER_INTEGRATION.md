@@ -69,6 +69,15 @@ independently of receipt timing and execution completion. Unvisited cards stay
 still, even when visible as neighbors. Pause remains available for completed runs; hidden
 tabs, the Evidence overlay and reduced-motion preferences suppress motion.
 
+The floating controls use a 154 × 54 px icon pill: Evidence, New run (Stop while
+executing), and Pause/Resume motion. Labels remain available on hover and to
+assistive technology. A revisit expands the pill horizontally, up to 450 px and
+bounded by the viewport, without increasing its height. The restart action
+appears after the expansion and receives keyboard focus only once available.
+Cancel and Escape dismiss it; reduced motion and Pause suppress the transition.
+The full stage-specific restart label and description remain accessible even
+when phone layouts shorten the visible label.
+
 ## Acceptance
 
 `npm --prefix webapp run test:experience` records desktop and mobile journeys

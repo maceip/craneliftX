@@ -3,6 +3,8 @@ import { Run } from "../src/pipeline";
 import { elf } from "./elf";
 import { sceneLabel } from "../src/pipelineScenes";
 
+test.use({ video: { mode: "on", size: { width: 1440, height: 1000 } } });
+
 const currentId = (page: Page) => new URL(page.url()).searchParams.get("run");
 const state = async (page: Page, id = currentId(page)): Promise<Run> =>
   (await page.request.get(`/api/pipeline/runs/${id}`)).json();
@@ -26,7 +28,7 @@ test.afterEach(async ({ page }) => {
   }
 });
 
-test("a previously visited card opens a glowing confirmation and restarts the exact Rust server at the selected view", async ({
+test("the compact transport expands sideways before revealing restart and reruns the exact binary", async ({
   page,
 }, info) => {
   let restartRequests = 0;
@@ -42,7 +44,26 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   await expect(page).toHaveURL(/run=/);
   const original = await settled(page, currentId(page)!);
   const footer = page.locator(".focus-transport");
-  const before = (await footer.boundingBox())!.height;
+  const before = (await footer.boundingBox())!;
+  expect(before.height).toBeLessThanOrEqual(56);
+  expect(before.width).toBeLessThanOrEqual(170);
+  await expect(footer.locator(".timeline-controls button")).toHaveCount(3);
+  expect(
+    await footer
+      .locator(".timeline-controls button")
+      .evaluateAll((buttons) =>
+        buttons.every(
+          (button) =>
+            button.getAttribute("aria-label") &&
+            button.getAttribute("title") &&
+            button.querySelector('svg[aria-hidden="true"]') &&
+            button.getBoundingClientRect().height >= 40,
+        ),
+      ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("transport-compact-desktop.png"),
+  });
   // First visits navigate. Returning to a previously visited card offers restart.
   await page.getByTestId("group-lower").click();
   await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
@@ -55,13 +76,34 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
     "audit",
   );
   // Click the illustration, not just the header button.
+  await page.locator("#timeline-lower .stage-illustration").evaluate((el) => {
+    el.addEventListener(
+      "click",
+      () => {
+        (window as any).transportFrames = [];
+        const until = performance.now() + 900;
+        const sample = () => {
+          const bar = document.querySelector(".focus-transport")!;
+          const confirm = bar.querySelector(".restart-confirmation");
+          const rect = bar.getBoundingClientRect();
+          (window as any).transportFrames.push({
+            width: rect.width,
+            height: rect.height,
+            opacity: confirm ? Number(getComputedStyle(confirm).opacity) : 0,
+          });
+          if (performance.now() < until) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      },
+      { once: true },
+    );
+  });
   await page.locator("#timeline-lower .stage-illustration").click();
   const panel = page.getByRole("region", {
     name: "Restart analysis confirmation",
   });
   await expect(panel).toBeVisible();
   await expect(footer).toHaveAttribute("data-expanded", "true");
-  expect((await footer.boundingBox())!.height).toBeGreaterThan(before);
   const confirm = page.getByRole("button", {
     name: `Restart Analysis from ${sceneLabel("lower")} ?`,
     exact: true,
@@ -71,16 +113,32 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   expect(restartRequests).toBe(0);
   const buttonRect = (await confirm.boundingBox())!,
     barRect = (await footer.boundingBox())!;
-  expect(
-    Math.abs(
-      buttonRect.x + buttonRect.width / 2 - barRect.x - barRect.width / 2,
-    ),
-  ).toBeLessThan(1);
+  expect(barRect.height).toBe(before.height);
+  expect(barRect.width).toBeGreaterThan(before.width + 150);
+  expect(buttonRect.x).toBeGreaterThan(barRect.x + before.width - 12);
+  expect(buttonRect.x + buttonRect.width).toBeLessThan(
+    barRect.x + barRect.width,
+  );
   expect(
     await confirm.evaluate((el) => getComputedStyle(el).boxShadow),
   ).not.toBe("none");
   await expect(panel).toHaveCSS("opacity", "1");
   await expect(confirm).toHaveCSS("opacity", "1");
+  const frames = await page.evaluate(() => (window as any).transportFrames);
+  expect(
+    frames.some(
+      (frame: any) =>
+        frame.width > before.width + 10 && frame.width < barRect.width - 10,
+    ),
+  ).toBe(true);
+  expect(
+    frames.every((frame: any) => Math.abs(frame.height - before.height) < 1),
+  ).toBe(true);
+  expect(
+    frames
+      .filter((frame: any) => frame.width < barRect.width - 2)
+      .every((frame: any) => frame.opacity === 0),
+  ).toBe(true);
   await page.screenshot({
     path: info.outputPath("restart-confirmation-desktop.png"),
   });
@@ -92,7 +150,7 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
     "data-group",
     "audit",
   );
-  await expect(panel).toContainText(
+  await expect(panel.locator(".restart-confirm")).toHaveAccessibleName(
     `Restart Analysis from ${sceneLabel("audit")} ?`,
   );
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -104,6 +162,8 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
     .evaluate((el) => el.scrollIntoView({ block: "center" }));
   await expect(confirm).toBeVisible();
   await expect(panel).toHaveCSS("opacity", "1");
+  expect((await footer.boundingBox())!.height).toBe(before.height);
+  expect((await footer.boundingBox())!.width).toBeLessThanOrEqual(390 - 16);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -111,6 +171,27 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   ).toBe(true);
   await page.screenshot({
     path: info.outputPath("restart-confirmation-mobile.png"),
+  });
+  // Stage copy still fits a small phone; reduced motion reveals
+  // the inline action immediately and leaves keyboard dismissal available.
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByTestId("group-lower").click();
+  await expect(confirm).toBeFocused();
+  await expect(panel).toHaveCSS("opacity", "1");
+  expect((await footer.boundingBox())!.height).toBe(before.height);
+  expect((await footer.boundingBox())!.width).toBeLessThanOrEqual(320 - 16);
+  expect(
+    await footer.evaluate(
+      (el) =>
+        el
+          .getAnimations({ subtree: true })
+          .filter((a) => a.playState === "running").length,
+    ),
+  ).toBe(0);
+  await page.screenshot({
+    path: info.outputPath("restart-confirmation-small-mobile.png"),
   });
   await confirm.click();
   await expect.poll(() => currentId(page)).not.toBe(original.id);

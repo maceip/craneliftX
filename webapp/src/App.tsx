@@ -20,6 +20,7 @@ import { ArchitectureRail } from "./components/ArchitectureRail";
 import { PipelineTimeline } from "./components/PipelineTimeline";
 import { TelemetryGauge } from "./components/Telemetry";
 import { RestartConfirmation } from "./components/RestartConfirmation";
+import { TransportIcon } from "./components/TransportIcon";
 import { stageLabel } from "./pipelineCopy";
 
 const cn = (...values: Parameters<typeof clsx>) => twMerge(clsx(...values));
@@ -623,6 +624,7 @@ export function App() {
                     restartGroup
                   }
                   busy={restarting}
+                  paused={paused}
                   description={`${!terminal(run.status) ? "Stops the current run. " : ""}Starts a new execution of this binary, with the view beginning here. Required earlier stages run again.`}
                   onConfirm={() => void restart()}
                   onCancel={dismissRestart}
@@ -648,26 +650,29 @@ export function App() {
                   type="button"
                   onClick={openEvidence}
                   aria-label="View evidence"
+                  title="View evidence"
                 >
-                  Evidence
+                  <TransportIcon kind="info" />
                 </button>
                 {busy && run ? (
                   <button
                     type="button"
                     aria-label="Stop execution"
+                    title="Stop execution"
                     disabled={run.status === "cancelling" || restarting}
                     onClick={() => void stop()}
                   >
-                    Stop
+                    <TransportIcon kind="stop" />
                   </button>
                 ) : (
                   <button
                     type="button"
                     aria-label="Start a new run"
+                    title="New run"
                     disabled={restarting}
                     onClick={() => selectRun(null)}
                   >
-                    New run
+                    <TransportIcon kind="rewind" />
                   </button>
                 )}
               </>

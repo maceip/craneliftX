@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fibDir, makeProj } from "thinking-orbs";
 import { ArchitectureRail } from "./ArchitectureRail";
+import { TransportIcon } from "./TransportIcon";
 import { TranslationArrow, TranslationVisual } from "./TranslationVisual";
 import { PerformanceSummary } from "./Telemetry";
 import { Scene, sceneStatus } from "../pipelineScenes";
@@ -820,24 +821,30 @@ export function PipelineTimeline({
           (groups.find((scene) => scene.id === selected)?.count ?? 0) > 0
         }
       />
-      <div className="focus-transport" data-expanded={!!confirmation}>
-        {confirmation}
-        <div className="focus-stream-caption">{status}</div>
+      <div
+        className="focus-transport"
+        data-expanded={!!confirmation}
+        role="group"
+        aria-label="Execution controls"
+      >
+        <div className="visually-hidden">{status}</div>
         <div className="timeline-controls">
+          {controls}
           {run && (
             <>
               <button
                 type="button"
                 aria-label={paused ? "Resume animations" : "Pause animations"}
+                title={paused ? "Resume animations" : "Pause animations"}
                 aria-pressed={paused}
                 onClick={() => onPause(!paused)}
               >
-                {paused ? "Resume motion" : "Pause motion"}
+                <TransportIcon kind={paused ? "play" : "pause"} />
               </button>
             </>
           )}
-          {controls}
         </div>
+        {confirmation}
       </div>
       <div className="timeline-layout">
         <ol className="timeline-list" aria-label="Pipeline operation groups">

@@ -414,15 +414,20 @@
   bottom: max(18px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 24px);
+  width: 154px;
+  height: 54px;
+  max-width: calc(100% - 16px);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 12px;
+  gap: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
   background: #101310f5;
+  overflow: hidden;
+  /* A one-shot width transition on this isolated, fixed control does not
+     reflow the cards. Its icons retain their size throughout the expansion. */
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .focus-stream-caption {
   display: flex;
@@ -439,9 +444,8 @@
   white-space: nowrap;
 }
 .focus-shell .timeline-controls {
-  gap: 6px;
+  gap: 2px;
 }
-.focus-shell .timeline-controls button,
 .evidence-heading button {
   height: var(--control-height);
   padding: 8px 12px;
@@ -452,10 +456,30 @@
   background: #191f18;
   border: 1px solid var(--line);
 }
+.focus-shell .timeline-controls button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #8ebd70;
+  background: transparent;
+}
+.timeline-controls svg {
+  width: 30px;
+  height: 30px;
+}
+.focus-shell .timeline-controls button:hover:not(:disabled),
 .focus-shell .timeline-controls button[aria-pressed="true"] {
-  border-color: #605542;
-  color: #e3bf98;
-  background: #29251e;
+  color: #b6d699;
+  background: #24331f;
+}
+.focus-transport button:focus-visible {
+  outline: 2px solid #b6d699;
+  outline-offset: -2px;
 }
 .evidence-dialog {
   width: min(1040px, calc(100% - 32px));
@@ -909,12 +933,6 @@
   }
   .focus-transport {
     bottom: max(8px, env(safe-area-inset-bottom));
-    padding: 10px 6px;
-    gap: 8px;
-  }
-  .focus-shell .timeline-controls button {
-    padding-inline: 9px;
-    font-size: 10px;
   }
   .focus-run-name {
     max-width: 115px;
@@ -1064,32 +1082,43 @@
 }
 
 .focus-transport[data-expanded="true"] {
-  width: min(560px, calc(100% - 24px));
+  width: min(450px, calc(100% - 16px));
   border: 1px solid #5d382b;
 }
 .restart-confirmation {
   display: flex;
-  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
-  width: 100%;
-  padding: 8px;
-  gap: 12px;
-  animation: confirmation-enter 220ms ease-out both;
+  padding-left: 8px;
+  gap: 4px;
+  opacity: 0;
+  transform: translateX(-6px);
+  transition:
+    opacity 160ms ease-out,
+    transform 160ms ease-out;
+  pointer-events: none;
+}
+.restart-confirmation[data-ready="true"] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 .restart-confirm {
   position: relative;
-  width: 100%;
-  min-height: 48px;
-  padding: 12px 20px;
-  border: 1px solid #e48b63;
-  border-radius: 8px;
-  color: #ffe9da;
-  background: #713721;
-  box-shadow:
-    0 0 18px #df633229,
-    inset 0 1px 0 #ffb28524;
-  font-size: 14px;
-  line-height: 1.5;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #ab714d;
+  border-radius: 7px;
+  color: #f0bd97;
+  background: #4b2e20;
+  box-shadow: inset 0 1px 0 #ffb28524;
+  font:
+    500 11px/1 Inter,
+    sans-serif;
+  white-space: nowrap;
   text-align: center;
 }
 .restart-confirm::after {
@@ -1106,45 +1135,40 @@
 .restart-confirm:focus-visible::after {
   opacity: 1;
 }
-.restart-confirmation p {
-  margin: 0;
-  color: #c6b2a5;
-  font-size: 11px;
-  line-height: 1.6;
-  text-align: center;
-  max-width: 430px;
-}
 .restart-cancel {
-  min-height: 36px;
-  padding: 0 16px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
   color: var(--muted);
   background: transparent;
-  font-size: 12px;
 }
-@keyframes confirmation-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.restart-cancel svg {
+  width: 20px;
+  height: 20px;
+}
+.restart-cancel:hover {
+  color: #f0bd97;
+  background: #30261e;
 }
 @media (prefers-reduced-motion: reduce) {
+  .focus-transport,
   .restart-confirmation {
-    animation: none;
+    transition: none;
   }
 }
 
+.pipeline-timeline[data-paused="true"] .focus-transport,
 .pipeline-timeline[data-paused="true"] .restart-confirmation {
-  animation: none;
+  transition: none;
 }
-@media (max-width: 720px) {
-  .restart-confirm {
-    min-height: 72px;
+@media (max-width: 560px) {
+  .restart-stage {
+    display: none;
   }
 }
 

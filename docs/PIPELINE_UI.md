@@ -161,8 +161,10 @@ color. This is an inspection map, not a claim that the engine is currently
 executing that group.
 
 A first visit by click navigates without a restart prompt. Clicking a previously
-visited card expands the floating controls with a centered, warm red/orange
-**Restart Analysis from {operation}?** confirmation. Cancel or Escape closes it
+visited card expands the compact icon pill horizontally, then reveals a warm
+orange **Restart Analysis from {operation}?** action beside its controls. The
+pill stays 54 px tall throughout; narrow screens shorten only the visible action
+label. Cancel or Escape closes it
 without stopping the guest. Confirming stops that run if active, preserves its
 ledger and creates a fresh execution of its retained input bytes. The new view
 begins at the chosen group; required earlier stages really execute again. This

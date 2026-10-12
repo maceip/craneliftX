@@ -523,13 +523,10 @@
 }
 .focus-transport {
   border: 1px solid #262e25;
-  border-radius: 14px;
   background: #101310f2;
   backdrop-filter: blur(8px);
 }
 .focus-shell .timeline-controls button {
-  padding: 8px 14px;
-  border-radius: 7px;
   font:
     500 11px Inter,
     sans-serif;
@@ -572,14 +569,10 @@
   transform-origin: bottom;
   animation: designer-wave 1.2s ease-in-out infinite;
 }
-.timeline-step[data-motion="focused"]
-  .execution-register
-  > span:nth-child(2) {
+.timeline-step[data-motion="focused"] .execution-register > span:nth-child(2) {
   animation-delay: 0.2s;
 }
-.timeline-step[data-motion="focused"]
-  .execution-register
-  > span:nth-child(3) {
+.timeline-step[data-motion="focused"] .execution-register > span:nth-child(3) {
   animation-delay: 0.4s;
 }
 @keyframes designer-rail {
@@ -856,10 +849,6 @@
   }
   .dial-readout .matrix-number {
     height: 16px;
-  }
-  .focus-shell .timeline-controls button {
-    font-size: 10px;
-    padding: 8px 12px;
   }
   .focus-stream-caption {
     font-size: 9px;
