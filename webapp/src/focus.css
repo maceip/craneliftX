@@ -28,9 +28,11 @@
   justify-content: center;
   text-align: center;
 }
-.launch-wordmark {
-  font: 12px var(--mono);
-  color: var(--accent);
+.launch-logo {
+  display: block;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
   margin-bottom: 28px;
 }
 .launch-screen h1 {

@@ -515,7 +515,13 @@ export function App() {
       />
       {!id ? (
         <main className="launch-screen">
-          <div className="launch-wordmark">chunder</div>
+          <img
+            className="launch-logo"
+            src="/dist/chunder-icon.png"
+            alt="Chunder"
+            width={28}
+            height={28}
+          />
           <h1>Watch a binary come alive.</h1>
           <p className="launch-description">
             x86-64 → iced-x86 → Cranelift → RV64
