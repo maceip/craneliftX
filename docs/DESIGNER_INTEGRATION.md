@@ -53,6 +53,13 @@ Selecting a raw group in Evidence returns to its containing card. Restart uses
 the card's primary group ID and retains the existing fresh-execution contract.
 Cards share dimensions and retain the preceding/following card. The architecture
 rail remains a read-only diagram. The updated 2026-10-12 factory renderer is now used as a subdued background on the selected card. A single WebGL canvas moves between card hosts; a new run receives a fresh renderer. The foreground diagrams explain actual recorded operations.
+The embedded renderer uses a 24 fps direct-render mode at a maximum 1x pixel
+ratio. It preserves the delivered geometry, materials, camera and mechanics,
+while omitting the standalone bloom, multisample and 2048 px shadow passes.
+The original full-quality mode remains the default for standalone embedding.
+The background pauses during restart confirmation so the controls can animate
+without competing with it. CI explicitly exercises software-rendered WebGL;
+`ISR_SOFTWARE_WEBGL=1` selects the same path in local browser checks.
 The [factory correction handoff](FACTORY_HANDOFF.md) defines their nine scene
 states, Cranelift/RV64 copy and reader-controlled animation contract before integration.
 

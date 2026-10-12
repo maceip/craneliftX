@@ -70,6 +70,12 @@ for (const viewport of [
     await factory.evaluate(
       (c: any) => ((window as any).originalFactoryCanvas = c),
     );
+    expect(await factory.evaluate((c: any) => c.factoryState().quality)).toBe(
+      "backdrop",
+    );
+    expect(
+      await factory.evaluate((c: HTMLCanvasElement) => c.width),
+    ).toBeLessThanOrEqual(Math.ceil((await factory.boundingBox())!.width));
     const untouched = await factory.evaluate(
       (c: any) => c.factoryState().clocks,
     );

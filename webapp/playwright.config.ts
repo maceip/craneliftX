@@ -7,9 +7,19 @@ export default defineConfig({
   timeout: 180_000,
   expect: { timeout: 15_000 },
   use: {
-    launchOptions: process.env.ISR_BROWSER_EXECUTABLE
-      ? { executablePath: process.env.ISR_BROWSER_EXECUTABLE }
-      : undefined,
+    launchOptions: {
+      executablePath: process.env.ISR_BROWSER_EXECUTABLE || undefined,
+      // Exercise the same CPU-rendered WebGL path on CI and developer machines.
+      // The decorative factory must leave time for foreground UI animation.
+      args:
+        process.env.ISR_SOFTWARE_WEBGL === "1"
+          ? [
+              "--use-gl=angle",
+              "--use-angle=swiftshader",
+              "--enable-unsafe-swiftshader",
+            ]
+          : undefined,
+    },
     baseURL: process.env.ISR_BASE_URL || "http://127.0.0.1:8878",
     actionTimeout: 15000,
     navigationTimeout: 15000,

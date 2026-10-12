@@ -15042,6 +15042,10 @@ function Ku(e) {
 //#endregion
 //#region factory/src/renderer.ts
 function qu(e, t = {}) {
+	// The embedded background keeps the delivered geometry, camera and mechanics.
+	// Its low opacity does not benefit from the standalone scene's bloom, MSAA or
+	// 2048px shadow pass. Leave the full-quality standalone default unchanged.
+	const backdrop = t.quality === "backdrop", frameInterval = backdrop ? 1000 / 24 : 0;
 	let n = matchMedia("(prefers-reduced-motion: reduce)"), r = {
 		scene: t.scene ?? "ingest",
 		active: t.active ?? !1,
@@ -15052,10 +15056,10 @@ function qu(e, t = {}) {
 	if (!Uu(r.scene)) throw Error(`Unknown factory scene: ${r.scene}`);
 	let i = t.results ?? {}, a = null, o = -1, s = !1, c = !1, l = !1, d = 0, f = null, p = 0, m = 1, h = 1, g = 1, _ = {}, v = 10.2, y = 10.2, b = Object.fromEntries(Hu.map((e) => [e.id, 0])), x = new Gl({
 		canvas: e,
-		antialias: !0,
-		preserveDrawingBuffer: !0
+		antialias: !backdrop,
+		preserveDrawingBuffer: !backdrop
 	});
-	x.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)), x.outputColorSpace = k, x.shadowMap.enabled = !0, x.shadowMap.type = 1;
+	x.setPixelRatio(Math.min(devicePixelRatio || 1, backdrop ? 1 : 1.5)), x.outputColorSpace = k, x.shadowMap.enabled = !backdrop, x.shadowMap.type = 1;
 	let S = new Nt();
 	S.background = new Z("#11140f");
 	let C = new ao(-10, 10, 8, -8, .1, 150);
@@ -15092,13 +15096,15 @@ function qu(e, t = {}) {
 	j.hide(), S.add(j.root);
 	let M = Vu();
 	S.add(M.root);
-	let N = new K(), P = new K(), F = new eu(x, new Je(1, 1, {
+	let N = new K(), P = new K(), F = backdrop ? null : new eu(x, new Je(1, 1, {
 		type: u,
 		samples: 4
 	}));
-	F.addPass(new tu(S, C));
-	let I = new ru(new G(1, 1), .38, .25, 1.05);
-	F.addPass(I), F.addPass(new au());
+	if (F) {
+		F.addPass(new tu(S, C));
+		let I = new ru(new G(1, 1), .38, .25, 1.05);
+		F.addPass(I), F.addPass(new au());
+	}
 	let L = () => r.reducedMotion || n.matches, R = () => !c && !l && r.active && !r.paused && !r.evidenceOpen && !L() && s && !document.hidden, ee = () => Hu.find((e) => e.id === r.scene), te = () => i[r.scene] ?? Wu();
 	function ne() {
 		let e = te().outcome;
@@ -15130,11 +15136,15 @@ function qu(e, t = {}) {
 		N.copy(P).lerp(o.center, s), v = Ae.lerp(y, o.span, s), C.left = -v * m / h / 2, C.right = -C.left, C.top = v / 2, C.bottom = -v / 2, C.updateProjectionMatrix(), C.position.copy(N).add(new K(28, 28, 28)), C.lookAt(N), C.updateMatrixWorld(), S.updateMatrixWorld(!0);
 	}
 	function V() {
-		c || l || (B(), F.render(), p++);
+		c || l || (B(), F ? F.render() : x.render(S, C), p++);
 	}
 	function H(e) {
 		if (d = 0, !R()) {
 			f = null;
+			return;
+		}
+		if (f !== null && e - f < frameInterval) {
+			d = requestAnimationFrame(H);
 			return;
 		}
 		let t = f === null ? 0 : Math.min(.065, (e - f) / 1e3);
@@ -15165,7 +15175,7 @@ function qu(e, t = {}) {
 	}
 	function se() {
 		let t = e.getBoundingClientRect();
-		if (m = Math.max(1, t.width), h = Math.max(1, t.height), x.setSize(m, h, !1), F.setSize(m, h), g === 1) {
+		if (m = Math.max(1, t.width), h = Math.max(1, t.height), x.setSize(m, h, !1), F?.setSize(m, h), g === 1) {
 			let e = z();
 			P.copy(e.center), y = e.span;
 		}
@@ -15195,6 +15205,7 @@ function qu(e, t = {}) {
 		let e = O.corners.map((e) => e.clone().applyMatrix4(O.root.matrixWorld)), t = O.root.position.clone().project(C);
 		return {
 			...r,
+			quality: backdrop ? "backdrop" : "full",
 			reducedMotion: L(),
 			running: R(),
 			visible: s,
@@ -15235,7 +15246,7 @@ function qu(e, t = {}) {
 				r.add(e);
 				for (let t of Object.values(e)) t instanceof Ge && i.add(t);
 			}
-		}), t.forEach((e) => e.dispose()), r.forEach((e) => e.dispose()), i.forEach((e) => e.dispose()), w.shadow.dispose(), F.passes.forEach((e) => e.dispose()), F.dispose(), x.dispose();
+		}), t.forEach((e) => e.dispose()), r.forEach((e) => e.dispose()), i.forEach((e) => e.dispose()), w.shadow.dispose(), F?.passes.forEach((e) => e.dispose()), F?.dispose(), x.dispose();
 	}
 	return {
 		setState: ie,

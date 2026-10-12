@@ -435,7 +435,9 @@ export function PipelineTimeline({
         key={run?.id ?? "idle"}
         scene={selected}
         active={
-          enabled && (groups.find((s) => s.id === selected)?.count ?? 0) > 0
+          enabled &&
+          !confirmation &&
+          (groups.find((s) => s.id === selected)?.count ?? 0) > 0
         }
         reduced={reduced}
         run={run}

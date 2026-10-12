@@ -49,6 +49,7 @@ export function FactoryBackdrop({
         if (disposed) return;
         const props = latest.current;
         factory.current = module.createFactory(canvas, {
+          quality: "backdrop",
           scene: props.scene,
           active: props.active,
           reducedMotion: props.reduced,
