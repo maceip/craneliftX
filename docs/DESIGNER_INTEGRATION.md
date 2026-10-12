@@ -22,7 +22,7 @@ No backend or engine behavior changes.
 | Card radii, borders, selected outline, typography, status colors | Shared styles across the designer's 9 cards |
 | Bytes → disassembly illustration | Actual `harvest` instructions and original bytes |
 | x86 → CLIF → RV64 illustrations | `TranslationVisual.tsx`, previews of saved artifacts for the exact block ID and RIP |
-| Dashed translation paths, scanning, execution bars | Existing visible/live span and fresh-receipt motion gates, with pause and reduced-motion support |
+| Dashed translation paths, scanning, execution bars | Animate only on the visible, selected card, including recorded results, with pause and reduced-motion support |
 | Floating transport, dial and matrix summary | Existing controls and measured values, restyled to match the export |
 
 Production now follows the designer's nine-card composition, titles and numbering.
@@ -53,6 +53,8 @@ Selecting a raw group in Evidence returns to its containing card. Restart uses
 the card's primary group ID and retains the existing fresh-execution contract.
 Cards share dimensions and retain the preceding/following card. The architecture
 rail remains a read-only diagram. The separate artist factory assets are not used.
+The [factory correction handoff](FACTORY_HANDOFF.md) defines their nine scene
+states, Cranelift/RV64 copy and reader-controlled animation contract before integration.
 
 The prototype's sample numbers, timestamps, illustrative IR/assembly,
 scene-indexed timer, always-running animations and placeholder Evidence actions
@@ -61,6 +63,11 @@ disassembly. A missing artifact has an explicit waiting/unavailable state. The
 preview fetch is aborted on block/run changes and when offscreen; reads are
 bounded to 8 KiB for IR and 48 bytes for machine code. Full downloads stay in
 Evidence. Reading recorded output never changes engine time or replays execution.
+Illustration motion starts when scrolling, clicking or keyboard focus selects a
+card, and stops when that card is left. The motion gate follows reading position,
+independently of receipt timing and execution completion. Unvisited cards stay
+still, even when visible as neighbors. Pause remains available for completed runs; hidden
+tabs, the Evidence overlay and reduced-motion preferences suppress motion.
 
 ## Acceptance
 
@@ -68,9 +75,11 @@ Evidence. Reading recorded output never changes engine time or replays execution
 through all nine cards. It checks the no-input hold, exact forward ring
 sequence, scrolling/click/touch/keyboard navigation, hover opacity, real clock,
 gauge/card separation, self-hosted fonts and exact artifact preview contents
-against independently downloaded, SHA-256-checked receipts. The full browser
-suite also exercises live motion, reduced motion, failures, reconnects, uploads,
-restart and the real Rust TCP server.
+against independently downloaded, SHA-256-checked receipts. It also checks actual
+animation starts on all nine cards after execution has finished, inactive
+neighbors, focus without activation, moving scan frames, pause, reduced motion
+and restored-run playback. The full browser suite also exercises motion during
+live execution, failures, reconnects, uploads, restart and the real Rust TCP server.
 
 Compare reference and integrated screenshots, inspect all cards and recorded
 transitions, then repeat browser acceptance against the exact deployed commit.

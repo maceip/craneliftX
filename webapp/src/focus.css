@@ -1030,7 +1030,7 @@
   }
 }
 
-.focus-shell .timeline-step[data-motion="receipt"] .receipt-glow {
+.focus-shell .timeline-step[data-motion="focused"] .receipt-glow {
   animation-name: focus-receipt;
 }
 @keyframes focus-receipt {

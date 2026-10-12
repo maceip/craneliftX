@@ -560,24 +560,24 @@
 .focus-error {
   top: 74px;
 }
-/* Export motion is gated by the existing real span/receipt state. Entering a
-   recorded card never restarts processing animations or changes the clock. */
-.timeline-step[data-motion="active-span"] .beam-dashes {
+/* Keep the export's effects local to the card being read. Selection starts
+   them even for recorded results; leaving the card removes the animations. */
+.timeline-step[data-motion="focused"] .beam-dashes {
   animation: designer-dash 1s linear infinite;
 }
-.timeline-step[data-motion="active-span"] .execution-register {
+.timeline-step[data-motion="focused"] .execution-register {
   animation: none;
 }
-.timeline-step[data-motion="active-span"] .execution-register > span {
+.timeline-step[data-motion="focused"] .execution-register > span {
   transform-origin: bottom;
   animation: designer-wave 1.2s ease-in-out infinite;
 }
-.timeline-step[data-motion="active-span"]
+.timeline-step[data-motion="focused"]
   .execution-register
   > span:nth-child(2) {
   animation-delay: 0.2s;
 }
-.timeline-step[data-motion="active-span"]
+.timeline-step[data-motion="focused"]
   .execution-register
   > span:nth-child(3) {
   animation-delay: 0.4s;

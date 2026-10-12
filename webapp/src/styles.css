@@ -1875,32 +1875,29 @@ footer {
   opacity: 0;
   transform-origin: left;
 }
-.timeline-step[data-motion="receipt"] .receipt-glow {
+.timeline-step[data-motion="focused"] .receipt-glow {
   animation: receipt-arrive var(--stage-receipt) ease-out both;
 }
-.timeline-step[data-motion="receipt"] .opcode-track {
+.timeline-step[data-motion="focused"] .opcode-track {
   animation: opcode-arrive var(--stage-receipt) ease-out both;
 }
-.timeline-step[data-motion="receipt"] .beam-particle {
-  animation: beam-receipt var(--stage-receipt) linear both;
-}
-.timeline-step[data-motion="active-span"] .beam-particle {
+.timeline-step[data-motion="focused"] .beam-particle {
   animation: beam-receipt var(--stage-cycle) linear infinite;
 }
-.timeline-step[data-motion="active-span"] .scan-light {
+.timeline-step[data-motion="focused"] .scan-light {
   animation: scan-receipt var(--stage-cycle) linear infinite;
 }
-.timeline-step[data-motion="active-span"] .operation-scan {
+.timeline-step[data-motion="focused"] .operation-scan {
   animation: operation-scan var(--stage-cycle) linear infinite;
 }
-.timeline-step[data-motion="active-span"] .orb-dots,
-.timeline-step[data-motion="active-span"] .execution-register {
+.timeline-step[data-motion="focused"] .orb-dots,
+.timeline-step[data-motion="focused"] .execution-register {
   animation: span-breathe var(--stage-cycle) ease-in-out infinite;
 }
-.timeline-step[data-motion="active-span"] .register-illustration,
-.timeline-step[data-motion="active-span"] .policy-illustration,
-.timeline-step[data-motion="active-span"] .file-illustration,
-.timeline-step[data-motion="active-span"] .cache-tiles {
+.timeline-step[data-motion="focused"] .register-illustration,
+.timeline-step[data-motion="focused"] .policy-illustration,
+.timeline-step[data-motion="focused"] .file-illustration,
+.timeline-step[data-motion="focused"] .cache-tiles {
   animation: span-breathe var(--stage-cycle) ease-in-out infinite;
 }
 @keyframes receipt-arrive {

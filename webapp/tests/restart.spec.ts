@@ -130,8 +130,9 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   expect(next.engine_run_id).not.toBe(original.engine_run_id);
   expect(next.groups.ingest.completed).toBeGreaterThan(0);
   expect(next.groups.load.completed).toBeGreaterThan(0);
-  expect(next.verification?.first_connection_responses).toBe(12);
-  expect(next.verification?.verified_responses).toBe(15);
+  expect(next.verification?.first_connection_responses).toBe(15);
+  expect(next.verification?.verified_responses).toBe(18);
+  expect(next.verification?.payload_bytes).toBe(271443);
   expect((await state(page, original.id)).cursor).toBe(original.cursor);
   await info.attach("restart-receipt", {
     body: JSON.stringify({

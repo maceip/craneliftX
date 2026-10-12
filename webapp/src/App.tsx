@@ -336,7 +336,7 @@ export function App() {
   const [actionError, setActionError] = useState<string | null>(null),
     [setupError, setSetupError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
-    { run, connection, error, liveAfter } = usePipeline(id, initial);
+    { run, connection, error } = usePipeline(id, initial);
   const busy = submitting || (!!run && !terminal(run.status));
   useEffect(() => {
     let alive = true;
@@ -629,8 +629,6 @@ export function App() {
                 />
               ) : null
             }
-            connection={streamConnection}
-            liveAfter={liveAfter}
             obscured={evidenceOpen}
             status={
               <>

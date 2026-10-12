@@ -19,6 +19,18 @@ for (const viewport of [
       await page.setViewportSize(viewport);
       await page.addInitScript(() => {
         (window as any).stageChanges = [];
+        (window as any).cardAnimations = [];
+        document.addEventListener("animationstart", (event) => {
+          const step = (event.target as Element).closest<HTMLElement>(
+            ".timeline-step",
+          );
+          if (step)
+            (window as any).cardAnimations.push({
+              group: step.dataset.group,
+              selected: step.classList.contains("is-current"),
+              animation: event.animationName,
+            });
+        });
         new MutationObserver(() => {
           const id = document.querySelector<HTMLElement>(
             ".timeline-step.is-current",
@@ -64,12 +76,13 @@ for (const viewport of [
         const firstCursor = Number(await ring.getAttribute("data-cursor"));
         const initialScroll = await page.evaluate(() => scrollY);
         await expect
-          .poll(async () => (await snapshot()).status, { timeout: 30000 })
+          .poll(async () => (await snapshot()).status, { timeout: 120000 })
           .toBe("completed");
         const final = await snapshot();
         expect(final.cursor).toBeGreaterThan(firstCursor);
-        expect(final.verification?.verified_responses).toBe(15);
-        expect(final.verification?.first_connection_responses).toBe(12);
+        expect(final.verification?.verified_responses).toBe(18);
+        expect(final.verification?.first_connection_responses).toBe(15);
+        expect(final.verification?.payload_bytes).toBe(271443);
         // Deliberately outwait both rejected 4s/6s timers, without any input.
         await page.waitForTimeout(7000);
         await expect(current).toHaveAttribute("data-group", "ingest");
@@ -97,6 +110,24 @@ for (const viewport of [
         );
         await expect(page.locator(".timeline-step")).toHaveCount(9);
         await expect(ring.locator("li")).toHaveCount(9);
+        // The entire real run has finished while the reader stayed on card 1.
+        // No later card may have spent its animation on background receipts.
+        expect(
+          await page.evaluate(() => [
+            ...new Set((window as any).cardAnimations.map((a: any) => a.group)),
+          ]),
+        ).toEqual(["ingest"]);
+        const effects: Record<string, string> = {
+          ingest: "scan-receipt",
+          initialize: "scan-receipt",
+          decode: "opcode-arrive",
+          audit: "span-breathe",
+          lower: "designer-dash",
+          codegen: "designer-dash",
+          execute: "designer-wave",
+          syscall: "beam-receipt",
+          result: "focus-receipt",
+        };
         const visits: { group: string; seq: number }[] = [];
         for (let i = 0; i < groups.length; i++) {
           const group = groups[i];
@@ -113,11 +144,26 @@ for (const viewport of [
             const button = page.getByTestId(`group-${group.id}`);
             if (viewport.name === "mobile") await button.tap();
             else if (i === 6) {
+              // Focus alone must select and animate, without an Enter/click.
               await button.focus();
-              await button.press("Enter");
             } else await button.click();
           }
           await expect(current).toHaveAttribute("data-group", group.id);
+          await expect(step).toHaveAttribute("data-motion", "focused");
+          await expect(
+            page.locator('.timeline-step:not(.is-current)[data-motion="focused"]'),
+          ).toHaveCount(0);
+          await expect
+            .poll(() =>
+              page.evaluate(
+                ({ id, effect }) =>
+                  (window as any).cardAnimations.some(
+                    (a: any) => a.group === id && a.animation === effect,
+                  ),
+                { id: group.id, effect: effects[group.id] },
+              ),
+            )
+            .toBe(true);
           await expect(ring).toHaveAttribute("data-current-stage", group.id);
           await expect(
             page.getByRole("group", { name: "Pipeline architecture" }),
@@ -238,6 +284,11 @@ for (const viewport of [
           () => (window as any).stageChanges,
         );
         expect(stageChanges).toEqual(groups.map((g) => g.id));
+        expect(
+          await page.evaluate(() =>
+            (window as any).cardAnimations.every((a: any) => a.selected),
+          ),
+        ).toBe(true);
         // Hovering a neighbor must not abruptly dim either card.
         const neighbor = page.locator("#timeline-syscall .timeline-card");
         await page.mouse.move(5, 5);
@@ -271,6 +322,44 @@ for (const viewport of [
         await expect(
           page.locator("#timeline-ingest .completion-detent"),
         ).toBeVisible();
+        await expect(page.getByTestId("telemetry-gauge")).toHaveAttribute(
+          "data-elapsed-ns",
+          String(final.elapsed_ns),
+        );
+        const scan = page.locator("#timeline-ingest .scan-light");
+        const runningScans = () =>
+          scan.evaluate((el) =>
+            el.getAnimations().filter((a) => a.playState === "running").length,
+          );
+        await expect.poll(runningScans).toBe(1);
+        const before = await scan.evaluate((el) => getComputedStyle(el).transform);
+        await expect
+          .poll(() => scan.evaluate((el) => getComputedStyle(el).transform))
+          .not.toBe(before);
+        // Motion controls continue to work after completion, with readable
+        // recorded values and no new execution/navigation writes.
+        await page.getByRole("button", { name: "Pause animations" }).click();
+        await expect.poll(runningScans).toBe(0);
+        await page.getByTestId("group-initialize").focus();
+        await expect(current).toHaveAttribute("data-group", "initialize");
+        await expect(current).toHaveAttribute("data-motion", "off");
+        await page.getByRole("button", { name: "Resume animations" }).click();
+        await expect(current).toHaveAttribute("data-motion", "focused");
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await expect(current).toHaveAttribute("data-motion", "off");
+        await page.getByTestId("group-initialize").focus();
+        await page.keyboard.press("Tab");
+        await expect(current).toHaveAttribute("data-group", "decode");
+        await expect(current).toHaveAttribute("data-motion", "off");
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await expect(current).toHaveAttribute("data-motion", "focused");
+        await page.getByRole("button", { name: "View evidence" }).click();
+        await expect(page.locator('.timeline-step[data-motion="focused"]')).toHaveCount(0);
+        // A restored snapshot has no fresh SSE receipt to trigger motion.
+        await page.reload();
+        await expect(current).toHaveAttribute("data-group", "ingest");
+        await expect.poll(runningScans).toBe(1);
+        await expect(current).toHaveAttribute("data-motion", "focused");
         await expect(page.getByTestId("telemetry-gauge")).toHaveAttribute(
           "data-elapsed-ns",
           String(final.elapsed_ns),

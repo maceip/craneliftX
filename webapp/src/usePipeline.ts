@@ -13,7 +13,6 @@ export async function request<T>(
 export function usePipeline(id: string | null, initial: Run | null = null) {
   const [run, setRun] = useState<Run | null>(null),
     [connection, setConnection] = useState("idle");
-  const [liveAfter, setLiveAfter] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null),
     current = useRef<Run | null>(null);
   useEffect(() => {
@@ -26,7 +25,6 @@ export function usePipeline(id: string | null, initial: Run | null = null) {
     let first = initial?.id === id ? initial : null;
     current.current = null;
     setRun(null);
-    setLiveAfter(null);
     setError(null);
     if (!id) {
       setConnection("idle");
@@ -63,7 +61,6 @@ export function usePipeline(id: string | null, initial: Run | null = null) {
         first = null;
         if (disposed) return;
         current.current = snapshot;
-        setLiveAfter(snapshot.cursor);
         publish();
         setError(null);
         if (terminal(snapshot.status)) {
@@ -136,5 +133,5 @@ export function usePipeline(id: string | null, initial: Run | null = null) {
       window.removeEventListener("online", online);
     };
   }, [id, initial]);
-  return { run: run?.id === id ? run : null, connection, error, liveAfter };
+  return { run: run?.id === id ? run : null, connection, error };
 }

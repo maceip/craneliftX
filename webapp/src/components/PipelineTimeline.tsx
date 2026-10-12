@@ -519,8 +519,8 @@ function TimelineStep({
   selected,
   context,
   onSelect,
+  onFocus,
   enabled,
-  liveAfter,
   confirming,
 }: {
   group: Scene;
@@ -528,16 +528,15 @@ function TimelineStep({
   selected: boolean;
   context: string;
   onSelect: () => void;
+  onFocus: () => void;
   enabled: boolean;
-  liveAfter: number | null;
   confirming: boolean;
 }) {
   const element = useRef<HTMLLIElement>(null);
+  const pointerFocus = useRef(false);
   const [visible, setVisible] = useState(false),
-    [flash, setFlash] = useState(false),
     [prominence, setProminence] = useState(0);
-  const seq = group.last_event?.seq ?? 0,
-    seen = useRef(seq);
+  const seq = group.last_event?.seq ?? 0;
   const state = group.state;
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) =>
@@ -571,23 +570,10 @@ function TimelineStep({
       window.removeEventListener("resize", observe);
     };
   }, []);
-  const motion = enabled && visible;
-  useEffect(() => {
-    const fresh = seq !== seen.current;
-    seen.current = seq;
-    const pulse = motion && fresh && liveAfter !== null && seq > liveAfter;
-    setFlash(pulse);
-    if (pulse) {
-      const timer = setTimeout(() => setFlash(false), 220);
-      return () => clearTimeout(timer);
-    }
-  }, [seq, motion, liveAfter]);
-  const busy =
-    motion &&
-    !!run &&
-    !terminal(run.status) &&
-    group.active > 0 &&
-    state === "Active";
+  // Reading owns the illustration's lifecycle. Fast/offscreen engine events
+  // must not consume an animation before this card is reached, or restart it
+  // while it is being read. Completed and restored runs use the same gate.
+  const motion = enabled && visible && selected && group.count > 0;
   return (
     <li
       ref={element}
@@ -597,7 +583,7 @@ function TimelineStep({
       data-source-groups={group.sources.map((source) => source.id).join(" ")}
       data-context={context}
       data-state={state}
-      data-motion={busy ? "active-span" : flash ? "receipt" : "off"}
+      data-motion={motion ? "focused" : "off"}
       data-motion-seq={seq || undefined}
       data-prominence={prominence.toFixed(2)}
       data-completed={state === "Completed"}
@@ -620,7 +606,25 @@ function TimelineStep({
           }
         />
       )}
-      <div className="timeline-card" onClick={onSelect}>
+      <div
+        className="timeline-card"
+        onClick={onSelect}
+        onPointerDownCapture={() => {
+          pointerFocus.current = true;
+        }}
+        onPointerUpCapture={() => {
+          pointerFocus.current = false;
+        }}
+        onPointerCancelCapture={() => {
+          pointerFocus.current = false;
+        }}
+        onFocusCapture={() => {
+          // Keyboard/programmatic focus follows the same reading selection.
+          // Pointer focus is handled by click to preserve its smooth scroll.
+          if (!pointerFocus.current) onFocus();
+          pointerFocus.current = false;
+        }}
+      >
         <button
           type="button"
           className="timeline-stage-button"
@@ -649,11 +653,7 @@ function TimelineStep({
         </button>
         <div className="stage-illustration" data-stage-visual={group.id}>
           <SceneVisual scene={group} run={run} visible={visible} />
-          <span
-            key={`${seq}:${selected}`}
-            className="receipt-glow"
-            aria-hidden="true"
-          />
+          <span className="receipt-glow" aria-hidden="true" />
         </div>
         <div className="timeline-provenance">
           <span>
@@ -679,8 +679,6 @@ export function PipelineTimeline({
   selected,
   onSelect,
   onView,
-  connection,
-  liveAfter,
   controls,
   status,
   obscured,
@@ -694,8 +692,6 @@ export function PipelineTimeline({
   selected: string;
   onSelect: (id: string, revisit: boolean) => void;
   onView: (id: string) => void;
-  connection: string;
-  liveAfter: number | null;
   controls: React.ReactNode;
   status: React.ReactNode;
   obscured: boolean;
@@ -797,15 +793,15 @@ export function PipelineTimeline({
     onSelect(id, revisit);
     center(id, reduced ? "instant" : "smooth");
   }
-  const enabled =
-    !paused &&
-    !obscured &&
-    !reduced &&
-    visible &&
-    connection === "live" &&
-    !!run &&
-    !terminal(run.status);
-  const showPlayback = !!run && !terminal(run.status);
+  function focusCard(id: string) {
+    if (id !== observed.current) {
+      departed.current.add(observed.current);
+      observed.current = id;
+      viewCallback.current(id);
+    }
+    center(id);
+  }
+  const enabled = !paused && !obscured && !reduced && visible && !!run;
   return (
     <section
       className="pipeline-timeline"
@@ -821,14 +817,14 @@ export function PipelineTimeline({
         stage={selected}
         animate={
           enabled &&
-          (groups.find((scene) => scene.id === selected)?.active ?? 0) > 0
+          (groups.find((scene) => scene.id === selected)?.count ?? 0) > 0
         }
       />
       <div className="focus-transport" data-expanded={!!confirmation}>
         {confirmation}
         <div className="focus-stream-caption">{status}</div>
         <div className="timeline-controls">
-          {showPlayback && (
+          {run && (
             <>
               <button
                 type="button"
@@ -861,19 +857,19 @@ export function PipelineTimeline({
                       : "distant"
               }
               onSelect={() => selectCard(group.id)}
+              onFocus={() => focusCard(group.id)}
               enabled={enabled}
-              liveAfter={liveAfter}
               confirming={confirmationFor === group.id}
             />
           ))}
         </ol>
       </div>
       <p className="visually-hidden">
-        Scroll or click a card to inspect its recorded output. Previously
+        Scroll, click or focus a card to inspect its recorded output. Previously
         visited cards offer a restart confirmation. The engine runs
         continuously; values and engine time update independently from the
-        ledger. Motion indicates an open engine span or a newly received
-        receipt. {reduced ? "Reduced motion is enabled." : ""}
+        ledger. Illustrations animate only on the card being read, including
+        recorded results. {reduced ? "Reduced motion is enabled." : ""}
       </p>
     </section>
   );

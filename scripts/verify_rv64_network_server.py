@@ -20,6 +20,7 @@ from live_probe import LiveConsumer, endpoint_from, stalled_consumer
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tests/fixtures/rv64_network_server.rs"
+REQUEST_SIZES = json.loads((ROOT / "webapp/network_workload.json").read_text())["request_sizes"]
 
 
 def sha(data):
@@ -126,7 +127,7 @@ def verify(args, out, report):
                 peer, local, fd = stream.getpeername(), stream.getsockname(), stream.fileno()
                 connected = time.time_ns()
                 assert consumer.first_compile.wait(timeout=5), "no live compilation events"
-                for seq, size in enumerate([0, 1, 2, 3, 7, 8, 15, 16, 255, 256, 4096, 65536], 1):
+                for seq, size in enumerate(REQUEST_SIZES[0], 1):
                     responses.append(exchange(stream, 0, seq, size))
                     if seq == 6:
                         time.sleep(0.2)
@@ -137,9 +138,9 @@ def verify(args, out, report):
                 report["persistent_connection"] = {"status": "passed", "reconnects": 0,
                     "peer": peer, "local": local, "client_fd": fd,
                     "connected_unix_ns": str(connected), "disconnected_unix_ns": str(disconnected),
-                    "verified_responses": 12, "request_sequence_preserved": True}
+                    "verified_responses": len(REQUEST_SIZES[0]), "request_sequence_preserved": True}
             with socket.create_connection(("127.0.0.1", port), timeout=30) as stream:
-                for seq, size in enumerate([4097, 31, 512], 1):
+                for seq, size in enumerate(REQUEST_SIZES[1], 1):
                     responses.append(exchange(stream, 1, seq, size))
                 stream.shutdown(socket.SHUT_WR)
                 assert stream.recv(1) == b""

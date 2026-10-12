@@ -25,6 +25,10 @@ from sse_starlette import EventSourceResponse
 ROOT = Path(__file__).resolve().parents[1]
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 LIMIT = 64 * 1024 * 1024
+# The browser demo and direct runtime acceptance exercise the same workload.
+# Four full frames make the real work substantial without padding the binary
+# or delaying execution. The empty final connection tests oversize rejection.
+SERVER_REQUEST_SIZES = json.loads((ROOT / "webapp/network_workload.json").read_text())["request_sizes"]
 
 
 def encode(value):
@@ -316,7 +320,7 @@ class PipelineRuns:
         proof = {"source": "host TCP test client", "verified_responses": 0, "payload_bytes": 0,
                  "first_connection_responses": 0, "reconnects_on_first_connection": 0, "status": "running"}
         self.update(run_id, verification=dict(proof))
-        for connection, sizes in enumerate([[0, 1, 2, 3, 7, 8, 15, 16, 255, 256, 4096, 65536], [4097, 31, 512], []]):
+        for connection, sizes in enumerate(SERVER_REQUEST_SIZES):
             reader, writer = await asyncio.open_connection("127.0.0.1", port)
             try:
                 if not sizes:

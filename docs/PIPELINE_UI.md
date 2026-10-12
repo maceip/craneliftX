@@ -32,6 +32,12 @@ The binary upload limit is 64 MiB. One guest process runs at a time, with a
 120-second engine deadline. A file is translated as guest control flow reaches
 its instructions; input file length is not a measure of lifted code.
 
+The bundled Rust server uses one shared workload in
+`webapp/network_workload.json`: 18 verified responses, 15 on the first persistent
+connection, and 271,443 payload bytes (about 265 KiB). Four full 64 KiB requests
+provide roughly 3.6 times the original work; runtime speed determines duration.
+The browser tests and direct RV64 acceptance use this same workload.
+
 `ISR_PROCESS` overrides `target/release/isr-process`; `ISR_SERVER_FIXTURE`
 overrides `target/fixtures/rust-network-server.elf`. `ISR_STATE_DIR` selects the
 state root (default `.isr-state`), with these runs under `pipeline-ui/`.
@@ -229,7 +235,7 @@ It exercises:
 
 - All 13 group controls, changing event cursors before execution completes,
   exact engine-to-browser projection, artifact hashes, and saved-run reload.
-- The real Rust server: 15 independently checked responses, 12 on one persistent
+- The real Rust server: 18 independently checked responses, 15 on one persistent
   connection, partial headers, an idle interval, EOF, oversized input rejection,
   and guest cache invalidations during the run.
 - A 16 MiB uploaded ELF containing 256 arithmetic blocks plus entry/exit blocks:
@@ -245,9 +251,10 @@ It exercises:
   idle seconds; wheel/click navigation, readable centered cards and one matching
   thermometer ring; no backward ring jumps during forward navigation; unchanged
   recorded timing and no navigation API writes.
-- Live timeline animations matched to journal sequence numbers, real instruction
-  and mapping values, visible previous/current/next cards on desktop and mobile,
-  and motion pause/reduced-motion/offline behavior while a real syscall loop runs.
+- Timeline illustration motion owned by the selected, visible card, with real
+  instruction and mapping values and visible previous/current/next cards on
+  desktop and mobile. Motion remains available for completed and offline results,
+  and honors pause and reduced motion while a real syscall loop runs.
   Scrolling to earlier cards restores readability; the thermometer ring is
   matched to the viewed card and observed dots reconciled against the exact ledger.
 

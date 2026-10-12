@@ -133,8 +133,9 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   await expect(page.getByTestId("event-sequence")).toHaveText(
     String(final.cursor),
   );
-  expect(final.verification?.verified_responses).toBe(15);
-  expect(final.verification?.first_connection_responses).toBe(12);
+  expect(final.verification?.verified_responses).toBe(18);
+  expect(final.verification?.first_connection_responses).toBe(15);
+  expect(final.verification?.payload_bytes).toBe(271443);
   expect(final.verification?.reconnects_on_first_connection).toBe(0);
   expect(final.counters.cache_invalidations).toBeGreaterThan(0);
   await page.getByTestId("group-result").click();
@@ -583,7 +584,7 @@ test("runtime stack rejection is shown after accepted inspection and actual RV64
   });
 });
 
-test("timeline motion follows real receipts, preserves neighbors and pauses independently of live values", async ({
+test("timeline motion follows the reader, preserves neighbors and pauses independently of live values", async ({
   page,
   context,
 }, info) => {
@@ -652,7 +653,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await expect(timeline).toHaveAttribute("data-navigation", "manual");
   await expect(page.locator("#timeline-execute")).toHaveAttribute(
     "data-motion",
-    "active-span",
+    "focused",
   );
   const runningAnimations = () =>
     timeline.evaluate(
@@ -679,8 +680,8 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect.poll(runningAnimations).toBeGreaterThan(0);
   await context.setOffline(true);
-  await expect(timeline).toHaveAttribute("data-motion-enabled", "false");
-  await expect.poll(runningAnimations).toBe(0);
+  await expect(timeline).toHaveAttribute("data-motion-enabled", "true");
+  await expect.poll(runningAnimations).toBeGreaterThan(0);
   await context.setOffline(false);
   await expect(timeline).toHaveAttribute("data-motion-enabled", "true");
   await page
@@ -829,7 +830,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await expect(page.getByTestId("event-sequence")).toHaveText(
     String(final.cursor),
   );
-  await expect.poll(runningAnimations).toBe(0);
+  await expect.poll(runningAnimations).toBeGreaterThan(0);
   await expect(page.getByTestId("ingest-hash")).toHaveText(
     createHash("sha256").update(program).digest("hex"),
   );
@@ -879,8 +880,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     .map((s) => JSON.parse(s));
   const motions = await page.evaluate(() => (window as any).motionReceipts);
   expect(motions.length).toBeGreaterThan(0);
-  expect(motions.some((m: any) => m.kind === "active-span")).toBe(true);
-  expect(motions.some((m: any) => m.kind === "receipt")).toBe(true);
+  expect(motions.every((m: any) => m.kind === "focused")).toBe(true);
   for (const motion of motions)
     expect(sceneForGroup(journal[motion.seq - 1]?.group)).toBe(motion.group);
   const operations = await page.evaluate(
@@ -924,10 +924,10 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     }
   }
   await page.reload();
-  await expect(timeline).toHaveAttribute("data-motion-enabled", "false");
+  await expect(timeline).toHaveAttribute("data-motion-enabled", "true");
   await expect(
     page.locator('.timeline-step:not([data-motion="off"])'),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   await expect(page.locator('[data-stage-visual="result"]')).toHaveText(
     "Run ended without a terminal engine receipt",
   );
