@@ -1328,10 +1328,14 @@
   .response-packet {
     transform: translateX(20px);
   }
+  .focus-shell .card-story[data-scene="result"] {
+    grid-template-rows: 17px minmax(0, 1fr) 20px;
+    gap: 8px;
+  }
   .result-story {
     grid-template-columns: 1fr;
-    grid-template-rows: 25px minmax(0, 1fr);
-    gap: 8px;
+    grid-template-rows: 20px minmax(0, 1fr);
+    gap: 6px;
   }
   .result-tracks {
     display: flex;

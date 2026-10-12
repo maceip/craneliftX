@@ -322,6 +322,17 @@ for (const viewport of [
             .locator(".performance-summary")
             .evaluate((el) => el.scrollHeight <= el.clientHeight + 1),
         ).toBe(true);
+        if (viewport.name === "phone") {
+          await page.setViewportSize({ width: 375, height: 667 });
+          await expect
+            .poll(() => card.locator(".performance-summary")
+              .evaluate((el) => el.scrollHeight <= el.clientHeight + 1))
+            .toBe(true);
+          await page.screenshot({
+            path: info.outputPath("result-small-phone.png"),
+          });
+          await page.setViewportSize(viewport);
+        }
       }
     }
     // The completion cue fades while the same card is leaving its reading
