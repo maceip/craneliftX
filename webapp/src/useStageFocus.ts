@@ -3,7 +3,8 @@ import { Run, terminal } from "./pipeline";
 
 // Reading time for an observed operation, never an execution delay or a
 // simulated span duration. All cards and the gauge keep consuming live data.
-const READING_MS = 1400;
+const readingTime = (group?: string) =>
+  group === "decode" || group === "audit" ? 6000 : 4000;
 
 export function useStageFocus(
   run: Run | null,
@@ -56,7 +57,7 @@ export function useStageFocus(
       }
       const p = progress.current;
       if (!p.overview) {
-        if (now - p.since >= 600) {
+        if (now - p.since >= readingTime()) {
           const group = state.recent.at(-1)?.group;
           if (group) select(group);
           p.since = now;
@@ -71,7 +72,7 @@ export function useStageFocus(
         p.since = now;
         return;
       }
-      if (now - p.since < READING_MS) return;
+      if (now - p.since < readingTime(groups[p.index]?.id)) return;
       let next = p.index + 1;
       // Failed/cancelled runs may never exercise some operations. Do not
       // present those as having run, or wait forever for their receipts.

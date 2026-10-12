@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fibDir, makeProj } from "thinking-orbs";
 import { PerformanceSummary } from "./Telemetry";
+import { policyLabels, stageStatus } from "../pipelineCopy";
 import {
   bytes,
   duration,
@@ -141,14 +142,18 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           />
           <div>
             <strong>
-              {run?.engine_run_id
-                ? `${observed.length} groups recorded`
+              {Array.isArray(output?.groups)
+                ? `${output.groups.length} trace groups registered`
                 : "Waiting for a run"}
             </strong>
             <code>
-              {output?.decoder ?? "—"} · {output?.backend ?? "—"}
+              Engines: {output?.decoder ?? "—"} · {output?.backend ?? "—"}
             </code>
-            <small>One dot per observed group</small>
+            <small>
+              {Array.isArray(output?.groups)
+                ? "Group tracking enabled"
+                : "Awaiting trace group registration"}
+            </small>
           </div>
         </div>
       );
@@ -165,8 +170,8 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           <div>
             <strong>{run?.input_name ?? "Open a binary to begin"}</strong>
             <span>
-              {bytes(run?.input?.bytes)}
-              {run?.input ? " read from input" : " · input size not recorded"}
+              Payload: {bytes(run?.input?.bytes)}
+              {run?.input ? " read" : " · input size not recorded"}
             </span>
             <code className="hash-strip" data-testid="ingest-hash">
               {run?.input?.sha256 ?? "Awaiting the input fingerprint"}
@@ -211,7 +216,7 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             </div>
           ))}
           <small>
-            {segments.length} mapped segments · bars compare mapped byte lengths
+            Virtual address space configured · {segments.length} mapped segments
             {segments.length > 4 ? " · first four shown" : ""}
           </small>
         </div>
@@ -221,16 +226,18 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
       return complete ? (
         <div className="register-illustration" data-source-seq={output.seq}>
           {[
-            ["Entry RIP", output.entry_rip],
+            ["Guest RIP", output.entry_rip],
             ["Guest RSP", output.guest_rsp],
-            ["RV64 stack", bytes(output.rv64_stack_bytes)],
+            ["Host RV64 Stack", bytes(output.rv64_stack_bytes)],
           ].map(([key, value]) => (
             <div key={key}>
               <small>{key}</small>
               <code>{value}</code>
             </div>
           ))}
-          <small>{number(output.state_words)} state words initialized</small>
+          <small>
+            {number(output.state_words)} architectural registers initialized
+          </small>
         </div>
       ) : (
         <Waiting kind="registers">
@@ -277,7 +284,7 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             </ol>
             <small>
               {instructions.length} instructions · block {output!.block_id} ·
-              receipt #{output!.seq}
+              Receipt: #{output!.seq}
             </small>
           </div>
         </div>
@@ -289,7 +296,9 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           {output.checks.map((check: any) => (
             <li key={check.rule} className={`policy-${check.verdict}`}>
               <span aria-hidden="true" />
-              <strong title={check.label}>{check.label}</strong>
+              <strong title={check.detail ?? check.label}>
+                {policyLabels[check.rule] ?? check.label}
+              </strong>
               <small>
                 {check.verdict === "rejected"
                   ? "Rejected"
@@ -312,11 +321,11 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
       return (
         <div data-block-id={blockId} data-source-seq={output?.seq}>
           <Beam
-            from="Reached x86 block"
-            to="Cranelift IR"
+            from="Source"
+            to="Output · Cranelift IR"
             source={
               decoded?.instructions
-                ? `${decoded.instructions.length} instructions`
+                ? `${decoded.instructions.length} x86 instructions`
                 : "—"
             }
             destination={complete ? bytes(output?.clif_bytes) : "Awaiting CLIF"}
@@ -324,7 +333,7 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           <small className="visual-caption">
             {group.last_event?.rip ?? "No reached block"}
             {blockId !== undefined ? ` · block ${blockId}` : ""}
-            {complete ? ` · lowered in ${duration(output?.elapsed_ns)}` : ""}
+            {complete ? ` · Duration: ${duration(output?.elapsed_ns)}` : ""}
           </small>
         </div>
       );
@@ -334,15 +343,17 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
       return (
         <div data-block-id={blockId} data-source-seq={output?.seq}>
           <Beam
-            from="Cranelift IR"
-            to="RV64 machine code"
+            from="Input · Cranelift IR"
+            to="Output · RV64 machine code"
             source={
               lowered?.status === "completed" ? bytes(lowered.clif_bytes) : "—"
             }
             destination={complete ? bytes(output?.rv64_bytes) : "Awaiting RV64"}
           />
           <small className="visual-caption">
-            {complete ? output?.target : "Waiting for code-generation output"}
+            {complete
+              ? `Target: ${output?.target}`
+              : "Waiting for code-generation output"}
             {blockId !== undefined ? ` · block ${blockId}` : ""}
           </small>
         </div>
@@ -395,10 +406,9 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             <strong data-testid="timeline-rv64-steps">
               {number(run?.counters.rv64_steps)}
             </strong>
-            <span>reported RV64 instructions</span>
+            <span>RV64 instructions interpreted</span>
             <small>
-              {number(run?.counters.block_executions)} completed block
-              executions
+              {number(run?.counters.block_executions)} basic block executions
             </small>
           </div>
         </div>
@@ -407,15 +417,18 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
       return event ? (
         <div data-source-seq={event.seq}>
           <Beam
-            from="Guest syscall"
-            to="Host kernel bridge"
+            from="Guest Call"
+            to="Host Intercept"
             source={
-              event.detail?.name ??
-              (event.number !== undefined ? `#${event.number}` : "—")
+              event.detail?.name
+                ? `sys_${event.detail.name}${typeof event.detail.number === "number" ? ` (0x${event.detail.number.toString(16)})` : ""}`
+                : event.number !== undefined
+                  ? `#${event.number}`
+                  : "—"
             }
             destination={
               event.type === "syscall_completed"
-                ? `result ${event.detail?.result ?? "—"}`
+                ? `Returned ${event.detail?.result ?? "—"}`
                 : event.type === "syscall_failed"
                   ? "Failed"
                   : "Awaiting result"
@@ -426,7 +439,7 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             {event.elapsed_ns !== undefined
               ? ` · ${duration(event.elapsed_ns)}`
               : ""}{" "}
-            · receipt #{event.seq}
+            · Receipt: #{event.seq}
           </small>
         </div>
       ) : (
@@ -440,14 +453,14 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
               <div key={p.seq} data-source-seq={p.seq}>
                 <small>Compilation</small>
                 <strong>{p.blocks}</strong>
-                <code>{bytes(p.bytes)} reached</code>
+                <code>{bytes(p.bytes)} source reached</code>
               </div>
             ))}
           </div>
           <small>
-            {number(run?.counters.compiled_blocks)} compilations ·{" "}
+            {number(run?.counters.compiled_blocks)} compiled blocks ·{" "}
             {number(run?.counters.cache_invalidations)} invalidations · guest
-            state is retained
+            context intact
           </small>
         </div>
       );
@@ -601,7 +614,7 @@ function TimelineStep({
             className={`timeline-state state-${state.toLowerCase().replaceAll(" ", "-")}`}
           >
             <i aria-hidden="true" />
-            {state}
+            {stageStatus(group, run?.status)}
           </span>
         </button>
         <div className="stage-illustration" data-stage-visual={group.id}>
@@ -615,7 +628,7 @@ function TimelineStep({
         <div className="timeline-provenance">
           <span>
             {group.last_event
-              ? `#${seq} · ${timestamp(group.last_event.timestamp_unix_ns)} UTC`
+              ? `${timestamp(group.last_event.timestamp_unix_ns)} UTC · Event #${seq}`
               : "Awaiting an engine event"}
           </span>
           <span>

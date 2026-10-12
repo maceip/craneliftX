@@ -19,6 +19,7 @@ import { useStageFocus } from "./useStageFocus";
 import { PipelineTimeline } from "./components/PipelineTimeline";
 import { TelemetryGauge } from "./components/Telemetry";
 import { RestartConfirmation } from "./components/RestartConfirmation";
+import { stageLabel } from "./pipelineCopy";
 
 const cn = (...values: Parameters<typeof clsx>) => twMerge(clsx(...values));
 const descriptions: Record<string, string> = {
@@ -469,7 +470,10 @@ export function App() {
     }
   }
   const groups =
-    config?.groups.map((g) => run?.groups[g.id] ?? blankGroup(g)) ?? [];
+    config?.groups.map((g) => ({
+      ...(run?.groups[g.id] ?? blankGroup(g)),
+      label: stageLabel(g),
+    })) ?? [];
   const group = groups.find((g) => g.id === selected),
     shown =
       inspection ??
@@ -522,9 +526,12 @@ export function App() {
             width={28}
             height={28}
           />
-          <h1>Watch a binary come alive.</h1>
+          <h1>
+            Translate and execute <span>x86-64</span> binaries on{" "}
+            <span>RISC-V.</span>
+          </h1>
           <p className="launch-description">
-            x86-64 → iced-x86 → Cranelift → RV64
+            x86-64 → iced-x86 → Cranelift IR → RV64
           </p>
           <div className="launch-actions">
             <button
@@ -537,10 +544,10 @@ export function App() {
                 ▷
               </span>
               <strong>{submitting ? "Starting…" : "Run demo"}</strong>
-              <span>A real Rust TCP server, running through RV64.</span>
+              <span>Live Rust TCP server translated to RV64</span>
             </button>
             <button
-              aria-label="Open binary"
+              aria-label="Upload binary"
               className="launch-action"
               disabled={busy || !config?.ready}
               onClick={() => file.current?.click()}
@@ -548,10 +555,10 @@ export function App() {
               <span className="launch-symbol" aria-hidden="true">
                 ↑
               </span>
-              <strong>Open binary</strong>
+              <strong>Upload binary</strong>
               <span>
-                Static Linux x86-64 ELF · up to{" "}
-                {bytes(config?.max_upload_bytes)}
+                Static Linux x86-64 ELF (up to{" "}
+                {bytes(config?.max_upload_bytes).replace(/\.00 MiB$/, " MiB")})
               </span>
             </button>
           </div>
@@ -603,7 +610,7 @@ export function App() {
                 {run.message}
               </p>
             )}
-          <TelemetryGauge run={run} connection={streamConnection} />
+          <TelemetryGauge run={run} stage={selected} reviewing={reviewing} />
           <PipelineTimeline
             groups={groups}
             run={run}

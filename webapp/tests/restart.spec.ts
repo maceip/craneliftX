@@ -1,6 +1,7 @@
 import { expect, Page, test } from "@playwright/test";
 import { Run } from "../src/pipeline";
 import { elf } from "./elf";
+import { stageLabel } from "../src/pipelineCopy";
 
 const currentId = (page: Page) => new URL(page.url()).searchParams.get("run");
 const state = async (page: Page, id = currentId(page)): Promise<Run> =>
@@ -49,7 +50,7 @@ test("any completed card opens a glowing confirmation and restarts the exact Rus
   await expect(footer).toHaveAttribute("data-expanded", "true");
   expect((await footer.boundingBox())!.height).toBeGreaterThan(before);
   const confirm = page.getByRole("button", {
-    name: `Restart Analysis from ${original.groups.lower.label} ?`,
+    name: `Restart Analysis from ${stageLabel(original.groups.lower)} ?`,
     exact: true,
   });
   await expect(confirm).toBeFocused();
@@ -75,7 +76,7 @@ test("any completed card opens a glowing confirmation and restarts the exact Rus
   await expect(page.getByTestId("group-lower")).toBeFocused();
   await page.getByTestId("group-audit").click();
   await expect(panel).toContainText(
-    `Restart Analysis from ${original.groups.audit.label} ?`,
+    `Restart Analysis from ${stageLabel(original.groups.audit)} ?`,
   );
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   expect(restartRequests).toBe(0);
@@ -133,7 +134,9 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Open binary" })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Upload binary" }),
+  ).toBeEnabled();
   await page.getByLabel("Choose an x86-64 ELF binary").setInputFiles({
     name: "restart-loop.elf",
     mimeType: "application/octet-stream",
@@ -158,7 +161,7 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
   expect((await state(page)).status).toBe("running");
   await page
     .getByRole("button", {
-      name: `Restart Analysis from ${original.groups.initialize.label} ?`,
+      name: `Restart Analysis from ${stageLabel(original.groups.initialize)} ?`,
       exact: true,
     })
     .click();

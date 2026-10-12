@@ -40,6 +40,9 @@
   line-height: 1.15;
   font-weight: 500;
 }
+.launch-screen h1 span {
+  white-space: nowrap;
+}
 .launch-description {
   margin-top: 18px;
   color: var(--muted);
@@ -601,8 +604,7 @@
   border-radius: 50%;
   background: #22291f;
 }
-.stage-thermometer [data-state="Completed"] .thermometer-dot,
-.stage-thermometer [data-state="Observed"] .thermometer-dot {
+.stage-thermometer [data-observed="true"] .thermometer-dot {
   background: #98aa7f;
   border-color: #98aa7f;
 }
@@ -610,7 +612,7 @@
   background: #dd835d;
   border-color: #dd835d;
 }
-.stage-thermometer [data-executing="true"] .thermometer-dot::after {
+.stage-thermometer [data-current="true"] .thermometer-dot::after {
   content: "";
   position: absolute;
   inset: -5px;
@@ -774,7 +776,7 @@
     width: 12px;
     height: 10px;
   }
-  .stage-thermometer [data-executing="true"] .thermometer-dot::after {
+  .stage-thermometer [data-current="true"] .thermometer-dot::after {
     inset: -3px;
   }
   .dial-readout {
@@ -937,7 +939,7 @@
     width: 3px;
     height: 3px;
   }
-  .stage-thermometer [data-executing="true"] .thermometer-dot::after {
+  .stage-thermometer [data-current="true"] .thermometer-dot::after {
     inset: -2.5px;
   }
   .dial-readout {

@@ -13,11 +13,31 @@ test("a fast real demo presents every observed group before settling on the resu
       const seq = Number(current.getAttribute("data-motion-seq"));
       const visits = (window as any).stageVisits;
       if (seq && visits.at(-1)?.group !== group)
-        visits.push({ group, seq, at: performance.now() });
+        visits.push({
+          group,
+          seq,
+          at: performance.now(),
+          ring: document.querySelector<HTMLElement>(
+            '[data-testid="stage-thermometer"]',
+          )?.dataset.currentStage,
+        });
     }).observe(document, { subtree: true, attributes: true, childList: true });
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Translate and execute x86-64 binaries on RISC-V.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Upload binary" }),
+  ).toBeEnabled();
+  await expect(page.locator(".launch-description")).toHaveText(
+    "x86-64 → iced-x86 → Cranelift IR → RV64",
+  );
+  await page.screenshot({ path: info.outputPath("launch-copy-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: info.outputPath("launch-copy-mobile.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("button", { name: "Run demo", exact: true }).click();
   await expect(page).toHaveURL(/run=/);
   const id = new URL(page.url()).searchParams.get("run");
@@ -53,9 +73,13 @@ test("a fast real demo presents every observed group before settling on the resu
     const paused = await page
       .locator(".timeline-step.is-current")
       .getAttribute("data-group");
-    await page.waitForTimeout(1700);
+    await page.waitForTimeout(4300);
     await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
       "data-group",
+      paused!,
+    );
+    await expect(page.getByTestId("stage-thermometer")).toHaveAttribute(
+      "data-current-stage",
       paused!,
     );
     await expect(page.getByTestId("telemetry-gauge")).toHaveAttribute(
@@ -69,7 +93,7 @@ test("a fast real demo presents every observed group before settling on the resu
     await expect(page.getByTestId("pipeline-timeline")).toHaveAttribute(
       "data-reviewing",
       "false",
-      { timeout: 30000 },
+      { timeout: 75000 },
     );
     await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
       "data-group",
@@ -80,8 +104,38 @@ test("a fast real demo presents every observed group before settling on the resu
       .sort((a, b) => a.order - b.order)
       .filter((g) => g.count > 0);
     expect(visits.map((v: any) => v.group)).toEqual(groups.map((g) => g.id));
-    for (let i = 1; i < visits.length; i++)
-      expect(visits[i].at - visits[i - 1].at).toBeGreaterThan(1200);
+    for (let i = 1; i < visits.length; i++) {
+      const dense = ["decode", "audit"].includes(visits[i - 1].group);
+      expect(visits[i].at - visits[i - 1].at).toBeGreaterThan(
+        dense ? 5800 : 3500,
+      );
+    }
+    for (const visit of visits) expect(visit.ring).toBe(visit.group);
+    await expect(page.getByTestId("stage-thermometer")).toHaveAttribute(
+      "data-current-stage",
+      "result",
+    );
+    await expect(
+      page.locator('.stage-thermometer [aria-current="step"]'),
+    ).toHaveCount(1);
+    const titles = [
+      "Initialize Pipeline",
+      "Read ELF Image",
+      "Validate & Map Segments",
+      "Initialize Guest Context",
+      "Disassemble Block",
+      "Verify Safety Policy",
+      "Lift to Cranelift IR",
+      "Compile to RV64",
+      "Commit Block Artifacts",
+      "Execute RV64 Code",
+      "Handle System Call",
+      "Code Cache Status",
+      "Execution Summary",
+    ];
+    await expect(page.locator(".timeline-stage-button strong")).toHaveText(
+      titles,
+    );
     const journal = (
       await (await page.request.get(`/api/pipeline/runs/${id}/journal`)).text()
     )
@@ -115,6 +169,9 @@ test("a fast real demo presents every observed group before settling on the resu
         visits,
         engine_elapsed_ns: final.elapsed_ns,
         all_observed_groups_presented: true,
+        stage_ring_tracks_readable_progression: true,
+        minimum_stage_reading_ms: 4000,
+        dense_stage_reading_ms: 6000,
         hover_opacity_stable: true,
       }),
       contentType: "application/json",

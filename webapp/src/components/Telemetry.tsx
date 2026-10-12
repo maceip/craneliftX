@@ -1,5 +1,6 @@
 import React from "react";
 import { groupState, number, Run, terminal } from "../pipeline";
+import { stageLabel, stageStatus } from "../pipelineCopy";
 
 // A display font, not telemetry: lit pixels spell values from engine receipts.
 const digits: Record<string, string[]> = {
@@ -44,10 +45,12 @@ export function MatrixNumber({ value }: { value: string }) {
 }
 export function TelemetryGauge({
   run,
-  connection,
+  stage,
+  reviewing,
 }: {
   run: Run | null;
-  connection: string;
+  stage: string;
+  reviewing: boolean;
 }) {
   const elapsed = run ? run.elapsed_ns / 1e9 : null;
   // This is a seconds dial, never a percentage-complete ring. It moves only
@@ -56,20 +59,17 @@ export function TelemetryGauge({
   const groups = Object.values(run?.groups ?? {}).sort(
     (a, b) => a.order - b.order,
   );
-  const active = groups
-    .filter((group) => group.active > 0)
-    .sort((a, b) => (b.last_event?.seq ?? 0) - (a.last_event?.seq ?? 0))[0];
-  const executing =
-    run && connection === "live" && !terminal(run.status) && !run.engine_result
-      ? (active?.id ?? run.recent.at(-1)?.group)
-      : null;
+  // The map locates the stage being presented, not each sub-millisecond engine
+  // transition. Observed dots stay lit when that group opens another span.
+  const current = run?.groups[stage]?.count ? stage : null;
   return (
     <div className="telemetry-stack">
       <ol
         className="stage-thermometer"
-        aria-label="Engine operation map"
+        aria-label="Timeline stage map"
         data-testid="stage-thermometer"
-        data-executing={executing ?? ""}
+        data-current-stage={current ?? ""}
+        data-mode={reviewing ? "review" : "inspection"}
         data-cursor={run?.cursor ?? 0}
       >
         {groups.map((group) => {
@@ -79,9 +79,11 @@ export function TelemetryGauge({
               key={group.id}
               data-group={group.id}
               data-state={state}
-              data-executing={executing === group.id}
-              title={`${group.order}. ${group.label} · ${state}`}
-              aria-label={`${group.label}: ${state}${executing === group.id ? ", current engine operation" : ""}`}
+              data-observed={group.count > 0}
+              data-current={current === group.id}
+              aria-current={current === group.id ? "step" : undefined}
+              title={`${group.order}. ${stageLabel(group)} · ${stageStatus(group, run?.status)}`}
+              aria-label={`${stageLabel(group)}: ${stageStatus(group, run?.status)}${current === group.id ? ", displayed stage" : ""}`}
             >
               <span className="thermometer-dot" />
             </li>
@@ -143,7 +145,7 @@ export function PerformanceSummary({ run }: { run: Run }) {
       raw: run.elapsed_ns,
     },
     {
-      label: "RV64 instructions",
+      label: "Target instructions (RV64)",
       value: number(run.counters.rv64_steps),
       color: "mint",
       key: "rv64_steps",
@@ -157,14 +159,14 @@ export function PerformanceSummary({ run }: { run: Run }) {
       raw: run.counters.compiled_blocks,
     },
     {
-      label: "Source instructions",
+      label: "Source lifted (x86 instructions)",
       value: number(run.counters.unique_lifted_instructions),
       color: "ice",
       key: "unique_lifted_instructions",
       raw: run.counters.unique_lifted_instructions,
     },
     {
-      label: "Source bytes lifted",
+      label: "Source lifted (bytes)",
       value: number(run.counters.unique_lifted_bytes),
       color: "lilac",
       key: "unique_lifted_bytes",
@@ -192,7 +194,7 @@ export function PerformanceSummary({ run }: { run: Run }) {
         <div>
           <strong>
             {result.status === "completed"
-              ? "Execution complete"
+              ? "Execution Complete"
               : "Execution failed"}
           </strong>
           <small>
@@ -225,7 +227,7 @@ export function PerformanceSummary({ run }: { run: Run }) {
                 : "Connection verification incomplete"}
             </strong>
             <small>
-              {run.verification.verified_responses} responses checked ·{" "}
+              {run.verification.verified_responses} requests served ·{" "}
               {run.verification.first_connection_responses} on the first
               connection · {run.verification.reconnects_on_first_connection}{" "}
               reconnects

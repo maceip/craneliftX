@@ -29,7 +29,9 @@ const sequence = async (page: Page) =>
   Number(await page.getByTestId("event-sequence").textContent());
 async function upload(page: Page, name: string, buffer: Buffer) {
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Open binary" })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Upload binary" }),
+  ).toBeEnabled();
   await page
     .getByLabel("Choose an x86-64 ELF binary")
     .setInputFiles({ name, mimeType: "application/octet-stream", buffer });
@@ -544,11 +546,20 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
       const map = document.querySelector<HTMLElement>(
         '[data-testid="stage-thermometer"]',
       );
-      if (!map?.dataset.executing) return;
+      if (!map?.dataset.currentStage) return;
       const receipts = (window as any).operationReceipts;
       const seq = Number(map.dataset.cursor);
       if (receipts.length < 500 && receipts.at(-1)?.seq !== seq)
-        receipts.push({ seq, group: map.dataset.executing });
+        receipts.push({
+          seq,
+          group: map.dataset.currentStage,
+          selected: document.querySelector<HTMLElement>(
+            ".timeline-step.is-current",
+          )?.dataset.group,
+          observed: Array.from(
+            map.querySelectorAll<HTMLElement>('[data-observed="true"]'),
+          ).map((dot) => dot.dataset.group),
+        });
     }).observe(document, { subtree: true, attributes: true, childList: true });
     document.addEventListener("animationstart", (event) => {
       const step = (event.target as Element).closest<HTMLElement>(
@@ -583,7 +594,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   expect((await runSummary(page)).status).toBe("running");
   await expect(page.locator(".stage-thermometer li")).toHaveCount(13);
   await expect(
-    page.locator('.stage-thermometer [data-executing="true"]'),
+    page.locator('.stage-thermometer [data-current="true"]'),
   ).toHaveCount(1);
   await page.getByTestId("group-execute").click();
   await page.keyboard.press("Escape");
@@ -713,10 +724,10 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     .toBe(1);
   await expect(page.locator("#timeline-run .completion-detent")).toBeVisible();
   await expect(
-    page.locator('.stage-thermometer [data-executing="true"]'),
+    page.locator('.stage-thermometer [data-current="true"]'),
   ).toHaveCount(1);
   await expect(page.getByTestId("stage-thermometer")).not.toHaveAttribute(
-    "data-executing",
+    "data-current-stage",
     "run",
   );
   await page.screenshot({ path: info.outputPath("scroll-history-mobile.png") });
@@ -757,9 +768,10 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     .poll(async () => (await runSummary(page)).status)
     .toBe("cancelled");
   const final = await snapshot(page);
+  // A steady ring locates the inspected card even when execution has ended.
   await expect(
-    page.locator('.stage-thermometer [data-executing="true"]'),
-  ).toHaveCount(0);
+    page.locator('.stage-thermometer [data-current="true"]'),
+  ).toHaveCount(1);
   await expect(page.getByTestId("event-sequence")).toHaveText(
     String(final.cursor),
   );
@@ -831,14 +843,25 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
       Object.values(final.groups).map((g) => [g.id, blankGroup(g)]),
     ),
   } as Run;
-  const bySeq = new Map(operations.map((r: any) => [r.seq, r.group]));
+  for (let i = 0; i < operations.length; i++) {
+    expect(operations[i].group).toBe(operations[i].selected);
+    if (i > 0)
+      expect(operations[i].observed).toEqual(
+        expect.arrayContaining(operations[i - 1].observed),
+      );
+  }
+  const bySeq = new Map(operations.map((r: any) => [r.seq, r]));
   for (const event of journal) {
     projected = applyLedger(projected, event);
     if (bySeq.has(event.seq)) {
-      const active = Object.values(projected.groups)
-        .filter((g) => g.active > 0)
-        .sort((a, b) => (b.last_event?.seq ?? 0) - (a.last_event?.seq ?? 0))[0];
-      expect(bySeq.get(event.seq)).toBe(active?.id ?? event.group);
+      const receipt: any = bySeq.get(event.seq);
+      expect(projected.groups[receipt.group].count).toBeGreaterThan(0);
+      expect(receipt.observed).toEqual(
+        Object.values(projected.groups)
+          .sort((a, b) => a.order - b.order)
+          .filter((g) => g.count > 0)
+          .map((g) => g.id),
+      );
     }
   }
   await page.reload();
@@ -857,7 +880,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
       values_match_engine: true,
       pause_does_not_pause_events: true,
       scrolling_controls_readability: true,
-      operation_map_matches_engine: operations,
+      stage_map_matches_presented_card_and_observed_receipts: operations,
     }),
     contentType: "application/json",
   });
