@@ -198,9 +198,16 @@
 .focus-shell .timeline-step[data-context="distant"] .timeline-card {
   opacity: 0.1;
 }
-.focus-shell .timeline-step:focus-within .timeline-card,
-.focus-shell .timeline-step:hover .timeline-card {
+.focus-shell .timeline-step:has(:focus-visible) .timeline-card {
   opacity: 1;
+}
+.focus-shell .timeline-stage-button:hover {
+  color: #c8d2c1;
+}
+.evidence-run-caption {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 20px;
 }
 .focus-shell .timeline-stage-button {
   height: 102px;
@@ -938,6 +945,6 @@
   background: #412d23;
   border-color: #80543e;
 }
-.pipeline-timeline[data-motion-enabled="false"] .timeline-card {
+.pipeline-timeline[data-paused="true"] .timeline-card {
   transition: none;
 }

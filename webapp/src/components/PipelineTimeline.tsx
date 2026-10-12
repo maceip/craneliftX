@@ -473,6 +473,7 @@ function TimelineStep({
   onSelect,
   enabled,
   liveAfter,
+  reviewing,
 }: {
   group: Group;
   run: Run | null;
@@ -481,6 +482,7 @@ function TimelineStep({
   onSelect: () => void;
   enabled: boolean;
   liveAfter: number | null;
+  reviewing: boolean;
 }) {
   const element = useRef<HTMLLIElement>(null);
   const [visible, setVisible] = useState(false),
@@ -496,16 +498,28 @@ function TimelineStep({
     return () => observer.disconnect();
   }, []);
   const motion = enabled && visible;
+  const reviewed = useRef(false);
   useEffect(() => {
     const fresh = seq !== seen.current;
+    const enteredReview = reviewing && selected && !reviewed.current;
+    reviewed.current = reviewing && selected;
     seen.current = seq;
-    setFlash(fresh && motion && liveAfter !== null && seq > liveAfter);
-    if (fresh && motion) {
+    const pulse =
+      motion &&
+      ((fresh && liveAfter !== null && seq > liveAfter) ||
+        (enteredReview && seq > 0));
+    setFlash(pulse);
+    if (pulse) {
       const timer = setTimeout(() => setFlash(false), 220);
       return () => clearTimeout(timer);
     }
-  }, [seq, motion, liveAfter]);
-  const busy = motion && group.active > 0 && state === "Active";
+  }, [seq, motion, liveAfter, reviewing, selected]);
+  const busy =
+    motion &&
+    !!run &&
+    !terminal(run.status) &&
+    group.active > 0 &&
+    state === "Active";
   return (
     <li
       ref={element}
@@ -546,7 +560,11 @@ function TimelineStep({
         </button>
         <div className="stage-illustration" data-stage-visual={group.id}>
           <StageVisual group={group} run={run} />
-          <span key={seq} className="receipt-glow" aria-hidden="true" />
+          <span
+            key={`${seq}:${selected}`}
+            className="receipt-glow"
+            aria-hidden="true"
+          />
         </div>
         <div className="timeline-provenance">
           <span>
@@ -578,6 +596,9 @@ export function PipelineTimeline({
   controls,
   status,
   obscured,
+  reviewing,
+  paused,
+  onPause,
 }: {
   groups: Group[];
   run: Run | null;
@@ -590,9 +611,11 @@ export function PipelineTimeline({
   controls: React.ReactNode;
   status: React.ReactNode;
   obscured: boolean;
+  reviewing: boolean;
+  paused: boolean;
+  onPause: (value: boolean) => void;
 }) {
-  const [paused, setPaused] = useState(false),
-    [reduced, setReduced] = useState(false),
+  const [reduced, setReduced] = useState(false),
     [visible, setVisible] = useState(true);
   useEffect(() => {
     const media = matchMedia("(prefers-reduced-motion: reduce)");
@@ -615,8 +638,8 @@ export function PipelineTimeline({
     if (!run || obscured) return;
     const step = document.getElementById(`timeline-${selected}`);
     if (!step) return;
-    // Move naturally to an adjacent observed group. A new reached block can
-    // jump back several groups; never scroll through a fictional stage tour.
+    // Move naturally between adjacent observed groups. The overview's reading
+    // pace is independent of execution; it never creates a group receipt.
     const adjacent =
       following &&
       !paused &&
@@ -673,9 +696,11 @@ export function PipelineTimeline({
     !obscured &&
     !reduced &&
     visible &&
-    connection === "live" &&
+    (connection === "live" ||
+      (reviewing && following && connection === "saved")) &&
     !!run &&
-    !terminal(run.status);
+    (!terminal(run.status) || (reviewing && following));
+  const showPlayback = reviewing || (!!run && !terminal(run.status));
   return (
     <section
       className="pipeline-timeline"
@@ -683,26 +708,34 @@ export function PipelineTimeline({
       data-testid="pipeline-timeline"
       data-motion-enabled={enabled}
       data-following={following}
+      data-reviewing={reviewing}
+      data-paused={paused}
     >
       <div className="focus-transport">
         <div className="focus-stream-caption">{status}</div>
         <div className="timeline-controls">
-          <button
-            type="button"
-            aria-label="Follow live events"
-            aria-pressed={following}
-            onClick={() => onFollow(!following)}
-          >
-            Follow live
-          </button>
-          <button
-            type="button"
-            aria-label={paused ? "Resume animations" : "Pause animations"}
-            aria-pressed={paused}
-            onClick={() => setPaused(!paused)}
-          >
-            {paused ? "Resume motion" : "Pause motion"}
-          </button>
+          {showPlayback && (
+            <>
+              <button
+                type="button"
+                aria-label={
+                  reviewing ? "Follow stage review" : "Follow live events"
+                }
+                aria-pressed={following}
+                onClick={() => onFollow(!following)}
+              >
+                {reviewing ? "Follow stages" : "Follow live"}
+              </button>
+              <button
+                type="button"
+                aria-label={paused ? "Resume animations" : "Pause animations"}
+                aria-pressed={paused}
+                onClick={() => onPause(!paused)}
+              >
+                {paused ? "Resume motion" : "Pause motion"}
+              </button>
+            </>
+          )}
           {controls}
         </div>
       </div>
@@ -726,13 +759,15 @@ export function PipelineTimeline({
               onSelect={() => onSelect(group.id)}
               enabled={enabled}
               liveAfter={liveAfter}
+              reviewing={reviewing && following}
             />
           ))}
         </ol>
       </div>
       <p className="visually-hidden">
-        Motion indicates an open engine span or a newly received event. Values
-        advance only from the ledger.{" "}
+        Motion indicates an open engine span or an observed receipt. Stage
+        review shows recorded operations at a readable pace; values and engine
+        time continue updating independently from the ledger.{" "}
         {reduced ? "Reduced motion is enabled." : ""}
       </p>
     </section>

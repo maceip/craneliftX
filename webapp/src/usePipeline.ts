@@ -10,7 +10,7 @@ export async function request<T>(
     throw new Error(body.error ?? `Request failed (${result.status})`);
   return body;
 }
-export function usePipeline(id: string | null) {
+export function usePipeline(id: string | null, initial: Run | null = null) {
   const [run, setRun] = useState<Run | null>(null),
     [connection, setConnection] = useState("idle");
   const [liveAfter, setLiveAfter] = useState<number | null>(null);
@@ -21,6 +21,9 @@ export function usePipeline(id: string | null) {
       source: EventSource | null = null,
       retry: ReturnType<typeof setTimeout> | undefined;
     let queued: LedgerEvent[] = [];
+    // POST already returns the run at cursor zero. Subscribe from that receipt
+    // immediately so a fast run cannot disappear into a later GET snapshot.
+    let first = initial?.id === id ? initial : null;
     current.current = null;
     setRun(null);
     setLiveAfter(null);
@@ -55,7 +58,9 @@ export function usePipeline(id: string | null) {
         return;
       }
       try {
-        const snapshot = await request<Run>(`/api/pipeline/runs/${id}`);
+        const snapshot =
+          first ?? (await request<Run>(`/api/pipeline/runs/${id}`));
+        first = null;
         if (disposed) return;
         current.current = snapshot;
         setLiveAfter(snapshot.cursor);
@@ -130,6 +135,6 @@ export function usePipeline(id: string | null) {
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
     };
-  }, [id]);
-  return { run, connection, error, liveAfter };
+  }, [id, initial]);
+  return { run: run?.id === id ? run : null, connection, error, liveAfter };
 }

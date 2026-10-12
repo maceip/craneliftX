@@ -15,6 +15,7 @@ import {
   timestamp,
 } from "./pipeline";
 import { request, usePipeline } from "./usePipeline";
+import { useStageFocus } from "./useStageFocus";
 import { PipelineTimeline } from "./components/PipelineTimeline";
 import { TelemetryGauge } from "./components/Telemetry";
 
@@ -328,10 +329,19 @@ export function App() {
     [submitting, setSubmitting] = useState(false);
   const evidence = useRef<HTMLDialogElement>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [initial, setInitial] = useState<Run | null>(null);
+  const [paused, setPaused] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null),
     [setupError, setSetupError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
-    { run, connection, error, liveAfter } = usePipeline(id);
+    { run, connection, error, liveAfter } = usePipeline(id, initial);
+  const { reviewing, endReview } = useStageFocus(
+    run,
+    initial?.id ?? null,
+    following,
+    paused || evidenceOpen,
+    setSelected,
+  );
   const busy = submitting || (!!run && !terminal(run.status));
   useEffect(() => {
     let alive = true;
@@ -360,6 +370,7 @@ export function App() {
   }, [run?.status]);
   useEffect(() => {
     const pop = () => {
+      setInitial(null);
       setFollowing(false);
       setInspection(null);
       setId(new URLSearchParams(location.search).get("run"));
@@ -368,27 +379,11 @@ export function App() {
     return () => removeEventListener("popstate", pop);
   }, []);
   useEffect(() => {
-    const latest = run?.recent.at(-1);
-    if (latest) setSelected(latest.group);
     if (run && !terminal(run.status)) setFollowing(true);
   }, [run?.id]);
-  const latestGroup = useRef<string | undefined>(undefined);
-  latestGroup.current = run?.recent.at(-1)?.group;
-  useEffect(() => {
-    if (!following) return;
-    // Focus samples the latest actual group; the ledger and values still render
-    // every batch. Do not queue a stage tour or chase every short-lived span.
-    const focus = () => {
-      if (latestGroup.current) {
-        setSelected(latestGroup.current);
-        setInspection(null);
-      }
-    };
-    focus();
-    const timer = setInterval(focus, 600);
-    return () => clearInterval(timer);
-  }, [following, run?.id]);
   function selectRun(next: string | null) {
+    setInitial(null);
+    setPaused(false);
     setFollowing(false);
     setInspection(null);
     setActionError(null);
@@ -419,8 +414,9 @@ export function App() {
         body: binary ?? JSON.stringify({ mode: "rust-server" }),
       });
       selectRun(state.id);
+      setInitial(state);
       setFollowing(true);
-      setSelected("ingest");
+      setSelected("run");
       setRaw(false);
     } catch (e) {
       setActionError((e as Error).message);
@@ -464,6 +460,7 @@ export function App() {
       : connection;
   function openEvidence() {
     setFollowing(false);
+    endReview();
     setEvidenceOpen(true);
     evidence.current?.showModal();
   }
@@ -571,23 +568,33 @@ export function App() {
             selected={selected}
             onSelect={(id) => {
               setFollowing(false);
+              endReview();
               setSelected(id);
               setInspection(null);
             }}
             following={following}
-            onFollow={setFollowing}
+            onFollow={(value) => {
+              setFollowing(value);
+              if (value) setInspection(null);
+            }}
+            reviewing={reviewing}
+            paused={paused}
+            onPause={setPaused}
             connection={streamConnection}
             liveAfter={liveAfter}
             obscured={evidenceOpen}
             status={
               <>
-                <span role="status">{connectionLabel[streamConnection]}</span>
-                <span className="mono">
-                  #
-                  {<span data-testid="event-sequence">{run?.cursor ?? 0}</span>}
-                </span>
-                <span className="focus-run-name">
-                  {run?.input_name ?? "Starting execution"}
+                <span role="status">
+                  {reviewing
+                    ? `${
+                        run && terminal(run.status)
+                          ? run.status === "completed"
+                            ? "Engine complete"
+                            : `Run ${run.status}`
+                          : connectionLabel[streamConnection]
+                      } · ${following && !paused ? "Reviewing recorded stages" : "Stage review paused"}`
+                    : connectionLabel[streamConnection]}
                 </span>
               </>
             }
@@ -636,6 +643,10 @@ export function App() {
           </button>
         </div>
         <div className="evidence-body">
+          <p className="evidence-run-caption mono">
+            {run?.input_name ?? "Starting execution"} · Event #
+            <span data-testid="event-sequence">{run?.cursor ?? 0}</span>
+          </p>
           <label className="evidence-group">
             Inspect operation group
             <select

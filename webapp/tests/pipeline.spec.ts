@@ -124,7 +124,9 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   await page.getByRole("button", { name: "Run demo" }).click();
   await expect(page).toHaveURL(/run=/);
   await expect(page.locator(".timeline-stage-button")).toHaveCount(13);
-  await expect(page.getByText("Live stream", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Live stream" }),
+  ).toBeVisible();
   await expect.poll(() => sequence(page)).toBeGreaterThan(100);
   const before = await runSummary(page),
     first = await sequence(page);
@@ -395,7 +397,9 @@ test("16 MiB input keeps the browser live through hundreds of lazy compilations 
       readFileSync(join(tmpdir(), "isr-e2e-stack-8878.json"), "utf8"),
     );
     writeFileSync(metadata.control, "proxy");
-    await expect(page.getByText("Reconnecting", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Reconnecting" }),
+    ).toBeVisible();
     const interruptedCursor = await sequence(page);
     await expect
       .poll(() => sequence(page), { timeout: 30000 })

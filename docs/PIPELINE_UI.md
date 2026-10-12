@@ -58,11 +58,13 @@ resume from the last stored sequence after a transport disconnect. Conflicting
 replays, sequence gaps, and changed run identities fail instead of advancing
 the display. The retained engine journal is reconciled after process exit.
 
-The browser first loads a bounded snapshot, then consumes `event: ledger` over
-SSE. It applies each event in sequence and publishes batches every 50 ms (or
+A newly launched run subscribes from the cursor in its POST response, preserving
+early receipts even when execution is faster than another snapshot request.
+Existing runs first load a bounded snapshot, then consume `event: ledger` over SSE. It applies each event in sequence and publishes batches every 50 ms (or
 128 queued events). This batches rendering, not translation. Reconnects use
 `Last-Event-ID`; reloads resume from the saved snapshot. A sequence gap triggers
-snapshot recovery. No stage is advanced by a timer or estimated percentage.
+snapshot recovery. Execution states and values never advance from a timer or
+estimated percentage; presentation focus has a separate reading pace.
 
 `event: coordinator` carries process lifecycle and host test-client results
 separately, without impersonating an engine event or consuming an engine
@@ -124,19 +126,28 @@ bytes, block IDs, emitted code sizes, artifact hashes, and runtime counters.
 Sphere dots correspond one-for-one to observed groups or decoded instructions.
 Related decode/CLIF/RV64 values are joined only when their block IDs match.
 
-Motion has two meanings: a repeating illustration indicates a visible, open
-engine span; a short pulse indicates a newly received event. Neither advances a
-counter, declares completion, or estimates progress. Snapshots do not replay
-old animations. Offscreen cards, hidden tabs, disconnected streams, saved runs,
-reduced-motion preferences and **Pause animations** suppress motion. Pausing
-animations leaves the live ledger and values updating. Terminal state and
-failure colors still require their actual engine/coordinator evidence.
+A new run presents every observed group in catalog order, with at least 1.4
+seconds of reading time per card. This is a **stage overview**, not a replay of
+execution timing: the ledger and card values continue updating every 50 ms.
+If the engine finishes before the overview, the caption immediately reads
+**Engine complete · Reviewing recorded stages** and the gauge retains the actual
+engine duration. Failed or cancelled runs skip groups with no events. No unseen
+group becomes successful to fill the overview.
 
-**Follow live events** samples the most recently received group every 600 ms
-and centers its card in the viewport. The ledger still publishes its normal
-50 ms batches. Focus may skip operations that complete between samples; it never
-queues a fictional linear tour. User scrolling, selecting a stage, or pinning a
-ledger record stops following. Saved runs open with following disabled.
+A repeating illustration indicates a visible, open engine span. A short pulse
+marks a newly received receipt or an observed receipt entering stage review.
+Terminal runs never show active-span loops. Saved runs opened from history do
+not automatically replay animations. Offscreen cards, hidden tabs, disconnected
+streams and reduced-motion preferences suppress motion. **Pause motion** also
+pauses automatic screen progression, while the ledger keeps updating.
+
+After the initial overview, **Follow live** samples the latest group every
+600 ms for executions still running. User scrolling pauses following; selecting
+a card or opening Evidence leaves the overview. Playback controls disappear
+when execution and stage review have both ended. Pointer hover does not change
+card opacity; dimming tracks selection, with keyboard-focus visibility preserved.
+The filename and event cursor appear inside Evidence instead of the floating
+controls.
 
 The floating seconds dial uses `run.elapsed_ns`, the latest emitted engine
 monotonic timestamp. It does not interpolate missing engine time or imply a
@@ -203,6 +214,9 @@ It exercises:
   after an nginx restart. Padding is never counted as lifted source.
 - Browser offline recovery, unsupported instructions, invalid ELF input,
   cancellation, bounded live rows, desktop/mobile layout, and raw event replay.
+- A fast real Rust server run showing all 13 observed groups before the result,
+  independently measured engine time during review, paused progression and
+  stable neighboring-card opacity on hover.
 - Live timeline animations matched to journal sequence numbers, real instruction
   and mapping values, visible previous/current/next cards on desktop and mobile,
   and motion pause/reduced-motion/offline behavior while a real syscall loop runs.
