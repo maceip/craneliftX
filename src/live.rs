@@ -233,6 +233,10 @@ fn request(stream: &mut TcpStream) -> io::Result<(String, u64)> {
     Ok((path.to_owned(), after))
 }
 fn serve(mut stream: TcpStream, source: Source, stop: Arc<AtomicBool>) -> io::Result<()> {
+    // Accepted sockets inherit the listener's nonblocking mode on macOS.
+    // Each subscriber has its own thread and bounded I/O deadlines, so wait
+    // for fragmented headers instead of turning WouldBlock into HTTP 400.
+    stream.set_nonblocking(false)?;
     let (path, after) = match request(&mut stream) {
         Ok(r) => r,
         Err(e) => {

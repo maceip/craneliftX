@@ -54,6 +54,9 @@ fn connect(feed: &LiveFeed, target: &str, headers: &str) -> BufReader<TcpStream>
         "GET {target} HTTP/1.1\r\nHost: {address}\r\n{headers}\r\n"
     )
     .unwrap();
+    response(stream)
+}
+fn response(stream: TcpStream) -> BufReader<TcpStream> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
@@ -66,6 +69,39 @@ fn connect(feed: &LiveFeed, target: &str, headers: &str) -> BufReader<TcpStream>
         }
     }
     reader
+}
+#[test]
+fn live_service_accepts_headers_split_across_delayed_tcp_writes() {
+    let fixture = Fixture::new();
+    let mut ledger = fixture.ledger();
+    let feed = ledger.serve_events(bind()).unwrap();
+    let endpoint = feed.endpoint();
+    let address = endpoint
+        .strip_prefix("http://")
+        .unwrap()
+        .strip_suffix("/events")
+        .unwrap();
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    // Accept the connection before any request bytes arrive, then send valid
+    // headers in separate TCP writes. A partial header is not a bad request.
+    for part in [
+        b"GET /events HTTP/1.1\r\n".as_slice(),
+        b"Host: localhost\r\n".as_slice(),
+        b"\r\n".as_slice(),
+    ] {
+        thread::sleep(Duration::from_millis(40));
+        stream.write_all(part).unwrap();
+    }
+    let mut reader = response(stream);
+    ledger.event("started", json!({})).unwrap();
+    assert_eq!(event(&mut reader)["seq"], 1);
+    ledger
+        .event("result", json!({"status":"completed"}))
+        .unwrap();
+    assert_eq!(event(&mut reader)["type"], "result");
 }
 fn event(reader: &mut BufReader<TcpStream>) -> Value {
     let mut id = None;
