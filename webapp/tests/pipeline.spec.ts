@@ -562,6 +562,17 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
 }, info) => {
   await page.addInitScript(() => {
     (window as any).motionReceipts = [];
+    (window as any).operationReceipts = [];
+    new MutationObserver(() => {
+      const map = document.querySelector<HTMLElement>(
+        '[data-testid="stage-thermometer"]',
+      );
+      if (!map?.dataset.executing) return;
+      const receipts = (window as any).operationReceipts;
+      const seq = Number(map.dataset.cursor);
+      if (receipts.length < 500 && receipts.at(-1)?.seq !== seq)
+        receipts.push({ seq, group: map.dataset.executing });
+    }).observe(document, { subtree: true, attributes: true, childList: true });
     document.addEventListener("animationstart", (event) => {
       const step = (event.target as Element).closest<HTMLElement>(
         ".timeline-step",
@@ -593,6 +604,10 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await upload(page, "timeline-syscalls.elf", program);
   await expect.poll(() => sequence(page)).toBeGreaterThan(100);
   expect((await runSummary(page)).status).toBe("running");
+  await expect(page.locator(".stage-thermometer li")).toHaveCount(13);
+  await expect(
+    page.locator('.stage-thermometer [data-executing="true"]'),
+  ).toHaveCount(1);
   await page.getByTestId("group-execute").click();
   await page
     .locator("#timeline-execute")
@@ -708,11 +723,65 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     "data-group",
     selected!,
   );
+  // Read earlier work by scrolling, without changing selection or pretending
+  // the engine moved back to those operations.
+  await page.mouse.wheel(0, -20000);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  const firstCard = page.locator("#timeline-run .timeline-card");
+  await expect
+    .poll(() =>
+      firstCard.evaluate((el) => Number(getComputedStyle(el).opacity)),
+    )
+    .toBe(1);
+  await expect(page.locator("#timeline-run .completion-detent")).toBeVisible();
+  await expect(
+    page.locator('.stage-thermometer [data-executing="true"]'),
+  ).toHaveCount(1);
+  await expect(page.getByTestId("stage-thermometer")).not.toHaveAttribute(
+    "data-executing",
+    "run",
+  );
+  await page.screenshot({ path: info.outputPath("scroll-history-mobile.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page
+    .locator("#timeline-ingest")
+    .evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await expect
+    .poll(() =>
+      page
+        .locator("#timeline-ingest .timeline-card")
+        .evaluate((el) => Number(getComputedStyle(el).opacity)),
+    )
+    .toBe(1);
+  await expect(
+    page.locator("#timeline-ingest .completion-detent"),
+  ).toHaveAttribute("aria-label", "Completed in this run");
+  await expect(
+    page.locator("#timeline-ingest .stage-illustration > div"),
+  ).toHaveCSS("opacity", "1");
+  await page.screenshot({
+    path: info.outputPath("scroll-history-desktop.png"),
+  });
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page
+    .locator("#timeline-ingest")
+    .evaluate((el) => el.scrollIntoView({ block: "center" }));
+  const gauge = await page.getByTestId("telemetry-gauge").boundingBox();
+  const heading = await page
+    .locator("#timeline-ingest .timeline-stage-button")
+    .boundingBox();
+  expect(gauge!.y + gauge!.height).toBeLessThan(heading!.y + 40);
+  await page.screenshot({
+    path: info.outputPath("scroll-history-small-mobile.png"),
+  });
   await page.getByRole("button", { name: "Stop execution" }).click();
   await expect
     .poll(async () => (await runSummary(page)).status)
     .toBe("cancelled");
   const final = await snapshot(page);
+  await expect(
+    page.locator('.stage-thermometer [data-executing="true"]'),
+  ).toHaveCount(0);
   await expect(page.getByTestId("event-sequence")).toHaveText(
     String(final.cursor),
   );
@@ -768,6 +837,32 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   expect(motions.some((m: any) => m.kind === "receipt")).toBe(true);
   for (const motion of motions)
     expect(journal[motion.seq - 1]?.group).toBe(motion.group);
+  const operations = await page.evaluate(
+    () => (window as any).operationReceipts,
+  );
+  expect(operations.length).toBeGreaterThan(0);
+  let projected = {
+    ...final,
+    cursor: 0,
+    status: "running",
+    recent: [],
+    history: [],
+    engine_result: null,
+    engine_run_id: null,
+    groups: Object.fromEntries(
+      Object.values(final.groups).map((g) => [g.id, blankGroup(g)]),
+    ),
+  } as Run;
+  const bySeq = new Map(operations.map((r: any) => [r.seq, r.group]));
+  for (const event of journal) {
+    projected = applyLedger(projected, event);
+    if (bySeq.has(event.seq)) {
+      const active = Object.values(projected.groups)
+        .filter((g) => g.active > 0)
+        .sort((a, b) => (b.last_event?.seq ?? 0) - (a.last_event?.seq ?? 0))[0];
+      expect(bySeq.get(event.seq)).toBe(active?.id ?? event.group);
+    }
+  }
   await page.reload();
   await expect(timeline).toHaveAttribute("data-motion-enabled", "false");
   await expect(
@@ -783,6 +878,8 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
       desktop_and_mobile_neighbors_visible: true,
       values_match_engine: true,
       pause_does_not_pause_events: true,
+      scrolling_controls_readability: true,
+      operation_map_matches_engine: operations,
     }),
     contentType: "application/json",
   });

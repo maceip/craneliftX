@@ -1,5 +1,5 @@
 import React from "react";
-import { number, Run, terminal } from "../pipeline";
+import { groupState, number, Run, terminal } from "../pipeline";
 
 // A display font, not telemetry: lit pixels spell values from engine receipts.
 const digits: Record<string, string[]> = {
@@ -42,49 +42,94 @@ export function MatrixNumber({ value }: { value: string }) {
     </svg>
   );
 }
-export function TelemetryGauge({ run }: { run: Run | null }) {
+export function TelemetryGauge({
+  run,
+  connection,
+}: {
+  run: Run | null;
+  connection: string;
+}) {
   const elapsed = run ? run.elapsed_ns / 1e9 : null;
   // This is a seconds dial, never a percentage-complete ring. It moves only
   // when an engine receipt supplies a new monotonic elapsed timestamp.
   const angle = elapsed === null ? null : ((elapsed % 60) * Math.PI) / 30;
+  const groups = Object.values(run?.groups ?? {}).sort(
+    (a, b) => a.order - b.order,
+  );
+  const active = groups
+    .filter((group) => group.active > 0)
+    .sort((a, b) => (b.last_event?.seq ?? 0) - (a.last_event?.seq ?? 0))[0];
+  const executing =
+    run && connection === "live" && !terminal(run.status) && !run.engine_result
+      ? (active?.id ?? run.recent.at(-1)?.group)
+      : null;
   return (
-    <aside
-      className="telemetry-gauge"
-      aria-label="Recorded engine time"
-      data-testid="telemetry-gauge"
-      data-elapsed-ns={run?.elapsed_ns}
-      data-terminal={run ? terminal(run.status) : false}
-    >
-      <svg className="telemetry-dial" viewBox="0 0 160 160" aria-hidden="true">
-        <circle className="dial-outline" cx="80" cy="80" r="69" />
-        {Array.from({ length: 60 }, (_, i) => {
-          const a = (i * Math.PI) / 30,
-            inner = i % 5 === 0 ? 57 : 62;
+    <div className="telemetry-stack">
+      <ol
+        className="stage-thermometer"
+        aria-label="Engine operation map"
+        data-testid="stage-thermometer"
+        data-executing={executing ?? ""}
+        data-cursor={run?.cursor ?? 0}
+      >
+        {groups.map((group) => {
+          const state = groupState(group, run?.status);
           return (
-            <line
-              key={i}
-              x1={80 + Math.sin(a) * inner}
-              y1={80 - Math.cos(a) * inner}
-              x2={80 + Math.sin(a) * 66}
-              y2={80 - Math.cos(a) * 66}
-            />
+            <li
+              key={group.id}
+              data-group={group.id}
+              data-state={state}
+              data-executing={executing === group.id}
+              title={`${group.order}. ${group.label} · ${state}`}
+              aria-label={`${group.label}: ${state}${executing === group.id ? ", current engine operation" : ""}`}
+            >
+              <span className="thermometer-dot" />
+            </li>
           );
         })}
-        {angle !== null && (
-          <circle
-            className="dial-position"
-            cx={80 + Math.sin(angle) * 69}
-            cy={80 - Math.cos(angle) * 69}
-            r="3"
-          />
-        )}
-      </svg>
-      <div className="dial-readout">
-        <small>ENGINE TIME</small>
-        <MatrixNumber value={elapsed === null ? "—" : elapsed.toFixed(1)} />
-        <span>seconds</span>
-      </div>
-    </aside>
+      </ol>
+      <aside
+        className="telemetry-gauge"
+        aria-label="Recorded engine time"
+        data-testid="telemetry-gauge"
+        data-elapsed-ns={run?.elapsed_ns}
+        data-terminal={run ? terminal(run.status) : false}
+      >
+        <svg
+          className="telemetry-dial"
+          viewBox="0 0 160 160"
+          aria-hidden="true"
+        >
+          <circle className="dial-outline" cx="80" cy="80" r="69" />
+          {Array.from({ length: 60 }, (_, i) => {
+            const a = (i * Math.PI) / 30,
+              inner = i % 5 === 0 ? 57 : 62;
+            return (
+              <line
+                key={i}
+                x1={80 + Math.sin(a) * inner}
+                y1={80 - Math.cos(a) * inner}
+                x2={80 + Math.sin(a) * 66}
+                y2={80 - Math.cos(a) * 66}
+              />
+            );
+          })}
+          {angle !== null && (
+            <circle
+              className="dial-position"
+              cx={80 + Math.sin(angle) * 69}
+              cy={80 - Math.cos(angle) * 69}
+              r="3"
+            />
+          )}
+        </svg>
+        <div className="dial-readout">
+          <small>ENGINE TIME</small>
+          <MatrixNumber value={elapsed === null ? "—" : elapsed.toFixed(1)} />
+          <span>seconds</span>
+        </div>
+      </aside>
+    </div>
   );
 }
 export function PerformanceSummary({ run }: { run: Run }) {

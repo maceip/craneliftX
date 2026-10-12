@@ -145,9 +145,19 @@ After the initial overview, **Follow live** samples the latest group every
 600 ms for executions still running. User scrolling pauses following; selecting
 a card or opening Evidence leaves the overview. Playback controls disappear
 when execution and stage review have both ended. Pointer hover does not change
-card opacity; dimming tracks selection, with keyboard-focus visibility preserved.
+card opacity. Readability follows intersection with the middle of the viewport,
+so scrolling back makes earlier operations bright without changing engine state.
+Completed spans and observed receipts retain a small side notch; missing or
+failed operations never receive a completion mark. Keyboard focus stays visible.
 The filename and event cursor appear inside Evidence instead of the floating
 controls.
+
+Above the seconds dial, a thermometer contains one dot per catalog group. A
+light ring marks the most recently updated open engine span, falling back to
+the latest emitted group only when no span is open. It is independent of
+scroll position and stage review. The ring disappears on disconnect, engine
+result, cancellation or terminal coordinator state; each dot retains its actual
+recorded status.
 
 The floating seconds dial uses `run.elapsed_ns`, the latest emitted engine
 monotonic timestamp. It does not interpolate missing engine time or imply a
@@ -220,6 +230,8 @@ It exercises:
 - Live timeline animations matched to journal sequence numbers, real instruction
   and mapping values, visible previous/current/next cards on desktop and mobile,
   and motion pause/reduced-motion/offline behavior while a real syscall loop runs.
+  Scrolling to earlier cards restores readability; the thermometer ring is
+  reconciled against the exact ledger at each sampled cursor.
 
 The Python suite additionally cuts a real engine SSE TCP connection and verifies
 live resubscription from the committed cursor, exact journal reconciliation,

@@ -486,7 +486,8 @@ function TimelineStep({
 }) {
   const element = useRef<HTMLLIElement>(null);
   const [visible, setVisible] = useState(false),
-    [flash, setFlash] = useState(false);
+    [flash, setFlash] = useState(false),
+    [prominence, setProminence] = useState(0);
   const seq = group.last_event?.seq ?? 0,
     seen = useRef(seq);
   const state = groupState(group, run?.status);
@@ -496,6 +497,31 @@ function TimelineStep({
     );
     if (element.current) observer.observe(element.current);
     return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    let observer: IntersectionObserver;
+    const observe = () => {
+      observer?.disconnect();
+      // The center 60% of the viewport controls readability, independently of
+      // selection and engine activity. No scroll listener or animation loop.
+      const inset = Math.round(innerHeight * 0.2);
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          setProminence(entry.intersectionRatio);
+        },
+        {
+          rootMargin: `-${inset}px 0px -${inset}px 0px`,
+          threshold: Array.from({ length: 21 }, (_, i) => i / 20),
+        },
+      );
+      if (element.current) observer.observe(element.current);
+    };
+    observe();
+    window.addEventListener("resize", observe);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", observe);
+    };
   }, []);
   const motion = enabled && visible;
   const reviewed = useRef(false);
@@ -530,10 +556,27 @@ function TimelineStep({
       data-state={state}
       data-motion={busy ? "active-span" : flash ? "receipt" : "off"}
       data-motion-seq={seq || undefined}
+      data-prominence={prominence.toFixed(2)}
+      data-completed={state === "Completed"}
+      style={
+        {
+          "--card-opacity": 0.42 + Math.min(1, prominence / 0.75) * 0.58,
+        } as React.CSSProperties
+      }
     >
       <span className="timeline-node" aria-hidden="true">
         {String(group.order).padStart(2, "0")}
       </span>
+      {["Completed", "Observed"].includes(state) && (
+        <span
+          className="completion-detent"
+          aria-label={
+            state === "Completed"
+              ? "Completed in this run"
+              : "Recorded in this run"
+          }
+        />
+      )}
       <div className="timeline-card">
         <button
           type="button"
@@ -636,6 +679,12 @@ export function PipelineTimeline({
   const previousFocus = useRef({ id: "", index: -1 });
   useLayoutEffect(() => {
     if (!run || obscured) return;
+    if (
+      !following &&
+      previousFocus.current.id === run.id &&
+      previousFocus.current.index === index
+    )
+      return;
     const step = document.getElementById(`timeline-${selected}`);
     if (!step) return;
     // Move naturally between adjacent observed groups. The overview's reading

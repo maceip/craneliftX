@@ -178,6 +178,7 @@
   background: var(--surface);
   box-shadow: none;
   height: var(--scene-height);
+  opacity: var(--card-opacity, 0.42);
   transition:
     opacity 200ms ease-out,
     border-color 200ms ease-out;
@@ -191,12 +192,16 @@
   color: var(--accent);
   border-color: var(--accent);
 }
-.focus-shell .timeline-step[data-context="previous"] .timeline-card,
-.focus-shell .timeline-step[data-context="next"] .timeline-card {
-  opacity: 0.32;
-}
-.focus-shell .timeline-step[data-context="distant"] .timeline-card {
-  opacity: 0.1;
+.completion-detent {
+  position: absolute;
+  z-index: 1;
+  top: 24px;
+  left: 0;
+  width: 3px;
+  height: 32px;
+  border-radius: 0 3px 3px 0;
+  background: #849c72;
+  opacity: 0.7;
 }
 .focus-shell .timeline-step:has(:focus-visible) .timeline-card {
   opacity: 1;
@@ -235,8 +240,8 @@
   height: calc(var(--scene-height) - 146px);
   padding: 20px var(--stage-inset);
 }
-.focus-shell .stage-illustration > div,
-.focus-shell .stage-illustration > ul {
+.focus-shell .timeline-step .stage-illustration > div,
+.focus-shell .timeline-step .stage-illustration > ul {
   opacity: 1;
 }
 .focus-shell .stage-illustration strong {
@@ -558,12 +563,62 @@
   color: var(--muted);
   font-size: 11px;
 }
-.telemetry-gauge {
+.telemetry-stack {
   position: fixed;
   z-index: 5;
   right: 28px;
   bottom: 116px;
   width: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.stage-thermometer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 10px 8px;
+  border: 1px solid #384332;
+  border-radius: 20px;
+  background: #111610f2;
+}
+.stage-thermometer li {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.thermometer-dot {
+  position: relative;
+  width: 5px;
+  height: 5px;
+  border: 1px solid #66715a;
+  border-radius: 50%;
+  background: #22291f;
+}
+.stage-thermometer [data-state="Completed"] .thermometer-dot,
+.stage-thermometer [data-state="Observed"] .thermometer-dot {
+  background: #98aa7f;
+  border-color: #98aa7f;
+}
+.stage-thermometer [data-state="Failed"] .thermometer-dot {
+  background: #dd835d;
+  border-color: #dd835d;
+}
+.stage-thermometer [data-executing="true"] .thermometer-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1px solid #f1ae73;
+  border-radius: 50%;
+  box-shadow: 0 0 7px #f697584d;
+}
+.telemetry-gauge {
+  position: relative;
+  width: 100%;
   height: 168px;
   color: #d8b579;
   border-radius: 50%;
@@ -701,12 +756,24 @@
   background: #9ac67c;
 }
 @media (max-width: 1120px) {
-  .telemetry-gauge {
+  .telemetry-stack {
     width: 116px;
-    height: 116px;
     right: 20px;
     top: 16px;
     bottom: auto;
+  }
+  .telemetry-gauge {
+    height: 116px;
+  }
+  .stage-thermometer {
+    padding: 6px;
+  }
+  .stage-thermometer li {
+    width: 12px;
+    height: 10px;
+  }
+  .stage-thermometer [data-executing="true"] .thermometer-dot::after {
+    inset: -3px;
   }
   .dial-readout {
     padding: 25px;
@@ -848,11 +915,28 @@
   .focus-run-name {
     max-width: 115px;
   }
+  .telemetry-stack {
+    width: 78px;
+    right: 12px;
+    top: 8px;
+    gap: 4px;
+  }
   .telemetry-gauge {
-    width: 98px;
-    height: 98px;
-    right: 16px;
-    top: 12px;
+    height: 78px;
+  }
+  .stage-thermometer {
+    padding: 5px;
+  }
+  .stage-thermometer li {
+    width: 10px;
+    height: 6px;
+  }
+  .thermometer-dot {
+    width: 3px;
+    height: 3px;
+  }
+  .stage-thermometer [data-executing="true"] .thermometer-dot::after {
+    inset: -2.5px;
   }
   .dial-readout {
     padding: 23px;
@@ -913,6 +997,32 @@
 @media (prefers-reduced-motion: reduce) {
   .focus-shell * {
     transition: none !important;
+  }
+}
+
+@media (max-width: 720px) and (max-height: 740px) {
+  .telemetry-stack {
+    width: 68px;
+    top: 4px;
+  }
+  .telemetry-gauge {
+    height: 68px;
+  }
+  .stage-thermometer {
+    padding: 4px;
+  }
+  .stage-thermometer li {
+    height: 4px;
+  }
+  .thermometer-dot {
+    width: 2px;
+    height: 2px;
+  }
+  .dial-readout {
+    padding: 14px;
+  }
+  .dial-readout .matrix-number {
+    height: 16px;
   }
 }
 

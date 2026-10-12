@@ -561,7 +561,7 @@ export function App() {
                 {run.message}
               </p>
             )}
-          <TelemetryGauge run={run} />
+          <TelemetryGauge run={run} connection={streamConnection} />
           <PipelineTimeline
             groups={groups}
             run={run}
