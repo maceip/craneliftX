@@ -14,6 +14,20 @@ for (const viewport of [
       page,
     }, info) => {
       await page.setViewportSize(viewport);
+      await page.addInitScript(() => {
+        (window as any).stageChanges = [];
+        new MutationObserver(() => {
+          const id = document.querySelector<HTMLElement>(
+            ".timeline-step.is-current",
+          )?.dataset.group;
+          const changes: string[] = (window as any).stageChanges;
+          if (id && changes.at(-1) !== id) changes.push(id);
+        }).observe(document, {
+          subtree: true,
+          attributes: true,
+          childList: true,
+        });
+      });
       const writes: string[] = [];
       page.on("request", (r) => {
         if (r.method() === "POST") writes.push(new URL(r.url()).pathname);
@@ -123,6 +137,12 @@ for (const viewport of [
             ),
           });
         }
+        // The ring must not jump ahead, back and ahead again during a forward
+        // click. It follows the viewed card throughout the scroll transition.
+        const stageChanges = await page.evaluate(
+          () => (window as any).stageChanges,
+        );
+        expect(stageChanges).toEqual(groups.map((g) => g.id));
         // Hovering a neighbor must not abruptly dim either card.
         const neighbor = page.locator("#timeline-cache .timeline-card");
         await page.mouse.move(5, 5);
@@ -179,6 +199,7 @@ for (const viewport of [
             body: JSON.stringify({
               id,
               visits,
+              stage_changes: stageChanges,
               engine_elapsed_ns: final.elapsed_ns,
               all_observed_groups_presented: true,
               stage_ring_tracks_manual_navigation: true,

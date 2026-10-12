@@ -610,7 +610,6 @@ export function App() {
               setInspection(null);
             }}
             onSelect={(id, revisit) => {
-              setSelected(id);
               setInspection(null);
               setRestartGroup(revisit ? id : null);
             }}

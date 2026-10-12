@@ -243,7 +243,8 @@ It exercises:
 - Desktop and mobile walkthroughs of all 13 cards from a real Rust server run:
   the engine completes while the first card stays selected, even after seven
   idle seconds; wheel/click navigation, readable centered cards and one matching
-  thermometer ring; unchanged recorded timing and no navigation API writes.
+  thermometer ring; no backward ring jumps during forward navigation; unchanged
+  recorded timing and no navigation API writes.
 - Live timeline animations matched to journal sequence numbers, real instruction
   and mapping values, visible previous/current/next cards on desktop and mobile,
   and motion pause/reduced-motion/offline behavior while a real syscall loop runs.

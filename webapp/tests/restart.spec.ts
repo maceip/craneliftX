@@ -45,7 +45,15 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   const before = (await footer.boundingBox())!.height;
   // First visits navigate. Returning to a previously visited card offers restart.
   await page.getByTestId("group-lower").click();
+  await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+    "data-group",
+    "lower",
+  );
   await page.getByTestId("group-audit").click();
+  await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+    "data-group",
+    "audit",
+  );
   // Click the illustration, not just the header button.
   await page.locator("#timeline-lower .stage-illustration").click();
   const panel = page.getByRole("region", {
@@ -80,6 +88,10 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   await expect(panel).toHaveCount(0);
   await expect(page.getByTestId("group-lower")).toBeFocused();
   await page.getByTestId("group-audit").click();
+  await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+    "data-group",
+    "audit",
+  );
   await expect(panel).toContainText(
     `Restart Analysis from ${stageLabel(original.groups.audit)} ?`,
   );
@@ -155,7 +167,15 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
   const originalId = currentId(page)!;
   await expect.poll(async () => (await state(page)).cursor).toBeGreaterThan(50);
   await page.getByTestId("group-initialize").click();
+  await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+    "data-group",
+    "initialize",
+  );
   await page.getByTestId("group-decode").click();
+  await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+    "data-group",
+    "decode",
+  );
   await page.locator("#timeline-initialize .stage-illustration").click();
   const original = await state(page);
   const panel = page.getByRole("region", {

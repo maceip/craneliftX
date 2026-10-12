@@ -704,10 +704,13 @@ export function PipelineTimeline({
     observed.current = selected;
     center(selected);
   }, [run?.id, catalog]);
+  const wasObscured = useRef(obscured);
   useLayoutEffect(() => {
-    if (obscured || observed.current === selected) return;
-    observed.current = selected;
-    center(selected);
+    if (wasObscured.current && !obscured) {
+      observed.current = selected;
+      center(selected);
+    }
+    wasObscured.current = obscured;
   }, [selected, obscured]);
   useEffect(() => {
     if (!run || obscured) return;
@@ -753,8 +756,9 @@ export function PipelineTimeline({
   }, [run?.id, obscured, catalog]);
   function selectCard(id: string) {
     const revisit = departed.current.has(id);
-    if (observed.current !== id) departed.current.add(observed.current);
-    observed.current = id;
+    // Let the viewport observer select the destination when it is actually
+    // reached. Preselecting here makes the ring jump forward/back/forward as
+    // the outgoing card crosses the center band during smooth scrolling.
     onSelect(id, revisit);
     center(id, reduced ? "instant" : "smooth");
   }
