@@ -440,6 +440,7 @@ export function PipelineTimeline({
           (groups.find((s) => s.id === selected)?.count ?? 0) > 0
         }
         reduced={reduced}
+        suspended={!!confirmation}
         run={run}
       />
       <TelemetryGauge

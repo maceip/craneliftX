@@ -57,9 +57,12 @@ The embedded renderer uses a 24 fps direct-render mode at a maximum 1x pixel
 ratio. It preserves the delivered geometry, materials, camera and mechanics,
 while omitting the standalone bloom, multisample and 2048 px shadow passes.
 The original full-quality mode remains the default for standalone embedding.
-The background pauses during restart confirmation so the controls can animate
-without competing with it. CI explicitly exercises software-rendered WebGL;
+The background pauses and defers scene changes during restart confirmation so
+the controls can animate without competing with a WebGL redraw. CI explicitly exercises software-rendered WebGL;
 `ISR_SOFTWARE_WEBGL=1` selects the same path in local browser checks.
+Screenshot checkpoints use the actual Pause control so slow image encoding
+cannot consume the phase being inspected. A separate browser frame sampler
+requires all five phases to appear in order while the walkthrough plays.
 The [factory correction handoff](FACTORY_HANDOFF.md) defines their nine scene
 states, Cranelift/RV64 copy and reader-controlled animation contract before integration.
 

@@ -394,6 +394,17 @@ test("cancellation interrupts open spans and never manufactures an engine result
 test("16 MiB input keeps the browser live through hundreds of lazy compilations and an nginx restart", async ({
   page,
 }, info) => {
+  await page.addInitScript(() => {
+    (window as any).connectionStates = [];
+    new MutationObserver(() => {
+      const text = document.querySelector('[role="status"]')?.textContent ?? "";
+      const states = (window as any).connectionStates;
+      if (text && states.at(-1)?.text !== text)
+        states.push({ text, seq: Number(document.querySelector(
+          '[data-testid="event-sequence"]',
+        )?.textContent ?? 0) });
+    }).observe(document, { subtree: true, childList: true, characterData: true });
+  });
   const blocks = 256;
   const add = Buffer.from([0x48, 0x83, 0xc0, 1]),
     jump = Buffer.from([0xe9, 0, 0, 0, 0]);
@@ -416,23 +427,28 @@ test("16 MiB input keeps the browser live through hundreds of lazy compilations 
     .toBeGreaterThan(10);
   const first = await sequence(page);
   expect((await runSummary(page)).status).toBe("running");
-  await page.screenshot({
-    path: info.outputPath("large-live.png"),
-    fullPage: true,
-  });
   if (!process.env.ISR_BASE_URL) {
     const metadata = JSON.parse(
       readFileSync(join(tmpdir(), "isr-e2e-stack-8878.json"), "utf8"),
     );
+    await page.evaluate(() => { (window as any).connectionStates = []; });
     writeFileSync(metadata.control, "proxy");
-    await expect(
-      page.getByRole("status").filter({ hasText: "Reconnecting" }),
-    ).toBeVisible();
-    const interruptedCursor = await sequence(page);
+    // The real one-second outage can recover between automation round trips.
+    // Retain its rendered state and cursor inside the browser as it happens.
+    await expect.poll(() => page.evaluate(() =>
+      (window as any).connectionStates.some((s: any) => s.text.includes("Reconnecting")),
+    )).toBe(true);
+    const interruptedCursor = await page.evaluate(() =>
+      (window as any).connectionStates.find((s: any) => s.text.includes("Reconnecting")).seq,
+    );
     await expect
       .poll(() => sequence(page), { timeout: 30000 })
       .toBeGreaterThan(interruptedCursor);
   }
+  await page.screenshot({
+    path: info.outputPath("large-reconnected.png"),
+    fullPage: true,
+  });
   await expect
     .poll(() => sequence(page), { timeout: 30000 })
     .toBeGreaterThan(first + 120);

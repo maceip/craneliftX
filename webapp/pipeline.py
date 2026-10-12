@@ -227,6 +227,11 @@ class PipelineRuns:
             self.update(run_id, engine_connection="live")
             event_id = None
             while line := await reader.readline():
+                # readline returns a partial final line when the transport
+                # closes mid-event. Replay from the committed cursor instead
+                # of treating an incomplete network frame as invalid JSON.
+                if not line.endswith(b"\n"):
+                    raise ConnectionError("Engine event stream ended mid-line")
                 if line.startswith(b"id: "):
                     event_id = int(line[4:])
                 elif line.startswith(b"data: "):

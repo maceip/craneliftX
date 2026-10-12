@@ -15156,6 +15156,14 @@ function qu(e, t = {}) {
 	function ie(e) {
 		if (!c) {
 			if (e.scene !== void 0 && !Uu(e.scene)) throw Error(`Unknown factory scene: ${e.scene}`);
+			// Pausing the backdrop must not submit another expensive WebGL frame
+			// during a foreground control transition. Preserve the last image.
+			if (backdrop && (!e.scene || e.scene === r.scene) &&
+				(e.reducedMotion === void 0 || e.reducedMotion === r.reducedMotion)) {
+				r = { ...r, ...e };
+				re();
+				return;
+			}
 			if (e.scene && e.scene !== r.scene && (P.copy(N), y = v, g = 0), r = {
 				...r,
 				...e

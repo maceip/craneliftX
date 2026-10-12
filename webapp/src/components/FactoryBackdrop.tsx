@@ -15,11 +15,13 @@ export function FactoryBackdrop({
   scene,
   active,
   reduced,
+  suspended,
   run,
 }: {
   scene: string;
   active: boolean;
   reduced: boolean;
+  suspended: boolean;
   run: Run | null;
 }) {
   const layer = useRef<HTMLDivElement | null>(null),
@@ -32,7 +34,6 @@ export function FactoryBackdrop({
     );
     if (host && layer.current && layer.current.parentElement !== host) {
       host.appendChild(layer.current);
-      factory.current?.resize();
     }
   };
   useLayoutEffect(() => {
@@ -71,6 +72,12 @@ export function FactoryBackdrop({
     };
   }, []);
   useLayoutEffect(() => {
+    // Keep the background on its previous card while the foreground controls
+    // expand. Moving/resizing WebGL here can block that short transition.
+    if (suspended) {
+      factory.current?.setState({ active: false, paused: true });
+      return;
+    }
     position();
     factory.current?.setState({
       scene,
@@ -78,9 +85,9 @@ export function FactoryBackdrop({
       paused: !active,
       reducedMotion: reduced,
     });
-  }, [scene, active, reduced, run?.id]);
+  }, [scene, active, reduced, suspended, run?.id]);
   useEffect(() => {
-    factory.current?.setRun(run);
-  }, [run]);
+    if (!suspended) factory.current?.setRun(run);
+  }, [run, suspended]);
   return null;
 }

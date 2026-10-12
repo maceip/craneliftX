@@ -144,6 +144,12 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.runs.snapshot(state["id"])["engine_result"])
 
     async def test_dropped_engine_transport_resumes_live_from_committed_cursor(self):
+        await self.check_engine_transport_resume(partial=False)
+
+    async def test_truncated_event_resumes_without_parsing_or_committing_partial_json(self):
+        await self.check_engine_transport_resume(partial=True)
+
+    async def check_engine_transport_resume(self, partial):
         requests, peers = [], set()
         endpoint = None
 
@@ -157,14 +163,22 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
                 source, upstream = await asyncio.open_connection(endpoint.hostname, endpoint.port)
                 upstream.write(head)
                 await upstream.drain()
-                # Cut the real TCP transport after the first engine record.
-                # Every later connection forwards the actual runner unchanged.
+                # Cut after one complete record, optionally midway through
+                # the next data line. Reconnect must request after=1 in both
+                # cases; a partial network frame is not a committed event.
                 cut = len(requests) == 1
+                forwarded = 0
                 while line := await source.readline():
+                    if cut and partial and forwarded == 1 and line.startswith(b"data: "):
+                        writer.write(line[:len(line) // 2])
+                        await writer.drain()
+                        break
                     writer.write(line)
                     await writer.drain()
-                    if cut and line.startswith(b"data: "):
-                        break
+                    if line.startswith(b"data: "):
+                        forwarded += 1
+                        if cut and not partial:
+                            break
             finally:
                 for socket in [upstream, writer]:
                     if socket:

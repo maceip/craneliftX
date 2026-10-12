@@ -85,6 +85,9 @@ for (const viewport of [
         .every(([, time]) => time === 0),
     ).toBe(true);
     for (const scene of scenes) {
+      // Capture stable checkpoints with the real Pause control. Screenshot
+      // encoding can outlast a phase on a CPU-rendered CI browser.
+      await page.getByRole("button", { name: "Pause animations" }).click();
       await page.getByTestId(`group-${scene}`).focus();
       const card = page.locator(`#timeline-${scene}`),
         story = card.locator(".card-story");
@@ -126,13 +129,41 @@ for (const viewport of [
           ),
         ).toBe(0);
       }
+      await story.evaluate((el) => {
+        const frames: { phase: number; progress: number; cue: boolean }[] = [];
+        (window as any).walkthroughFrames = frames;
+        let stoppedAtMiddle = false;
+        const sample = () => {
+          const phase = Number((el as HTMLElement).dataset.phase);
+          const gauge = document.querySelector<HTMLElement>(
+            '[data-testid="telemetry-gauge"]',
+          )!;
+          const progress = Number(gauge.dataset.walkthroughProgress);
+          const cue = !!el.closest(".timeline-step")?.querySelector(
+            '.continue-cue[data-visible="true"]',
+          );
+          if (frames.at(-1)?.phase !== phase)
+            frames.push({ phase, progress, cue });
+          if (phase === 2 && !stoppedAtMiddle) {
+            stoppedAtMiddle = true;
+            document.querySelector<HTMLButtonElement>(
+              'button[aria-label="Pause animations"]',
+            )!.click();
+          }
+          if (progress < 1) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      await page.getByRole("button", { name: "Resume animations" }).click();
       await expect(story).toHaveAttribute("data-phase", "2");
+      await expect(
+        page.getByRole("button", { name: "Resume animations" }),
+      ).toBeVisible();
       if (scene !== "result") await expect(cue).toHaveCSS("opacity", "0");
       await page.screenshot({
         path: info.outputPath(`${scene}-operation.png`),
       });
       if (scene === "initialize") {
-        await page.getByRole("button", { name: "Pause animations" }).click();
         const progress = await gauge.getAttribute("data-walkthrough-progress");
         const clocks = await factory.evaluate(
           (c: any) => c.factoryState().clocks,
@@ -144,10 +175,13 @@ for (const viewport of [
         expect(
           await factory.evaluate((c: any) => c.factoryState().clocks),
         ).toEqual(clocks);
-        await page.getByRole("button", { name: "Resume animations" }).click();
       }
+      await page.getByRole("button", { name: "Resume animations" }).click();
       await expect(story).toHaveAttribute("data-phase", "4");
       await expect(gauge).toHaveAttribute("data-walkthrough-progress", "1.000");
+      const frames = await page.evaluate(() => (window as any).walkthroughFrames);
+      expect(frames.map((frame: any) => frame.phase)).toEqual([0, 1, 2, 3, 4]);
+      expect(frames.every((frame: any) => !frame.cue || frame.progress === 1)).toBe(true);
       if (scene !== "result") {
         await expect(cue).toHaveAttribute("data-visible", "true");
         await expect(cue).toHaveCSS("opacity", "1");
