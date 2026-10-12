@@ -15,7 +15,6 @@ import {
   timestamp,
 } from "./pipeline";
 import { request, usePipeline } from "./usePipeline";
-import { useStageFocus } from "./useStageFocus";
 import { PipelineTimeline } from "./components/PipelineTimeline";
 import { TelemetryGauge } from "./components/Telemetry";
 import { RestartConfirmation } from "./components/RestartConfirmation";
@@ -323,9 +322,6 @@ export function App() {
   );
   const [selected, setSelected] = useState("run"),
     [inspection, setInspection] = useState<LedgerEvent | null>(null);
-  const [following, setFollowing] = useState(
-    () => !new URLSearchParams(location.search).has("run"),
-  );
   const [raw, setRaw] = useState(false),
     [filter, setFilter] = useState("all"),
     [submitting, setSubmitting] = useState(false);
@@ -339,13 +335,6 @@ export function App() {
     [setupError, setSetupError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
     { run, connection, error, liveAfter } = usePipeline(id, initial);
-  const { reviewing, endReview } = useStageFocus(
-    run,
-    initial?.id ?? null,
-    following,
-    paused || evidenceOpen,
-    setSelected,
-  );
   const busy = submitting || (!!run && !terminal(run.status));
   useEffect(() => {
     let alive = true;
@@ -376,21 +365,18 @@ export function App() {
     const pop = () => {
       setRestartGroup(null);
       setInitial(null);
-      setFollowing(false);
+      setSelected("run");
       setInspection(null);
       setId(new URLSearchParams(location.search).get("run"));
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
-  useEffect(() => {
-    if (run && !terminal(run.status)) setFollowing(true);
-  }, [run?.id]);
   function selectRun(next: string | null) {
     setRestartGroup(null);
     setInitial(null);
     setPaused(false);
-    setFollowing(false);
+    setSelected("run");
     setInspection(null);
     setActionError(null);
     setId(next);
@@ -421,7 +407,6 @@ export function App() {
       });
       selectRun(state.id);
       setInitial(state);
-      setFollowing(true);
       setSelected("run");
       setRaw(false);
     } catch (e) {
@@ -460,7 +445,6 @@ export function App() {
       });
       selectRun(state.id);
       setInitial(state);
-      setFollowing(true);
       setSelected(restartGroup);
       setRaw(false);
     } catch (e) {
@@ -499,8 +483,6 @@ export function App() {
       : connection;
   function openEvidence() {
     setRestartGroup(null);
-    setFollowing(false);
-    endReview();
     setEvidenceOpen(true);
     evidence.current?.showModal();
   }
@@ -527,15 +509,21 @@ export function App() {
             height={28}
           />
           <h1>
-            Translate and execute <span>x86-64</span> binaries on{" "}
-            <span>RISC-V.</span>
+            Zero-trust binary execution via live <span>ISA re-targeting.</span>
           </h1>
           <p className="launch-description">
+            A dynamic instrumentation pipeline that lifts x86-64 binaries into
+            RISC-V machine code, basic block by basic block. Reached
+            instructions are checked against instruction, stack, memory and
+            control-flow policies. Generated RV64 code runs in an interpreter
+            with a mediated host syscall bridge.
+          </p>
+          <p className="launch-architecture">
             x86-64 → iced-x86 → Cranelift IR → RV64
           </p>
           <div className="launch-actions">
             <button
-              aria-label="Run demo"
+              aria-label="Run interactive pipeline"
               className="launch-action launch-primary"
               disabled={busy || !config?.ready || !config.server_available}
               onClick={() => void start()}
@@ -543,11 +531,13 @@ export function App() {
               <span className="launch-symbol" aria-hidden="true">
                 ▷
               </span>
-              <strong>{submitting ? "Starting…" : "Run demo"}</strong>
-              <span>Live Rust TCP server translated to RV64</span>
+              <strong>
+                {submitting ? "Starting…" : "Run interactive pipeline"}
+              </strong>
+              <span>Watch dynamic translation in real time</span>
             </button>
             <button
-              aria-label="Upload binary"
+              aria-label="Inspect your binary"
               className="launch-action"
               disabled={busy || !config?.ready}
               onClick={() => file.current?.click()}
@@ -555,7 +545,7 @@ export function App() {
               <span className="launch-symbol" aria-hidden="true">
                 ↑
               </span>
-              <strong>Upload binary</strong>
+              <strong>Inspect your binary</strong>
               <span>
                 Static Linux x86-64 ELF (up to{" "}
                 {bytes(config?.max_upload_bytes).replace(/\.00 MiB$/, " MiB")})
@@ -610,24 +600,20 @@ export function App() {
                 {run.message}
               </p>
             )}
-          <TelemetryGauge run={run} stage={selected} reviewing={reviewing} />
+          <TelemetryGauge run={run} stage={selected} />
           <PipelineTimeline
             groups={groups}
             run={run}
             selected={selected}
-            onSelect={(id) => {
-              setFollowing(false);
-              endReview();
+            onView={(id) => {
               setSelected(id);
               setInspection(null);
-              setRestartGroup(id);
             }}
-            following={following}
-            onFollow={(value) => {
-              setFollowing(value);
-              if (value) setInspection(null);
+            onSelect={(id, revisit) => {
+              setSelected(id);
+              setInspection(null);
+              setRestartGroup(revisit ? id : null);
             }}
-            reviewing={reviewing}
             paused={paused}
             onPause={setPaused}
             confirmationFor={restartGroup}
@@ -651,15 +637,12 @@ export function App() {
             status={
               <>
                 <span role="status">
-                  {reviewing
-                    ? `${
-                        run && terminal(run.status)
-                          ? run.status === "completed"
-                            ? "Engine complete"
-                            : `Run ${run.status}`
-                          : connectionLabel[streamConnection]
-                      } · ${following && !paused ? "Reviewing recorded stages" : "Stage review paused"}`
-                    : connectionLabel[streamConnection]}
+                  {run && terminal(run.status)
+                    ? `${run.status === "completed" ? "Engine complete" : `Run ${run.status}`} · Recorded results`
+                    : `${run?.status === "running" ? "Engine running" : run?.status === "cancelling" ? "Stopping engine" : "Starting engine"} · ${connectionLabel[streamConnection]}`}
+                  <span className="navigation-hint">
+                    Scroll or click a card to explore
+                  </span>
                 </span>
               </>
             }
@@ -950,7 +933,6 @@ export function App() {
                         <button
                           className="event-link"
                           onClick={() => {
-                            setFollowing(false);
                             setSelected(e.group);
                             setInspection(e);
                             setRaw(true);

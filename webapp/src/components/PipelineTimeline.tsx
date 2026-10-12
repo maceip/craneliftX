@@ -216,7 +216,8 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             </div>
           ))}
           <small>
-            Virtual address space configured · {segments.length} mapped segments
+            {segments.length} mapped segments · mapped-region permissions
+            enforced
             {segments.length > 4 ? " · first four shown" : ""}
           </small>
         </div>
@@ -226,9 +227,9 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
       return complete ? (
         <div className="register-illustration" data-source-seq={output.seq}>
           {[
-            ["Guest RIP", output.entry_rip],
+            ["Entry RIP", output.entry_rip],
             ["Guest RSP", output.guest_rsp],
-            ["Host RV64 Stack", bytes(output.rv64_stack_bytes)],
+            ["RV64 stack", bytes(output.rv64_stack_bytes)],
           ].map(([key, value]) => (
             <div key={key}>
               <small>{key}</small>
@@ -236,7 +237,8 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             </div>
           ))}
           <small>
-            {number(output.state_words)} architectural registers initialized
+            {number(output.state_words)} architectural state registers
+            initialized
           </small>
         </div>
       ) : (
@@ -283,8 +285,8 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
               ))}
             </ol>
             <small>
-              {instructions.length} instructions · block {output!.block_id} ·
-              Receipt: #{output!.seq}
+              {instructions.length} instructions decoded · block{" "}
+              {output!.block_id} · Receipt: #{output!.seq}
             </small>
           </div>
         </div>
@@ -333,7 +335,9 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           <small className="visual-caption">
             {group.last_event?.rip ?? "No reached block"}
             {blockId !== undefined ? ` · block ${blockId}` : ""}
-            {complete ? ` · Duration: ${duration(output?.elapsed_ns)}` : ""}
+            {complete
+              ? ` · Semantics lowered in ${duration(output?.elapsed_ns)}`
+              : ""}
           </small>
         </div>
       );
@@ -417,8 +421,8 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
       return event ? (
         <div data-source-seq={event.seq}>
           <Beam
-            from="Guest Call"
-            to="Host Intercept"
+            from="Guest call"
+            to="Mediated host call"
             source={
               event.detail?.name
                 ? `sys_${event.detail.name}${typeof event.detail.number === "number" ? ` (0x${event.detail.number.toString(16)})` : ""}`
@@ -459,8 +463,7 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           </div>
           <small>
             {number(run?.counters.compiled_blocks)} compiled blocks ·{" "}
-            {number(run?.counters.cache_invalidations)} invalidations · guest
-            context intact
+            {number(run?.counters.cache_invalidations)} cache invalidations
           </small>
         </div>
       );
@@ -486,7 +489,6 @@ function TimelineStep({
   onSelect,
   enabled,
   liveAfter,
-  reviewing,
   confirming,
 }: {
   group: Group;
@@ -496,7 +498,6 @@ function TimelineStep({
   onSelect: () => void;
   enabled: boolean;
   liveAfter: number | null;
-  reviewing: boolean;
   confirming: boolean;
 }) {
   const element = useRef<HTMLLIElement>(null);
@@ -539,22 +540,16 @@ function TimelineStep({
     };
   }, []);
   const motion = enabled && visible;
-  const reviewed = useRef(false);
   useEffect(() => {
     const fresh = seq !== seen.current;
-    const enteredReview = reviewing && selected && !reviewed.current;
-    reviewed.current = reviewing && selected;
     seen.current = seq;
-    const pulse =
-      motion &&
-      ((fresh && liveAfter !== null && seq > liveAfter) ||
-        (enteredReview && seq > 0));
+    const pulse = motion && fresh && liveAfter !== null && seq > liveAfter;
     setFlash(pulse);
     if (pulse) {
       const timer = setTimeout(() => setFlash(false), 220);
       return () => clearTimeout(timer);
     }
-  }, [seq, motion, liveAfter, reviewing, selected]);
+  }, [seq, motion, liveAfter]);
   const busy =
     motion &&
     !!run &&
@@ -628,7 +623,7 @@ function TimelineStep({
         <div className="timeline-provenance">
           <span>
             {group.last_event
-              ? `${timestamp(group.last_event.timestamp_unix_ns)} UTC · Event #${seq}`
+              ? `#${seq} · ${timestamp(group.last_event.timestamp_unix_ns)} UTC`
               : "Awaiting an engine event"}
           </span>
           <span>
@@ -648,14 +643,12 @@ export function PipelineTimeline({
   run,
   selected,
   onSelect,
-  following,
-  onFollow,
+  onView,
   connection,
   liveAfter,
   controls,
   status,
   obscured,
-  reviewing,
   paused,
   onPause,
   confirmation,
@@ -664,15 +657,13 @@ export function PipelineTimeline({
   groups: Group[];
   run: Run | null;
   selected: string;
-  onSelect: (id: string) => void;
-  following: boolean;
-  onFollow: (value: boolean) => void;
+  onSelect: (id: string, revisit: boolean) => void;
+  onView: (id: string) => void;
   connection: string;
   liveAfter: number | null;
   controls: React.ReactNode;
   status: React.ReactNode;
   obscured: boolean;
-  reviewing: boolean;
   paused: boolean;
   onPause: (value: boolean) => void;
   confirmation?: React.ReactNode;
@@ -696,88 +687,93 @@ export function PipelineTimeline({
     };
   }, []);
   const index = groups.findIndex((g) => g.id === selected);
-  const previousFocus = useRef({ id: "", index: -1 });
+  const catalog = groups.map((g) => g.id).join(",");
+  const observed = useRef("");
+  const departed = useRef(new Set<string>());
+  const viewCallback = useRef(onView);
+  viewCallback.current = onView;
+  const center = (id: string, behavior: ScrollBehavior = "instant") => {
+    document
+      .getElementById(`timeline-${id}`)
+      ?.scrollIntoView({ block: "center", behavior });
+  };
+  // Only a new run, an explicit card click or an Evidence selection may move
+  // the viewport. Engine events never select or scroll to a different group.
   useLayoutEffect(() => {
-    if (!run || obscured) return;
-    if (
-      !following &&
-      previousFocus.current.id === run.id &&
-      previousFocus.current.index === index
-    )
-      return;
-    const step = document.getElementById(`timeline-${selected}`);
-    if (!step) return;
-    // Move naturally between adjacent observed groups. The overview's reading
-    // pace is independent of execution; it never creates a group receipt.
-    const adjacent =
-      following &&
-      !paused &&
-      !reduced &&
-      previousFocus.current.id === run.id &&
-      Math.abs(index - previousFocus.current.index) === 1;
-    previousFocus.current = { id: run.id, index };
-    const center = (behavior: ScrollBehavior = "instant") => {
-      const rect = step.getBoundingClientRect();
-      window.scrollTo({
-        top: window.scrollY + rect.top + rect.height / 2 - innerHeight / 2,
-        behavior,
-      });
-    };
-    center(adjacent ? "smooth" : "instant");
-    let measured = false;
-    const observer = new ResizeObserver(() => {
-      if (measured) center();
-      measured = true;
-    });
-    observer.observe(step);
-    return () => observer.disconnect();
-  }, [following, selected, run?.id, obscured, paused, reduced]);
+    departed.current.clear();
+    observed.current = selected;
+    center(selected);
+  }, [run?.id, catalog]);
+  useLayoutEffect(() => {
+    if (obscured || observed.current === selected) return;
+    observed.current = selected;
+    center(selected);
+  }, [selected, obscured]);
   useEffect(() => {
-    const manual = () => onFollow(false);
-    const keyboard = (e: KeyboardEvent) => {
-      if (
-        [
-          "PageDown",
-          "PageUp",
-          "Home",
-          "End",
-          "ArrowDown",
-          "ArrowUp",
-          " ",
-        ].includes(e.key) &&
-        !["INPUT", "SELECT", "BUTTON", "TEXTAREA"].includes(
-          (e.target as HTMLElement)?.tagName,
-        )
-      )
-        manual();
+    if (!run || obscured) return;
+    let observer: IntersectionObserver;
+    const observe = () => {
+      observer?.disconnect();
+      const intersecting = new Set<HTMLElement>();
+      // A narrow center band makes the map follow the card being read. The
+      // observer never scrolls, so wheel, touch, scrollbar and keys stay native.
+      const inset = Math.floor(innerHeight * 0.45);
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting)
+              intersecting.add(entry.target as HTMLElement);
+            else intersecting.delete(entry.target as HTMLElement);
+          }
+          const nearest = [...intersecting].sort((a, b) => {
+            const distance = (el: HTMLElement) => {
+              const r = el.getBoundingClientRect();
+              return Math.abs(r.top + r.height / 2 - innerHeight / 2);
+            };
+            return distance(a) - distance(b);
+          })[0]?.dataset.group;
+          if (nearest && nearest !== observed.current) {
+            departed.current.add(observed.current);
+            observed.current = nearest;
+            viewCallback.current(nearest);
+          }
+        },
+        { rootMargin: `-${inset}px 0px -${inset}px 0px`, threshold: 0 },
+      );
+      document
+        .querySelectorAll<HTMLElement>(".timeline-step")
+        .forEach((el) => observer.observe(el));
     };
-    window.addEventListener("wheel", manual, { passive: true });
-    window.addEventListener("touchmove", manual, { passive: true });
-    window.addEventListener("keydown", keyboard);
+    observe();
+    window.addEventListener("resize", observe);
     return () => {
-      window.removeEventListener("wheel", manual);
-      window.removeEventListener("touchmove", manual);
-      window.removeEventListener("keydown", keyboard);
+      observer.disconnect();
+      window.removeEventListener("resize", observe);
     };
-  }, [onFollow]);
+  }, [run?.id, obscured, catalog]);
+  function selectCard(id: string) {
+    const revisit = departed.current.has(id);
+    if (observed.current !== id) departed.current.add(observed.current);
+    observed.current = id;
+    onSelect(id, revisit);
+    center(id, reduced ? "instant" : "smooth");
+  }
   const enabled =
     !paused &&
     !obscured &&
     !reduced &&
     visible &&
-    (connection === "live" ||
-      (reviewing && following && connection === "saved")) &&
+    connection === "live" &&
     !!run &&
-    (!terminal(run.status) || (reviewing && following));
-  const showPlayback = reviewing || (!!run && !terminal(run.status));
+    !terminal(run.status);
+  const showPlayback = !!run && !terminal(run.status);
   return (
     <section
       className="pipeline-timeline"
       aria-label="Connected pipeline timeline"
       data-testid="pipeline-timeline"
       data-motion-enabled={enabled}
-      data-following={following}
-      data-reviewing={reviewing}
+      data-navigation="manual"
       data-paused={paused}
     >
       <div className="focus-transport" data-expanded={!!confirmation}>
@@ -786,16 +782,6 @@ export function PipelineTimeline({
         <div className="timeline-controls">
           {showPlayback && (
             <>
-              <button
-                type="button"
-                aria-label={
-                  reviewing ? "Follow stage review" : "Follow live events"
-                }
-                aria-pressed={following}
-                onClick={() => onFollow(!following)}
-              >
-                {reviewing ? "Follow stages" : "Follow live"}
-              </button>
               <button
                 type="button"
                 aria-label={paused ? "Resume animations" : "Pause animations"}
@@ -826,20 +812,20 @@ export function PipelineTimeline({
                       ? "next"
                       : "distant"
               }
-              onSelect={() => onSelect(group.id)}
+              onSelect={() => selectCard(group.id)}
               enabled={enabled}
               liveAfter={liveAfter}
-              reviewing={reviewing && following}
               confirming={confirmationFor === group.id}
             />
           ))}
         </ol>
       </div>
       <p className="visually-hidden">
-        Motion indicates an open engine span or an observed receipt. Stage
-        review shows recorded operations at a readable pace; values and engine
-        time continue updating independently from the ledger.{" "}
-        {reduced ? "Reduced motion is enabled." : ""}
+        Scroll or click a card to inspect its recorded output. Previously
+        visited cards offer a restart confirmation. The engine runs
+        continuously; values and engine time update independently from the
+        ledger. Motion indicates an open engine span or a newly received
+        receipt. {reduced ? "Reduced motion is enabled." : ""}
       </p>
     </section>
   );

@@ -30,7 +30,7 @@ const sequence = async (page: Page) =>
 async function upload(page: Page, name: string, buffer: Buffer) {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "Upload binary" }),
+    page.getByRole("button", { name: "Inspect your binary" }),
   ).toBeEnabled();
   await page
     .getByLabel("Choose an x86-64 ELF binary")
@@ -99,7 +99,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
     path: info.outputPath("idle-desktop.png"),
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Run demo" }).click();
+  await page.getByRole("button", { name: "Run interactive pipeline" }).click();
   await expect(page).toHaveURL(/run=/);
   await expect(page.locator(".timeline-stage-button")).toHaveCount(13);
   await expect(
@@ -601,7 +601,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await page
     .locator("#timeline-execute")
     .evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await expect(timeline).toHaveAttribute("data-following", "false");
+  await expect(timeline).toHaveAttribute("data-navigation", "manual");
   await expect(page.locator("#timeline-execute")).toHaveAttribute(
     "data-motion",
     "active-span",
@@ -635,7 +635,9 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await expect.poll(runningAnimations).toBe(0);
   await context.setOffline(false);
   await expect(timeline).toHaveAttribute("data-motion-enabled", "true");
-  await page.getByRole("button", { name: "Follow live events" }).click();
+  await page
+    .locator("#timeline-execute")
+    .evaluate((el) => el.scrollIntoView({ block: "center" }));
   const neighborsVisible = async () => {
     await expect
       .poll(() =>
@@ -692,6 +694,9 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await consistentGeometry();
   await page.screenshot({ path: info.outputPath("timeline-live-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .locator("#timeline-execute")
+    .evaluate((el) => el.scrollIntoView({ block: "center" }));
   await neighborsVisible();
   await consistentGeometry();
   expect(
@@ -702,7 +707,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await page.screenshot({ path: info.outputPath("timeline-live-mobile.png") });
   await page.mouse.move(200, 400);
   await page.mouse.wheel(0, -150);
-  await expect(timeline).toHaveAttribute("data-following", "false");
+  await expect(timeline).toHaveAttribute("data-navigation", "manual");
   const selected = await page
     .locator(".timeline-step.is-current")
     .getAttribute("data-group");
@@ -712,8 +717,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     "data-group",
     selected!,
   );
-  // Read earlier work by scrolling, without changing selection or pretending
-  // the engine moved back to those operations.
+  // Scrolling updates the inspection map without changing engine execution.
   await page.mouse.wheel(0, -20000);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   const firstCard = page.locator("#timeline-run .timeline-card");
@@ -726,7 +730,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await expect(
     page.locator('.stage-thermometer [data-current="true"]'),
   ).toHaveCount(1);
-  await expect(page.getByTestId("stage-thermometer")).not.toHaveAttribute(
+  await expect(page.getByTestId("stage-thermometer")).toHaveAttribute(
     "data-current-stage",
     "run",
   );

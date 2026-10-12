@@ -5,17 +5,17 @@ import { CatalogGroup, Group, groupState, terminal } from "./pipeline";
 const labels: Record<string, string> = {
   run: "Initialize Pipeline",
   ingest: "Read ELF Image",
-  load: "Validate & Map Segments",
-  initialize: "Initialize Guest Context",
-  decode: "Disassemble Block",
-  audit: "Verify Safety Policy",
-  lower: "Lift to Cranelift IR",
-  codegen: "Compile to RV64",
-  artifacts: "Commit Block Artifacts",
-  execute: "Execute RV64 Code",
-  syscall: "Handle System Call",
-  cache: "Code Cache Status",
-  result: "Execution Summary",
+  load: "Validate and isolate memory layout",
+  initialize: "Instantiate isolated guest context",
+  decode: "Ingest and decode basic block",
+  audit: "Evaluate control-flow & memory invariants",
+  lower: "Lift semantics to Cranelift IR",
+  codegen: "JIT-compile to RV64 machine code",
+  artifacts: "Commit translation artifacts",
+  execute: "Execute re-targeted execution stream",
+  syscall: "Trap and mediate host syscall",
+  cache: "Maintain dynamic code cache",
+  result: "Runtime evidence & execution summary",
 };
 export const stageLabel = (group: CatalogGroup) =>
   labels[group.id] ?? group.label;
@@ -36,15 +36,15 @@ const activeLabels: Record<string, string> = {
 const recordedLabels: Record<string, string> = {
   run: "Initialized",
   ingest: "Ingested",
-  load: "Mapped",
-  initialize: "Context Ready",
-  decode: "Decoded",
+  load: "Enforced",
+  initialize: "Initialized",
+  decode: "Parsed",
   audit: "Verified",
-  lower: "Lowered",
+  lower: "Lifted",
   codegen: "Emitted",
   artifacts: "Committed",
   execute: "Executed",
-  syscall: "Handled",
+  syscall: "Intercepted",
 };
 export function stageStatus(group: Group, runStatus?: string): string {
   const state = groupState(group, runStatus);
@@ -58,7 +58,7 @@ export function stageStatus(group: Group, runStatus?: string): string {
 }
 
 export const policyLabels: Record<string, string> = {
-  privileged_control: "Syscall boundary isolation",
+  privileged_control: "Syscall boundary enforcement",
   stack_policy: "Stack pointer integrity",
   memory_policy: "Memory operand bounds",
   control_flow: "Target branch validation",

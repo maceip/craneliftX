@@ -26,7 +26,7 @@ test.afterEach(async ({ page }) => {
   }
 });
 
-test("any completed card opens a glowing confirmation and restarts the exact Rust server at the selected view", async ({
+test("a previously visited card opens a glowing confirmation and restarts the exact Rust server at the selected view", async ({
   page,
 }, info) => {
   let restartRequests = 0;
@@ -36,11 +36,16 @@ test("any completed card opens a glowing confirmation and restarts the exact Rus
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
-  await page.getByRole("button", { name: "Run demo", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Run interactive pipeline", exact: true })
+    .click();
   await expect(page).toHaveURL(/run=/);
   const original = await settled(page, currentId(page)!);
   const footer = page.locator(".focus-transport");
   const before = (await footer.boundingBox())!.height;
+  // First visits navigate. Returning to a previously visited card offers restart.
+  await page.getByTestId("group-lower").click();
+  await page.getByTestId("group-audit").click();
   // Click the illustration, not just the header button.
   await page.locator("#timeline-lower .stage-illustration").click();
   const panel = page.getByRole("region", {
@@ -135,7 +140,7 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
 }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "Upload binary" }),
+    page.getByRole("button", { name: "Inspect your binary" }),
   ).toBeEnabled();
   await page.getByLabel("Choose an x86-64 ELF binary").setInputFiles({
     name: "restart-loop.elf",
@@ -149,6 +154,8 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
   await expect(page).toHaveURL(/run=/);
   const originalId = currentId(page)!;
   await expect.poll(async () => (await state(page)).cursor).toBeGreaterThan(50);
+  await page.getByTestId("group-initialize").click();
+  await page.getByTestId("group-decode").click();
   await page.locator("#timeline-initialize .stage-illustration").click();
   const original = await state(page);
   const panel = page.getByRole("region", {

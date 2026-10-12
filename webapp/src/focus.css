@@ -1147,3 +1147,15 @@
     min-height: 72px;
   }
 }
+
+.launch-architecture {
+  color: var(--muted);
+  font: 12px var(--mono);
+  margin: 20px 0 0;
+}
+.navigation-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #969a99;
+}

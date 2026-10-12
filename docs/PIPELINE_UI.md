@@ -27,7 +27,7 @@ npm --prefix webapp run build
 .venv/bin/python webapp/server.py --port 8877
 ```
 
-Open **http://127.0.0.1:8877/**. Select **Run demo** or **Open binary**.
+Open **http://127.0.0.1:8877/**. Select **Run interactive pipeline** or **Inspect your binary**.
 The binary upload limit is 64 MiB. One guest process runs at a time, with a
 120-second engine deadline. A file is translated as guest control flow reaches
 its instructions; input file length is not a measure of lifted code.
@@ -64,7 +64,7 @@ Existing runs first load a bounded snapshot, then consume `event: ledger` over S
 128 queued events). This batches rendering, not translation. Reconnects use
 `Last-Event-ID`; reloads resume from the saved snapshot. A sequence gap triggers
 snapshot recovery. Execution states and values never advance from a timer or
-estimated percentage; presentation focus has a separate reading pace.
+estimated percentage. Inspection focus changes only through user navigation.
 
 `event: coordinator` carries process lifecycle and host test-client results
 separately, without impersonating an engine event or consuming an engine
@@ -106,7 +106,7 @@ span can become active again when the next block reaches that operation.
 
 ## Connected timeline and motion
 
-The dark launch screen offers **Run demo** and **Open binary**. During a run,
+The dark launch screen offers **Run interactive pipeline** and **Inspect your binary**. During a run,
 all thirteen groups occupy a connected vertical timeline, centered on one large
 operation card. The preceding and following cards remain partly visible and
 dimmed. There is no navigation bar or persistent side inspector. **Evidence**
@@ -126,48 +126,50 @@ bytes, block IDs, emitted code sizes, artifact hashes, and runtime counters.
 Sphere dots correspond one-for-one to observed groups or decoded instructions.
 Related decode/CLIF/RV64 values are joined only when their block IDs match.
 
-A new run presents every observed group in catalog order, with at least 1.4
-seconds of reading time per card. This is a **stage overview**, not a replay of
-execution timing: the ledger and card values continue updating every 50 ms.
-If the engine finishes before the overview, the caption immediately reads
-**Engine complete · Reviewing recorded stages** and the gauge retains the actual
-engine duration. Failed or cancelled runs skip groups with no events. No unseen
-group becomes successful to fill the overview.
+A new run starts on Initialize Pipeline and stays there until the user scrolls
+or clicks another card. There are no timed holds, automatic stage advances or
+engine pauses. The runtime proceeds at full speed, and the browser continues
+applying actual ledger updates to every card. The caption distinguishes the
+running engine from **Engine complete · Recorded results**. An unobserved group
+remains unobserved, even if the user visits it.
+
+Scrolling, touch, scrollbar dragging and keyboard navigation select the card
+intersecting the viewport center. Clicking a new card centers it. The viewport
+never follows engine events. Pointer hover does not change opacity: intersection
+with the middle of the viewport controls readability. Completed spans and
+observed receipts retain a small side notch. Missing or failed operations never
+receive a completion mark. Keyboard focus stays visible.
 
 A repeating illustration indicates a visible, open engine span. A short pulse
-marks a newly received receipt or an observed receipt entering stage review.
-Terminal runs never show active-span loops. Saved runs opened from history do
-not automatically replay animations. Offscreen cards, hidden tabs, disconnected
-streams and reduced-motion preferences suppress motion. **Pause motion** also
-pauses automatic screen progression, while the ledger keeps updating.
+marks a newly received receipt. Recorded results do not replay activity or imply
+that execution is still underway. Offscreen cards, hidden tabs, disconnected
+streams and reduced-motion preferences suppress motion. **Pause motion** only
+stops these animations; the engine and live data keep running. Motion controls
+disappear when the run ends. **Evidence** opens the event inspector without
+changing execution.
 
-After the initial overview, **Follow live** samples the latest group every
-600 ms for executions still running. User scrolling pauses following; selecting
-a card or opening Evidence leaves the overview. Playback controls disappear
-when execution and stage review have both ended. Pointer hover does not change
-card opacity. Readability follows intersection with the middle of the viewport,
-so scrolling back makes earlier operations bright without changing engine state.
-Completed spans and observed receipts retain a small side notch; missing or
-failed operations never receive a completion mark. Keyboard focus stays visible.
-The filename and event cursor appear inside Evidence instead of the floating
-controls.
+Above the seconds dial, the thermometer has one dot per catalog group. Its steady
+ring locates the card being inspected, including after execution ends. Observed
+dots stay filled when an operation runs again; failures retain their failure
+color. This is an inspection map, not a claim that the engine is currently
+executing that group.
 
-Above the seconds dial, a thermometer contains one dot per catalog group. A
-light ring marks the most recently updated open engine span, falling back to
-the latest emitted group only when no span is open. It is independent of
-scroll position and stage review. The ring disappears on disconnect, engine
-result, cancellation or terminal coordinator state; each dot retains its actual
-recorded status.
+A first visit by click navigates without a restart prompt. Clicking a previously
+visited card expands the floating controls with a centered, warm red/orange
+**Restart Analysis from {operation}?** confirmation. Cancel or Escape closes it
+without stopping the guest. Confirming stops that run if active, preserves its
+ledger and creates a fresh execution of its retained input bytes. The new view
+begins at the chosen group; required earlier stages really execute again. This
+is not a CPU/memory/socket checkpoint restore. Another active run is never
+stopped to restart a historical run; missing or changed retained inputs are
+rejected before stopping anything.
 
-Clicking anywhere on a card expands the floating controls with a centered,
-warm red/orange **Restart Analysis from {operation}?** confirmation. Cancel or
-Escape closes it without stopping the guest. Confirming stops that run if it is
-active, preserves its ledger, and creates a new execution of its retained input
-bytes. The new timeline begins at the chosen group; required earlier stages
-really execute again. The confirmation states this explicitly. This is a fresh
-execution, not a CPU/memory/socket checkpoint restore. Another active run is
-never stopped to restart a historical run; missing or changed retained inputs
-are rejected before stopping anything.
+Presentation copy describes emitted evidence. Artifact hashes are not signatures,
+policy acceptance is not proof of shellcode absence or gadget elimination, and
+RV64 machine-code generation does not imply physical RISC-V execution. Memory
+permissions and policy verdicts are shown as recorded, without turning runtime
+checks into static proof. Footer names remain the real ledger stage/type or
+block ID, rather than invented attestation events.
 
 The floating seconds dial uses `run.elapsed_ns`, the latest emitted engine
 monotonic timestamp. It does not interpolate missing engine time or imply a
@@ -235,20 +237,37 @@ It exercises:
   after an nginx restart. Padding is never counted as lifted source.
 - Browser offline recovery, unsupported instructions, invalid ELF input,
   cancellation, bounded live rows, desktop/mobile layout, and raw event replay.
-- Card confirmation, Escape/Cancel, new Rust-server execution with the identical
+- Previously visited card confirmation, Escape/Cancel, new Rust-server execution with the identical
   input hash, repeated prerequisite stages, and a new preserved TCP connection.
   Active uploaded runs continue until confirmation, then are reaped and rerun.
-- A fast real Rust server run showing all 13 observed groups before the result,
-  independently measured engine time during review, paused progression and
-  stable neighboring-card opacity on hover.
+- Desktop and mobile walkthroughs of all 13 cards from a real Rust server run:
+  the engine completes while the first card stays selected, even after seven
+  idle seconds; wheel/click navigation, readable centered cards and one matching
+  thermometer ring; unchanged recorded timing and no navigation API writes.
 - Live timeline animations matched to journal sequence numbers, real instruction
   and mapping values, visible previous/current/next cards on desktop and mobile,
   and motion pause/reduced-motion/offline behavior while a real syscall loop runs.
   Scrolling to earlier cards restores readability; the thermometer ring is
-  reconciled against the exact ledger at each sampled cursor.
+  matched to the viewed card and observed dots reconciled against the exact ledger.
 
 The Python suite additionally cuts a real engine SSE TCP connection and verifies
 live resubscription from the committed cursor, exact journal reconciliation,
 process reaping, coordinator interruption, and the legacy worker supervisor.
 Positive runtime tests use real binaries and emitted events. Synthetic ELF test
 inputs are executable test programs, not simulated telemetry.
+
+### UI acceptance loop
+
+Before changing interaction behavior, express the user-visible failure in a
+browser regression and demonstrate that it fails against the previous build.
+Run `npm --prefix webapp run test:experience` after building to exercise the real
+Rust server and inspect every group on desktop and mobile. Successful walkthrough
+videos and per-card screenshots are retained in `webapp/test-results` and uploaded
+by CI along with the full suite artifacts. Inspect the video transitions and card
+screenshots for clipping, brightness, map alignment and unexpected scrolling;
+passing assertions alone are not visual acceptance.
+
+Run the full browser suite before publishing. After publishing, rerun it against
+`ISR_BASE_URL=https://chunder.public.computer`, inspect the public walkthroughs,
+and verify deployed assets and source commit. Report local behavior, public
+behavior and engine evidence separately; never substitute a build for those checks.

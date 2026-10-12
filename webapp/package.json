@@ -8,6 +8,7 @@
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
+    "test:experience": "playwright test tests/progression.spec.ts",
     "test:server": "../.venv/bin/python -m unittest discover -s tests -p 'test_*.py'"
   },
   "dependencies": {

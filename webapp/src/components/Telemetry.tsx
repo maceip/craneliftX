@@ -46,11 +46,9 @@ export function MatrixNumber({ value }: { value: string }) {
 export function TelemetryGauge({
   run,
   stage,
-  reviewing,
 }: {
   run: Run | null;
   stage: string;
-  reviewing: boolean;
 }) {
   const elapsed = run ? run.elapsed_ns / 1e9 : null;
   // This is a seconds dial, never a percentage-complete ring. It moves only
@@ -61,7 +59,7 @@ export function TelemetryGauge({
   );
   // The map locates the stage being presented, not each sub-millisecond engine
   // transition. Observed dots stay lit when that group opens another span.
-  const current = run?.groups[stage]?.count ? stage : null;
+  const current = run?.groups[stage] ? stage : null;
   return (
     <div className="telemetry-stack">
       <ol
@@ -69,7 +67,7 @@ export function TelemetryGauge({
         aria-label="Timeline stage map"
         data-testid="stage-thermometer"
         data-current-stage={current ?? ""}
-        data-mode={reviewing ? "review" : "inspection"}
+        data-mode="inspection"
         data-cursor={run?.cursor ?? 0}
       >
         {groups.map((group) => {
@@ -227,7 +225,7 @@ export function PerformanceSummary({ run }: { run: Run }) {
                 : "Connection verification incomplete"}
             </strong>
             <small>
-              {run.verification.verified_responses} requests served ·{" "}
+              {run.verification.verified_responses} responses checked ·{" "}
               {run.verification.first_connection_responses} on the first
               connection · {run.verification.reconnects_on_first_connection}{" "}
               reconnects
