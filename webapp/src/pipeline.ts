@@ -42,6 +42,11 @@ export type Run = {
   message: string;
   diagnostics: string[];
   runner_sha256: string;
+  restart?: {
+    source_run_id: string;
+    focus_group: string;
+    kind: "fresh-execution";
+  };
   verification: null | {
     source: string;
     status: string;

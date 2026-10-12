@@ -1,3 +1,4 @@
+import { elf } from "./elf";
 import { test, expect, Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -26,31 +27,6 @@ const runSummary = async (page: Page): Promise<RunSummary> => {
 };
 const sequence = async (page: Page) =>
   Number(await page.getByTestId("event-sequence").textContent());
-function elf(code: Buffer, size = 256 + code.length) {
-  const image = Buffer.alloc(size);
-  Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]).copy(image);
-  image.writeUInt16LE(2, 16);
-  image.writeUInt16LE(62, 18);
-  image.writeUInt32LE(1, 20);
-  image.writeBigUInt64LE(0x20100n, 24);
-  image.writeBigUInt64LE(64n, 32);
-  for (const [at, value] of [
-    [52, 64],
-    [54, 56],
-    [56, 1],
-    [58, 64],
-  ])
-    image.writeUInt16LE(value, at);
-  image.writeUInt32LE(1, 64);
-  image.writeUInt32LE(5, 68);
-  image.writeBigUInt64LE(0x20000n, 80);
-  image.writeBigUInt64LE(0x20000n, 88);
-  image.writeBigUInt64LE(BigInt(size), 96);
-  image.writeBigUInt64LE(BigInt(size), 104);
-  image.writeBigUInt64LE(4096n, 112);
-  code.copy(image, 256);
-  return image;
-}
 async function upload(page: Page, name: string, buffer: Buffer) {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Open binary" })).toBeEnabled();
@@ -155,6 +131,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   expect(final.verification?.reconnects_on_first_connection).toBe(0);
   expect(final.counters.cache_invalidations).toBeGreaterThan(0);
   await page.getByTestId("group-result").click();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("telemetry-gauge")).toHaveAttribute(
     "data-elapsed-ns",
     String(final.elapsed_ns),
@@ -609,6 +586,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     page.locator('.stage-thermometer [data-executing="true"]'),
   ).toHaveCount(1);
   await page.getByTestId("group-execute").click();
+  await page.keyboard.press("Escape");
   await page
     .locator("#timeline-execute")
     .evaluate((el) => el.scrollIntoView({ block: "center" }));

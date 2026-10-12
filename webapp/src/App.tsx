@@ -18,6 +18,7 @@ import { request, usePipeline } from "./usePipeline";
 import { useStageFocus } from "./useStageFocus";
 import { PipelineTimeline } from "./components/PipelineTimeline";
 import { TelemetryGauge } from "./components/Telemetry";
+import { RestartConfirmation } from "./components/RestartConfirmation";
 
 const cn = (...values: Parameters<typeof clsx>) => twMerge(clsx(...values));
 const descriptions: Record<string, string> = {
@@ -331,6 +332,8 @@ export function App() {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [initial, setInitial] = useState<Run | null>(null);
   const [paused, setPaused] = useState(false);
+  const [restartGroup, setRestartGroup] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null),
     [setupError, setSetupError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
@@ -370,6 +373,7 @@ export function App() {
   }, [run?.status]);
   useEffect(() => {
     const pop = () => {
+      setRestartGroup(null);
       setInitial(null);
       setFollowing(false);
       setInspection(null);
@@ -382,6 +386,7 @@ export function App() {
     if (run && !terminal(run.status)) setFollowing(true);
   }, [run?.id]);
   function selectRun(next: string | null) {
+    setRestartGroup(null);
     setInitial(null);
     setPaused(false);
     setFollowing(false);
@@ -433,6 +438,36 @@ export function App() {
       setActionError((e as Error).message);
     }
   }
+  function dismissRestart() {
+    const group = restartGroup;
+    setRestartGroup(null);
+    if (group)
+      document
+        .getElementById(`timeline-${group}`)
+        ?.querySelector<HTMLButtonElement>("button")
+        ?.focus({ preventScroll: true });
+  }
+  async function restart() {
+    if (!run || !restartGroup || restarting) return;
+    setRestarting(true);
+    setActionError(null);
+    try {
+      const state = await request<Run>(`/api/pipeline/runs/${run.id}/restart`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ focus_group: restartGroup }),
+      });
+      selectRun(state.id);
+      setInitial(state);
+      setFollowing(true);
+      setSelected(restartGroup);
+      setRaw(false);
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setRestarting(false);
+    }
+  }
   const groups =
     config?.groups.map((g) => run?.groups[g.id] ?? blankGroup(g)) ?? [];
   const group = groups.find((g) => g.id === selected),
@@ -459,6 +494,7 @@ export function App() {
       ? "upstream-reconnecting"
       : connection;
   function openEvidence() {
+    setRestartGroup(null);
     setFollowing(false);
     endReview();
     setEvidenceOpen(true);
@@ -571,6 +607,7 @@ export function App() {
               endReview();
               setSelected(id);
               setInspection(null);
+              setRestartGroup(id);
             }}
             following={following}
             onFollow={(value) => {
@@ -580,6 +617,21 @@ export function App() {
             reviewing={reviewing}
             paused={paused}
             onPause={setPaused}
+            confirmationFor={restartGroup}
+            confirmation={
+              restartGroup && run ? (
+                <RestartConfirmation
+                  stage={
+                    groups.find((g) => g.id === restartGroup)?.label ??
+                    restartGroup
+                  }
+                  busy={restarting}
+                  description={`${!terminal(run.status) ? "Stops the current run. " : ""}Starts a new execution of this binary, with the view beginning here. Required earlier stages run again.`}
+                  onConfirm={() => void restart()}
+                  onCancel={dismissRestart}
+                />
+              ) : null
+            }
             connection={streamConnection}
             liveAfter={liveAfter}
             obscured={evidenceOpen}
@@ -611,7 +663,7 @@ export function App() {
                   <button
                     type="button"
                     aria-label="Stop execution"
-                    disabled={run.status === "cancelling"}
+                    disabled={run.status === "cancelling" || restarting}
                     onClick={() => void stop()}
                   >
                     Stop
@@ -620,6 +672,7 @@ export function App() {
                   <button
                     type="button"
                     aria-label="Start a new run"
+                    disabled={restarting}
                     onClick={() => selectRun(null)}
                   >
                     New run

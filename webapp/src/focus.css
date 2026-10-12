@@ -1058,3 +1058,88 @@
 .pipeline-timeline[data-paused="true"] .timeline-card {
   transition: none;
 }
+
+.focus-transport[data-expanded="true"] {
+  width: min(560px, calc(100% - 24px));
+  border: 1px solid #5d382b;
+}
+.restart-confirmation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  gap: 12px;
+  animation: confirmation-enter 220ms ease-out both;
+}
+.restart-confirm {
+  position: relative;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 20px;
+  border: 1px solid #e48b63;
+  border-radius: 8px;
+  color: #ffe9da;
+  background: #713721;
+  box-shadow:
+    0 0 18px #df633229,
+    inset 0 1px 0 #ffb28524;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+.restart-confirm::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 22px #f2763b4a;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+.restart-confirm:hover:not(:disabled)::after,
+.restart-confirm:focus-visible::after {
+  opacity: 1;
+}
+.restart-confirmation p {
+  margin: 0;
+  color: #c6b2a5;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+  max-width: 430px;
+}
+.restart-cancel {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+@keyframes confirmation-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .restart-confirmation {
+    animation: none;
+  }
+}
+
+.pipeline-timeline[data-paused="true"] .restart-confirmation {
+  animation: none;
+}
+@media (max-width: 720px) {
+  .restart-confirm {
+    min-height: 72px;
+  }
+}

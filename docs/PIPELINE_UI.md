@@ -159,6 +159,16 @@ scroll position and stage review. The ring disappears on disconnect, engine
 result, cancellation or terminal coordinator state; each dot retains its actual
 recorded status.
 
+Clicking anywhere on a card expands the floating controls with a centered,
+warm red/orange **Restart Analysis from {operation}?** confirmation. Cancel or
+Escape closes it without stopping the guest. Confirming stops that run if it is
+active, preserves its ledger, and creates a new execution of its retained input
+bytes. The new timeline begins at the chosen group; required earlier stages
+really execute again. The confirmation states this explicitly. This is a fresh
+execution, not a CPU/memory/socket checkpoint restore. Another active run is
+never stopped to restart a historical run; missing or changed retained inputs
+are rejected before stopping anything.
+
 The floating seconds dial uses `run.elapsed_ns`, the latest emitted engine
 monotonic timestamp. It does not interpolate missing engine time or imply a
 completion percentage. Its one-minute dial wraps every sixty measured seconds.
@@ -193,6 +203,7 @@ execution detector; it is not used as a UI proof metric.
 | `GET /api/pipeline/runs/{id}` | Projected snapshot with event cursor |
 | `GET /api/pipeline/runs/{id}/events?after=N` | Replay/follow engine and coordinator events |
 | `POST /api/pipeline/runs/{id}/cancel` | Stop and reap the guest process |
+| `POST /api/pipeline/runs/{id}/restart` with `{"focus_group":"lower"}` | Reexecute retained input; select the requested group in the new view |
 | `GET /api/pipeline/runs/{id}/journal` | Original engine JSONL |
 | `GET /api/pipeline/runs/{id}/artifacts/{name}` | Original x86/CLIF/RV64 artifact |
 
@@ -224,6 +235,9 @@ It exercises:
   after an nginx restart. Padding is never counted as lifted source.
 - Browser offline recovery, unsupported instructions, invalid ELF input,
   cancellation, bounded live rows, desktop/mobile layout, and raw event replay.
+- Card confirmation, Escape/Cancel, new Rust-server execution with the identical
+  input hash, repeated prerequisite stages, and a new preserved TCP connection.
+  Active uploaded runs continue until confirmation, then are reaped and rerun.
 - A fast real Rust server run showing all 13 observed groups before the result,
   independently measured engine time during review, paused progression and
   stable neighboring-card opacity on hover.

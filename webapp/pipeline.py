@@ -134,28 +134,53 @@ class PipelineRuns:
             self.db.execute("INSERT INTO events VALUES(?,?,?)", (run_id, event["seq"], encode(event)))
         self.changed.setdefault(run_id, asyncio.Event()).set()
 
-    def create(self, mode, name, data=None):
+    def create(self, mode, name, data=None, restart=None):
         if self.unavailable:
             raise RuntimeError(self.unavailable)
         if any(not task.done() for task in self.tasks.values()):
             raise RuntimeError("Another process run is active")
-        if mode == "rust-server" and not self.fixture.is_file():
+        if mode == "rust-server" and data is None and not self.fixture.is_file():
             raise RuntimeError("Build the Rust server with python3 scripts/build_web_fixture.py")
+        if data is None:
+            if mode != "rust-server":
+                raise ValueError("Binary input is required")
+            data = self.fixture.read_bytes()
         run_id = uuid.uuid4().hex
         work = self.root / run_id
         work.mkdir()
         binary = work / "input.elf"
-        binary.write_bytes(self.fixture.read_bytes() if mode == "rust-server" else data)
+        binary.write_bytes(data)
         state = {"id": run_id, "mode": mode, "input_name": name, "status": "starting", "revision": 0,
                  "created_unix_ns": str(time.time_ns()), "cursor": 0, "elapsed_ns": 0,
                  "groups": {g["id"]: blank_group(g) for g in self.groups}, "recent": [], "history": [],
                  "counters": {}, "artifact_count": 0, "engine_result": None, "engine_run_id": None,
                  "verification": None, "message": "Starting process runtime", "diagnostics": [],
                  "runner_sha256": hashlib.sha256(self.runner.read_bytes()).hexdigest()}
+        if restart is not None:
+            state["restart"] = restart
         self.states[run_id] = state
         self.update(run_id)
         self.tasks[run_id] = asyncio.create_task(self.run(run_id, binary))
         return state
+
+    async def restart(self, run_id, focus_group):
+        state = self.states[run_id]
+        if focus_group not in state["groups"]:
+            raise ValueError("Unknown operation group")
+        if any(key != run_id and not task.done() for key, task in self.tasks.items()):
+            raise RuntimeError("Another process run is active")
+        # Reuse the retained input, including the exact fixture bytes of an old
+        # demo. Validate it before stopping an active execution.
+        data = (self.root / run_id / "input.elf").read_bytes()
+        expected = state.get("input", {}).get("sha256")
+        if expected and hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError("Retained binary differs from the recorded input")
+        await self.cancel(run_id)
+        task = self.tasks.get(run_id)
+        if task is not None:
+            await asyncio.wait_for(asyncio.shield(task), 10)
+        return self.create(state["mode"], state["input_name"], data, restart={
+            "source_run_id": run_id, "focus_group": focus_group, "kind": "fresh-execution"})
 
     @staticmethod
     def kill(process):
@@ -413,6 +438,32 @@ async def cancel(request):
     return response(runs.snapshot(run_id))
 
 
+async def restart(request):
+    if not allowed(request):
+        return response({"error": "Cross-origin requests are not accepted"}, 403)
+    runs, run_id = manager(request), request.path_params["run_id"]
+    if not runs.snapshot(run_id):
+        return response({"error": "Run not found"}, 404)
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 512:
+            return response({"error": "Restart request is too large"}, 413)
+    try:
+        value = json.loads(body)
+        if not isinstance(value, dict) or set(value) != {"focus_group"} or not isinstance(value["focus_group"], str):
+            raise ValueError("Expected focus_group")
+        return response(await runs.restart(run_id, value["focus_group"]), 201)
+    except ValueError as error:
+        return response({"error": str(error)}, 400)
+    except FileNotFoundError:
+        return response({"error": "The original binary is no longer retained; open it again to run it"}, 410)
+    except asyncio.TimeoutError:
+        return response({"error": "The current run is still stopping; try again when it has ended"}, 409)
+    except (OSError, RuntimeError) as error:
+        return response({"error": str(error)}, 409)
+
+
 async def events(request):
     runs, run_id = manager(request), request.path_params["run_id"]
     state = runs.snapshot(run_id)
@@ -475,5 +526,6 @@ routes = [Route("/api/pipeline/config", config), Route("/api/pipeline/runs", his
           Route("/api/pipeline/runs/{run_id}", snapshot),
           Route("/api/pipeline/runs/{run_id}/events", events),
           Route("/api/pipeline/runs/{run_id}/cancel", cancel, methods=["POST"]),
+          Route("/api/pipeline/runs/{run_id}/restart", restart, methods=["POST"]),
           Route("/api/pipeline/runs/{run_id}/journal", journal),
           Route("/api/pipeline/runs/{run_id}/artifacts/{name}", artifact)]

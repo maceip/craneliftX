@@ -474,6 +474,7 @@ function TimelineStep({
   enabled,
   liveAfter,
   reviewing,
+  confirming,
 }: {
   group: Group;
   run: Run | null;
@@ -483,6 +484,7 @@ function TimelineStep({
   enabled: boolean;
   liveAfter: number | null;
   reviewing: boolean;
+  confirming: boolean;
 }) {
   const element = useRef<HTMLLIElement>(null);
   const [visible, setVisible] = useState(false),
@@ -577,14 +579,15 @@ function TimelineStep({
           }
         />
       )}
-      <div className="timeline-card">
+      <div className="timeline-card" onClick={onSelect}>
         <button
           type="button"
           className="timeline-stage-button"
           data-testid={`group-${group.id}`}
           data-state={state}
           aria-pressed={selected}
-          onClick={onSelect}
+          aria-expanded={confirming}
+          aria-controls={confirming ? "restart-confirmation" : undefined}
         >
           <span>
             <strong>{group.label}</strong>
@@ -642,6 +645,8 @@ export function PipelineTimeline({
   reviewing,
   paused,
   onPause,
+  confirmation,
+  confirmationFor,
 }: {
   groups: Group[];
   run: Run | null;
@@ -657,6 +662,8 @@ export function PipelineTimeline({
   reviewing: boolean;
   paused: boolean;
   onPause: (value: boolean) => void;
+  confirmation?: React.ReactNode;
+  confirmationFor: string | null;
 }) {
   const [reduced, setReduced] = useState(false),
     [visible, setVisible] = useState(true);
@@ -760,7 +767,8 @@ export function PipelineTimeline({
       data-reviewing={reviewing}
       data-paused={paused}
     >
-      <div className="focus-transport">
+      <div className="focus-transport" data-expanded={!!confirmation}>
+        {confirmation}
         <div className="focus-stream-caption">{status}</div>
         <div className="timeline-controls">
           {showPlayback && (
@@ -809,6 +817,7 @@ export function PipelineTimeline({
               enabled={enabled}
               liveAfter={liveAfter}
               reviewing={reviewing && following}
+              confirming={confirmationFor === group.id}
             />
           ))}
         </ol>

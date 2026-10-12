@@ -23,9 +23,23 @@ export function useStageFocus(
 
   useEffect(() => {
     const overview = !!run && run.id === freshRun;
-    progress.current = { overview, index: 0, since: performance.now() };
+    const groups = Object.values(run?.groups ?? {}).sort(
+      (a, b) => a.order - b.order,
+    );
+    const index =
+      overview && run?.restart
+        ? Math.max(
+            0,
+            groups.findIndex((g) => g.id === run.restart!.focus_group),
+          )
+        : 0;
+    progress.current = { overview, index, since: performance.now() };
     setReviewing(overview);
-    select(overview ? "run" : (run?.recent.at(-1)?.group ?? "run"));
+    select(
+      overview
+        ? (groups[index]?.id ?? "run")
+        : (run?.recent.at(-1)?.group ?? "run"),
+    );
     // Initialize once per run. A changing snapshot must never reset the view.
   }, [run?.id]);
 

@@ -64,6 +64,58 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state["groups"]["codegen"]["count"], 0)
             self.assertEqual(state["engine_result"]["status"], "failed")
 
+    async def test_restart_preserves_original_and_reexecutes_retained_binary(self):
+        state = self.runs.create("upload", "exit.elf", elf(b"\x31\xff\xb8\x3c\x00\x00\x00\x0f\x05"))
+        await asyncio.wait_for(self.runs.tasks[state["id"]], 10)
+        original = json.loads(json.dumps(state))
+        new = await self.runs.restart(state["id"], "codegen")
+        self.assertNotEqual(new["id"], state["id"])
+        self.assertEqual(new["restart"], {"source_run_id": state["id"], "focus_group": "codegen", "kind": "fresh-execution"})
+        await asyncio.wait_for(self.runs.tasks[new["id"]], 10)
+        self.assertEqual(new["status"], "completed", new["message"])
+        self.assertEqual(new["input"]["sha256"], original["input"]["sha256"])
+        self.assertNotEqual(new["engine_run_id"], original["engine_run_id"])
+        self.assertGreater(new["counters"]["rv64_steps"], 0)
+        self.assertGreater(new["groups"]["ingest"]["completed"], 0)
+        self.assertGreater(new["groups"]["load"]["completed"], 0)
+        self.assertEqual(state, original)
+
+    async def test_restart_reaps_only_its_source_run_after_validating_input(self):
+        data = elf(b"\xeb\xfe")
+        state = self.runs.create("upload", "loop.elf", data)
+        for _ in range(300):
+            if state["cursor"] > 20:
+                break
+            await asyncio.sleep(.01)
+        with self.assertRaisesRegex(ValueError, "Unknown operation"):
+            await self.runs.restart(state["id"], "invented")
+        binary = self.runs.root / state["id"] / "input.elf"
+        binary.write_bytes(data + b"changed")
+        with self.assertRaisesRegex(ValueError, "differs"):
+            await self.runs.restart(state["id"], "execute")
+        self.assertEqual(state["status"], "running")
+        binary.write_bytes(data)
+        new = await self.runs.restart(state["id"], "execute")
+        self.assertEqual(state["status"], "cancelled")
+        self.assertIsNone(state["engine_result"])
+        self.assertNotIn(state["id"], self.runs.processes)
+        with self.assertRaisesRegex(RuntimeError, "Another process"):
+            await self.runs.restart(state["id"], "ingest")
+        self.assertNotIn(new["status"], {"cancelled", "cancelling"})
+        await self.runs.cancel(new["id"])
+        await asyncio.wait_for(self.runs.tasks[new["id"]], 10)
+
+    async def test_missing_restart_input_does_not_create_a_replacement(self):
+        with self.assertRaisesRegex(ValueError, "Binary input is required"):
+            self.runs.create("upload", "missing.elf")
+        state = self.runs.create("upload", "exit.elf", elf(b"\x31\xff\xb8\x3c\x00\x00\x00\x0f\x05"))
+        await asyncio.wait_for(self.runs.tasks[state["id"]], 10)
+        (self.runs.root / state["id"] / "input.elf").unlink()
+        with self.assertRaises(FileNotFoundError):
+            await self.runs.restart(state["id"], "decode")
+        self.assertEqual(len(self.runs.states), 1)
+        self.assertEqual(state["status"], "completed")
+
     async def test_cancel_reaps_process_and_does_not_manufacture_success(self):
         state = self.runs.create("upload", "loop.elf", elf(b"\xeb\xfe"))
         for _ in range(300):
