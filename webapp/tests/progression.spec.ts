@@ -309,8 +309,23 @@ for (const viewport of [
           await neighbor.evaluate((el) => getComputedStyle(el).opacity),
         ).toBe(opacity);
         // Scroll backwards: the viewed card and map must move together.
+        await page.evaluate(() => {
+          (window as any).returnedToStart = false;
+          window.addEventListener(
+            "scrollend",
+            () => {
+              (window as any).returnedToStart = true;
+            },
+            { once: true },
+          );
+        });
         await page.mouse.wheel(0, -30000);
         await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+        // Hitting the top does not finish a native wheel gesture. Let the
+        // compositor settle before starting a separate keyboard interaction.
+        await expect
+          .poll(() => page.evaluate(() => (window as any).returnedToStart))
+          .toBe(true);
         await expect(current).toHaveAttribute("data-group", "ingest");
         await expect(ring).toHaveAttribute("data-current-stage", "ingest");
         await expect(
@@ -344,6 +359,9 @@ for (const viewport of [
         await page.emulateMedia({ reducedMotion: "reduce" });
         await expect(current).toHaveAttribute("data-motion", "off");
         await page.getByTestId("group-initialize").focus();
+        await expect(
+          page.locator("#timeline-initialize .continue-cue"),
+        ).toBeEnabled();
         await page.keyboard.press("Tab");
         // The card now has real inspection controls. Tab visits each memory
         // region before reaching the next card; all of them keep this card
@@ -356,7 +374,10 @@ for (const viewport of [
           .locator("#timeline-initialize .card-story button")
           .count();
         for (let i = 0; i < controls; i++) await page.keyboard.press("Tab");
-        await expect(page.getByTestId("group-decode")).toBeFocused();
+        await expect(
+          page.locator("#timeline-initialize .continue-cue"),
+        ).toBeFocused();
+        await page.keyboard.press("Enter");
         await expect(current).toHaveAttribute("data-group", "decode");
         await expect(current).toHaveAttribute("data-motion", "off");
         await page.emulateMedia({ reducedMotion: "no-preference" });

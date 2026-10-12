@@ -127,6 +127,13 @@ separate mint walkthrough ring. The numeric time is always measured engine time;
 a completed run keeps it fixed while the labeled walkthrough ring progresses.
 Pause/reduced motion suppress visual interpolation without stopping telemetry.
 
+A glowing double-down chevron appears below the selected card only after its
+walkthrough finishes. It fades when the card moves out of the reading
+position, and clicking or pressing Enter advances to the next card without
+starting another execution. The next card earns its own cue after its sequence;
+the summary has none. Pause freezes the small float, and reduced motion shows a
+still cue. Its position stays separate from the compact, expanding toolbar.
+
 `illustrations.spec.ts` captures before/operation/result frames for all nine
 cards, checks visible changes and pause/resume, compares memory, instruction,
 IR, RV64, syscall and execution data against independent receipts, verifies

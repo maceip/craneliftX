@@ -1431,3 +1431,87 @@
 .focus-shell .block-field {
   overflow: hidden;
 }
+
+/* A reader's next step appears only after the foreground sequence finishes. */
+.card-reading-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.focus-shell .continue-cue {
+  position: absolute;
+  z-index: 3;
+  left: calc(50% - 24px);
+  bottom: -8px;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #b4de91;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+.focus-shell .continue-cue[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.continue-cue svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 5px #99d876aa);
+}
+.continue-cue[data-visible="true"] .cue-motion {
+  animation: continue-float 1600ms ease-in-out infinite;
+}
+.continue-cue[data-animate="false"] .cue-motion {
+  animation-play-state: paused;
+}
+.focus-shell .continue-cue:focus-visible {
+  outline: 2px solid #eba36e;
+  outline-offset: 1px;
+}
+@keyframes continue-float {
+  0%,
+  100% {
+    transform: translateY(-2px);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translateY(2px);
+    opacity: 1;
+  }
+}
+.pipeline-timeline[data-paused="true"] .continue-cue {
+  transition: none;
+}
+@media (max-height: 650px) {
+  .focus-shell .continue-cue {
+    bottom: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .continue-cue,
+  .continue-cue .cue-motion {
+    animation: none !important;
+    transition: none !important;
+  }
+}

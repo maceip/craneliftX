@@ -27,6 +27,9 @@ function TimelineStep({
   evidence,
   reduced,
   onEvidence,
+  next,
+  onAdvance,
+  cueAllowed,
 }: {
   group: Scene;
   run: Run | null;
@@ -40,11 +43,18 @@ function TimelineStep({
   evidence: IllustrationEvidence;
   reduced: boolean;
   onEvidence: () => void;
+  next?: Scene;
+  onAdvance: () => void;
+  cueAllowed: boolean;
 }) {
   const element = useRef<HTMLLIElement>(null);
+  const readingCenter = useRef<HTMLSpanElement>(null);
   const pointerFocus = useRef(false);
   const [visible, setVisible] = useState(false),
     [prominence, setProminence] = useState(0);
+  const [inPosition, setInPosition] = useState(false),
+    [advanced, setAdvanced] = useState(false);
+  useEffect(() => setAdvanced(false), [selected]);
   const seq = group.last_event?.seq ?? 0;
   const state = group.state;
   useEffect(() => {
@@ -83,6 +93,42 @@ function TimelineStep({
   // must not consume an animation before this card is reached, or restart it
   // while it is being read. Completed and restored runs use the same gate.
   const motion = enabled && visible && selected && group.count > 0;
+  const sequenceReady =
+    hasStoryData(group, run) && (reduced || clock.progress >= 1);
+  useLayoutEffect(() => {
+    setInPosition(false);
+    if (!selected || !sequenceReady) return;
+    let observer: IntersectionObserver;
+    const observe = () => {
+      observer?.disconnect();
+      const marker = readingCenter.current;
+      if (!marker) return;
+      // Anchor to where the reader stopped, not an exact centered scroll
+      // position. One measurement at completion; scrolling only changes the
+      // intersection state, which fades the cue without a per-frame listener.
+      const top = marker.getBoundingClientRect().top;
+      observer = new IntersectionObserver(
+        ([entry]) => setInPosition(entry.isIntersecting),
+        {
+          rootMargin: `-${Math.max(0, top - 24)}px 0px -${Math.max(0, innerHeight - top - 24)}px 0px`,
+        },
+      );
+      observer.observe(marker);
+    };
+    observe();
+    window.addEventListener("resize", observe);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", observe);
+    };
+  }, [selected, sequenceReady]);
+  const cueVisible =
+    !!next &&
+    selected &&
+    inPosition &&
+    cueAllowed &&
+    !advanced &&
+    sequenceReady;
   return (
     <li
       ref={element}
@@ -102,6 +148,11 @@ function TimelineStep({
         } as React.CSSProperties
       }
     >
+      <span
+        ref={readingCenter}
+        className="card-reading-center"
+        aria-hidden="true"
+      />
       <span className="timeline-node" aria-hidden="true">
         {String(group.order).padStart(2, "0")}
       </span>
@@ -197,6 +248,29 @@ function TimelineStep({
           </span>
         </div>
       </div>
+      {next && (
+        <button
+          type="button"
+          className="continue-cue"
+          aria-label={`Continue to ${next.label}`}
+          title={`Scroll or continue to ${next.label}`}
+          aria-hidden={!cueVisible}
+          disabled={!cueVisible}
+          tabIndex={cueVisible ? 0 : -1}
+          data-visible={cueVisible}
+          data-animate={enabled}
+          onClick={() => {
+            setAdvanced(true);
+            onAdvance();
+          }}
+        >
+          <span className="cue-motion">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m6 5 6 6 6-6M6 13l6 6 6-6" />
+            </svg>
+          </span>
+        </button>
+      )}
     </li>
   );
 }
@@ -433,6 +507,19 @@ export function PipelineTimeline({
               evidence={evidence}
               reduced={reduced}
               onEvidence={onEvidence}
+              next={groups[i + 1]}
+              cueAllowed={!obscured && visible && !confirmation}
+              onAdvance={() => {
+                const next = groups[i + 1];
+                if (!next) return;
+                onSelect(next.id, false);
+                // Hiding a focused cue blurs its button during React's commit.
+                // Begin scrolling afterwards so that native blur cannot cancel
+                // the smooth scroll we just requested.
+                requestAnimationFrame(() =>
+                  center(next.id, reduced ? "instant" : "smooth"),
+                );
+              }}
             />
           ))}
         </ol>

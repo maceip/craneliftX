@@ -84,6 +84,11 @@ for (const viewport of [
         story = card.locator(".card-story");
       await expect(card).toHaveClass(/is-current/);
       await expect(story).toHaveAttribute("data-phase", "0");
+      const cue = card.locator(".continue-cue");
+      if (scene !== "result") {
+        await expect(cue).toHaveAttribute("data-visible", "false");
+        await expect(cue).toBeDisabled();
+      } else await expect(cue).toHaveCount(0);
       await expect(gauge).toHaveAttribute("data-walkthrough-progress", /^0\./);
       await expect
         .poll(() => factory.evaluate((c: any) => c.factoryState().scene))
@@ -116,6 +121,7 @@ for (const viewport of [
         ).toBe(0);
       }
       await expect(story).toHaveAttribute("data-phase", "2");
+      if (scene !== "result") await expect(cue).toHaveCSS("opacity", "0");
       await page.screenshot({
         path: info.outputPath(`${scene}-operation.png`),
       });
@@ -136,6 +142,16 @@ for (const viewport of [
       }
       await expect(story).toHaveAttribute("data-phase", "4");
       await expect(gauge).toHaveAttribute("data-walkthrough-progress", "1.000");
+      if (scene !== "result") {
+        await expect(cue).toHaveAttribute("data-visible", "true");
+        await expect(cue).toHaveCSS("opacity", "1");
+        await expect(
+          page.locator('.continue-cue[data-visible="true"]'),
+        ).toHaveCount(1);
+      } else
+        await expect(
+          page.locator('.continue-cue[data-visible="true"]'),
+        ).toHaveCount(0);
       await page.screenshot({ path: info.outputPath(`${scene}-result.png`) });
       expect(await hand.getAttribute("style")).toBe(seconds);
       expect(
@@ -268,6 +284,81 @@ for (const viewport of [
         ).toBe(true);
       }
     }
+    // The completion cue fades while the same card is leaving its reading
+    // position, before the next card is selected. Returning restores it.
+    const cue = page.locator("#timeline-ingest .continue-cue");
+    await page.screenshot({ path: info.outputPath("continue-cue.png") });
+    const bar = (await page.locator(".focus-transport").boundingBox())!;
+    const cueBox = (await cue.boundingBox())!;
+    expect(cueBox.y + cueBox.height).toBeLessThan(bar.y);
+    expect(bar.height).toBeLessThanOrEqual(56);
+    expect(bar.width).toBeLessThanOrEqual(170);
+    await cue.evaluate((el) => {
+      (window as any).cueFade = [];
+      const until = performance.now() + 500;
+      function frame() {
+        (window as any).cueFade.push(Number(getComputedStyle(el).opacity));
+        if (performance.now() < until) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    });
+    await page.mouse.move(viewport.width / 2, viewport.height / 2);
+    await page.mouse.wheel(0, 48);
+    await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+      "data-group",
+      "ingest",
+    );
+    await expect(cue).toHaveCSS("opacity", "0");
+    expect(
+      await page.evaluate(() =>
+        (window as any).cueFade.some(
+          (opacity: number) => opacity > 0 && opacity < 1,
+        ),
+      ),
+    ).toBe(true);
+    await page.mouse.wheel(0, -48);
+    await expect(cue).toHaveCSS("opacity", "1");
+    await cue.click();
+    await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+      "data-group",
+      "initialize",
+    );
+    const nextCue = page.locator("#timeline-initialize .continue-cue");
+    await expect(nextCue).toHaveCSS("opacity", "0");
+    await expect(nextCue).toHaveCSS("opacity", "1");
+    await page.getByRole("button", { name: "Pause animations" }).click();
+    // CSS pauses settle on the compositor's next frame. Wait for that commit
+    // before comparing the held pose, rather than sampling the click frame.
+    await expect
+      .poll(() =>
+        nextCue
+          .locator(".cue-motion")
+          .evaluate((el) =>
+            el
+              .getAnimations()
+              .every(
+                (animation) =>
+                  animation.playState === "paused" && !animation.pending,
+              ),
+          ),
+      )
+      .toBe(true);
+    const pausedCue = await nextCue
+      .locator(".cue-motion")
+      .evaluate((el) => getComputedStyle(el).transform);
+    await page.waitForTimeout(250);
+    expect(
+      await nextCue
+        .locator(".cue-motion")
+        .evaluate((el) => getComputedStyle(el).transform),
+    ).toBe(pausedCue);
+    await page.getByRole("button", { name: "Resume animations" }).click();
+    await nextCue.press("Enter");
+    await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+      "data-group",
+      "decode",
+    );
+    expect(new URL(page.url()).searchParams.get("run")).toBe(id);
     // The exact same saved run must open with a fresh, reader-controlled scene.
     await page.reload();
     await page.getByTestId("group-initialize").focus();
@@ -278,6 +369,15 @@ for (const viewport of [
     await expect(
       page.locator("#timeline-initialize .card-story"),
     ).toHaveAttribute("data-phase", "4");
+    await expect(page.locator("#timeline-initialize .continue-cue")).toHaveCSS(
+      "opacity",
+      "1",
+    );
+    expect(
+      await page
+        .locator("#timeline-initialize .continue-cue")
+        .evaluate((el) => el.getAnimations({ subtree: true }).length),
+    ).toBe(0);
     await expect
       .poll(() => factory.evaluate((c: any) => c.factoryState?.().running))
       .toBe(false);
@@ -299,6 +399,9 @@ test("different real inputs change the depicted byte groups and memory regions",
   const volumes = [];
   for (const size of [512, 16384]) {
     await page.goto("/");
+    await expect(
+      page.getByRole("button", { name: "Inspect your binary" }),
+    ).toBeEnabled();
     const program = elf(
       Buffer.from([0xb8, 60, 0, 0, 0, 0xbf, 0, 0, 0, 0, 0x0f, 0x05]),
       size,
