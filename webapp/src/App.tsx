@@ -18,7 +18,6 @@ import {
 import { request, usePipeline } from "./usePipeline";
 import { ArchitectureRail } from "./components/ArchitectureRail";
 import { PipelineTimeline } from "./components/PipelineTimeline";
-import { TelemetryGauge } from "./components/Telemetry";
 import { RestartConfirmation } from "./components/RestartConfirmation";
 import { TransportIcon } from "./components/TransportIcon";
 import { stageLabel } from "./pipelineCopy";
@@ -600,8 +599,8 @@ export function App() {
                 {run.message}
               </p>
             )}
-          <TelemetryGauge run={run} groups={scenes} stage={selectedScene} />
           <PipelineTimeline
+            onEvidence={openEvidence}
             groups={scenes}
             run={run}
             selected={selectedScene}

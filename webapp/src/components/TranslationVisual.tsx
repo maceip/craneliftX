@@ -35,15 +35,20 @@ function ArtifactPreview({
   artifact,
   visible,
   kind,
+  phase,
+  graph = false,
 }: {
   runId?: string;
   artifact: LedgerEvent | null;
   visible: boolean;
   kind: "clif" | "rv64";
+  phase: number;
+  graph?: boolean;
 }) {
   const [loaded, setLoaded] = useState<{
     key: string;
     text: string;
+    operations?: string[];
     error?: boolean;
   } | null>(null);
   const key =
@@ -85,7 +90,16 @@ function ArtifactPreview({
                   b.toString(16).padStart(2, "0"),
                 ).join(" "),
               ).join("\n");
-        if (!controller.signal.aborted) setLoaded({ key, text });
+        const operations =
+          kind === "clif"
+            ? new TextDecoder()
+                .decode(data)
+                .split("\n")
+                .slice(0, size === limit ? -1 : undefined)
+                .map((line) => line.trim())
+                .filter((line) => /^(v\d+\s*=|store\.|jump |return)/.test(line))
+            : [];
+        if (!controller.signal.aborted) setLoaded({ key, text, operations });
       } catch {
         if (!controller.signal.aborted)
           setLoaded({
@@ -108,16 +122,48 @@ function ArtifactPreview({
         {kind === "clif" ? "Cranelift IR" : "RV64 machine bytes"}
         {artifact ? ` · ${bytes(artifact.bytes)}` : ""}
       </small>
+      {graph && current && !current.error && (
+        <div
+          className="ir-graph"
+          data-ready={phase >= 2}
+          aria-label="Operations from this block's saved IR"
+        >
+          {(current.operations ?? [])
+            .filter((line, i) => i === 0 || !/= load\./.test(line))
+            .slice(0, 4)
+            .map((line, i) => (
+              <div key={i} style={{ transitionDelay: `${i * 150}ms` }}>
+                <code title={line}>{line}</code>
+                <span>↓</span>
+              </div>
+            ))}
+        </div>
+      )}
       <pre
         data-testid={`${kind}-preview`}
         data-loaded={!!current && !current.error}
+        data-ready={phase >= (kind === "clif" ? 1 : 2)}
       >
-        {current?.text ??
-          (artifact
-            ? "Reading saved artifact…"
-            : "Awaiting this block’s artifact")}
+        {kind === "rv64" && current && !current.error
+          ? current.text.split("\n").map((row, i, rows) => (
+              <span
+                className="emitted-row"
+                data-ready={phase >= Math.min(3, 1 + Math.floor(i / 2))}
+                key={i}
+              >
+                {row}
+                {i < rows.length - 1 ? "\n" : ""}
+              </span>
+            ))
+          : (current?.text ??
+            (artifact
+              ? "Reading saved artifact…"
+              : "Awaiting this block’s artifact"))}
       </pre>
       <small className="preview-note">
+        {graph && current?.operations
+          ? `${current.operations.length} IR operations in preview · block-level illustration. `
+          : ""}
         {kind === "clif" ? "First 7 lines" : "First 48 bytes"} · full artifact
         in Evidence
       </small>
@@ -132,6 +178,7 @@ export function TranslationVisual({
   decoded,
   lowered,
   visible,
+  phase,
 }: {
   group: Group;
   run: Run | null;
@@ -139,6 +186,7 @@ export function TranslationVisual({
   decoded?: LedgerEvent | null;
   lowered?: LedgerEvent | null;
   visible: boolean;
+  phase: number;
 }) {
   const lowering = group.id === "lower";
   const complete = output?.status === "completed";
@@ -169,16 +217,33 @@ export function TranslationVisual({
             artifact={blockArtifact(run, group, "clif")}
             visible={visible}
             kind="clif"
+            phase={phase}
           />
         )}
-        <TranslationArrow />
+        <div className="translation-process" data-ready={phase >= 1}>
+          <span>{lowering ? "Semantics" : "Cranelift"}</span>
+          <TranslationArrow />
+          <small>{lowering ? "Block → IR" : "IR → RV64"}</small>
+        </div>
         <ArtifactPreview
           runId={run?.id}
           artifact={blockArtifact(run, group, lowering ? "clif" : "rv64")}
           visible={visible}
           kind={lowering ? "clif" : "rv64"}
+          phase={phase}
+          graph={lowering}
         />
       </div>
+      {!lowering && (
+        <div className="emitted-record" data-ready={phase >= 3}>
+          <span>{complete ? bytes(output.rv64_bytes) : "Awaiting output"}</span>
+          <code>
+            {complete
+              ? `SHA-256 ${output.rv64_sha256?.slice(0, 24)}…`
+              : "No compilation receipt"}
+          </code>
+        </div>
+      )}
       <small className="visual-caption">
         {lowering
           ? `${group.last_event?.rip ?? "No reached block"}${complete ? ` · Semantics lowered in ${duration(output.elapsed_ns)}` : ""}`

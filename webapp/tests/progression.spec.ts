@@ -117,17 +117,9 @@ for (const viewport of [
             ...new Set((window as any).cardAnimations.map((a: any) => a.group)),
           ]),
         ).toEqual(["ingest"]);
-        const effects: Record<string, string> = {
-          ingest: "scan-receipt",
-          initialize: "scan-receipt",
-          decode: "opcode-arrive",
-          audit: "span-breathe",
-          lower: "designer-dash",
-          codegen: "designer-dash",
-          execute: "designer-wave",
-          syscall: "beam-receipt",
-          result: "focus-receipt",
-        };
+        const effects = Object.fromEntries(
+          groups.map((group) => [group.id, "story-arrive"]),
+        );
         const visits: { group: string; seq: number }[] = [];
         for (let i = 0; i < groups.length; i++) {
           const group = groups[i];
@@ -151,7 +143,9 @@ for (const viewport of [
           await expect(current).toHaveAttribute("data-group", group.id);
           await expect(step).toHaveAttribute("data-motion", "focused");
           await expect(
-            page.locator('.timeline-step:not(.is-current)[data-motion="focused"]'),
+            page.locator(
+              '.timeline-step:not(.is-current)[data-motion="focused"]',
+            ),
           ).toHaveCount(0);
           await expect
             .poll(() =>
@@ -326,16 +320,18 @@ for (const viewport of [
           "data-elapsed-ns",
           String(final.elapsed_ns),
         );
-        const scan = page.locator("#timeline-ingest .scan-light");
+        const factory = page.locator(".factory-backdrop canvas");
         const runningScans = () =>
-          scan.evaluate((el) =>
-            el.getAnimations().filter((a) => a.playState === "running").length,
-          );
+          factory.evaluate((el: any) => Number(!!el.factoryState?.().running));
         await expect.poll(runningScans).toBe(1);
-        const before = await scan.evaluate((el) => getComputedStyle(el).transform);
+        const before = await factory.evaluate(
+          (el: any) => el.factoryState().clocks.ingest,
+        );
         await expect
-          .poll(() => scan.evaluate((el) => getComputedStyle(el).transform))
-          .not.toBe(before);
+          .poll(() =>
+            factory.evaluate((el: any) => el.factoryState().clocks.ingest),
+          )
+          .toBeGreaterThan(before);
         // Motion controls continue to work after completion, with readable
         // recorded values and no new execution/navigation writes.
         await page.getByRole("button", { name: "Pause animations" }).click();
@@ -354,7 +350,9 @@ for (const viewport of [
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await expect(current).toHaveAttribute("data-motion", "focused");
         await page.getByRole("button", { name: "View evidence" }).click();
-        await expect(page.locator('.timeline-step[data-motion="focused"]')).toHaveCount(0);
+        await expect(
+          page.locator('.timeline-step[data-motion="focused"]'),
+        ).toHaveCount(0);
         // A restored snapshot has no fresh SSE receipt to trigger motion.
         await page.reload();
         await expect(current).toHaveAttribute("data-group", "ingest");

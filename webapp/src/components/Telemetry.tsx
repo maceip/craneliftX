@@ -1,6 +1,7 @@
 import React from "react";
 import { number, Run, terminal } from "../pipeline";
 import { Scene, sceneStatus } from "../pipelineScenes";
+import { Walkthrough } from "../walkthrough";
 
 // A display font, not telemetry: lit pixels spell values from engine receipts.
 const digits: Record<string, string[]> = {
@@ -47,15 +48,23 @@ export function TelemetryGauge({
   run,
   stage,
   groups,
+  clock,
+  enabled,
+  reduced,
 }: {
   run: Run | null;
   stage: string;
   groups: Scene[];
+  clock: Walkthrough;
+  enabled: boolean;
+  reduced: boolean;
 }) {
   const elapsed = run ? run.elapsed_ns / 1e9 : null;
-  // This is a seconds dial, never a percentage-complete ring. It moves only
-  // when an engine receipt supplies a new monotonic elapsed timestamp.
-  const angle = elapsed === null ? null : ((elapsed % 60) * Math.PI) / 30;
+  // A one-second sweep makes short engine runs visible. The outer mint ring
+  // is explicitly the reader's walkthrough; it never changes engine time.
+  const finished = !!run && terminal(run.status);
+  const angle = elapsed === null ? null : elapsed * 360;
+  const presentation = reduced ? 1 : clock.progress;
   // The map locates the stage being presented, not each sub-millisecond engine
   // transition. Observed dots stay lit when that group opens another span.
   const current = groups.some((group) => group.id === stage) ? stage : null;
@@ -93,6 +102,9 @@ export function TelemetryGauge({
         data-testid="telemetry-gauge"
         data-elapsed-ns={run?.elapsed_ns}
         data-terminal={run ? terminal(run.status) : false}
+        data-clock-mode={finished ? "recorded" : "live"}
+        data-walkthrough-progress={presentation.toFixed(3)}
+        data-moving={enabled}
       >
         <svg
           className="telemetry-dial"
@@ -100,6 +112,15 @@ export function TelemetryGauge({
           aria-hidden="true"
         >
           <circle className="dial-outline" cx="80" cy="80" r="69" />
+          <circle
+            className="walkthrough-ring"
+            cx="80"
+            cy="80"
+            r="74"
+            pathLength="100"
+            strokeDasharray={`${presentation * 100} 100`}
+            transform="rotate(-90 80 80)"
+          />
           {Array.from({ length: 60 }, (_, i) => {
             const a = (i * Math.PI) / 30,
               inner = i % 5 === 0 ? 57 : 62;
@@ -114,18 +135,31 @@ export function TelemetryGauge({
             );
           })}
           {angle !== null && (
-            <circle
-              className="dial-position"
-              cx={80 + Math.sin(angle) * 69}
-              cy={80 - Math.cos(angle) * 69}
-              r="3"
-            />
+            <g
+              className="engine-hand"
+              style={{ transform: `rotate(${angle}deg)` }}
+            >
+              <line x1="80" y1="16" x2="80" y2="30" />
+              <circle className="dial-position" cx="80" cy="16" r="3" />
+            </g>
           )}
         </svg>
         <div className="dial-readout">
-          <small>ENGINE TIME</small>
+          <small>{finished ? "RECORDED TIME" : "ENGINE TIME"}</small>
           <MatrixNumber value={elapsed === null ? "—" : elapsed.toFixed(1)} />
           <span>seconds</span>
+        </div>
+        <div className="gauge-legend">
+          <span className="engine-legend">
+            {finished ? "Engine stopped" : "1 turn / second"}
+          </span>
+          <span className="walkthrough-legend">
+            {reduced
+              ? "Static view"
+              : clock.progress >= 1
+                ? "View complete"
+                : `View ${groups.findIndex((g) => g.id === stage) + 1} walkthrough`}
+          </span>
         </div>
       </aside>
     </div>

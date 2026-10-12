@@ -7,6 +7,9 @@ export default defineConfig({
   timeout: 180_000,
   expect: { timeout: 15_000 },
   use: {
+    launchOptions: process.env.ISR_BROWSER_EXECUTABLE
+      ? { executablePath: process.env.ISR_BROWSER_EXECUTABLE }
+      : undefined,
     baseURL: process.env.ISR_BASE_URL || "http://127.0.0.1:8878",
     actionTimeout: 15000,
     navigationTimeout: 15000,

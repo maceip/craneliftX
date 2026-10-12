@@ -1,519 +1,19 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { fibDir, makeProj } from "thinking-orbs";
 import { ArchitectureRail } from "./ArchitectureRail";
 import { TransportIcon } from "./TransportIcon";
-import { TranslationArrow, TranslationVisual } from "./TranslationVisual";
-import { PerformanceSummary } from "./Telemetry";
-import { Scene, sceneStatus } from "../pipelineScenes";
-import { policyLabels } from "../pipelineCopy";
+import { TelemetryGauge } from "./Telemetry";
+import { CardIllustration, hasStoryData } from "./CardIllustration";
+import { FactoryBackdrop } from "./FactoryBackdrop";
 import {
-  bytes,
-  duration,
-  Group,
-  LedgerEvent,
-  number,
-  Run,
-  terminal,
-  timestamp,
-} from "../pipeline";
+  IllustrationEvidence,
+  Walkthrough,
+  useIllustrationEvidence,
+  useWalkthrough,
+} from "../walkthrough";
+import { Scene, sceneStatus } from "../pipelineScenes";
+import { number, Run, timestamp } from "../pipeline";
+const idleClock: Walkthrough = { progress: 0, phase: 0, playing: false };
 
-// Display only output belonging to the currently observed block. In particular,
-// never join block B's decode with block A's completed lowering/code generation.
-export function currentOutput(group?: Group): LedgerEvent | null {
-  if (!group) return null;
-  const last = group.last_event,
-    output = group.output;
-  if (
-    last?.block_id !== undefined &&
-    output?.block_id !== undefined &&
-    last.block_id !== output.block_id
-  )
-    return null;
-  return output;
-}
-function related(run: Run | null, id: string, blockId: unknown) {
-  const event = currentOutput(run?.groups[id]);
-  return blockId !== undefined && event?.block_id === blockId ? event : null;
-}
-function Orb({ items, label }: { items: string[]; label: string }) {
-  const project = makeProj(0.45, 0.25, 36, 36, 27);
-  // Reuse the recovered orb's sphere geometry. Each dot corresponds to an
-  // actual observed group/instruction; there are no decorative filler dots.
-  return (
-    <svg
-      className="ledger-orb"
-      viewBox="0 0 72 72"
-      role="img"
-      aria-label={label}
-    >
-      <circle className="orb-guide" cx="36" cy="36" r="28" />
-      <g className="orb-dots">
-        {items.map((item, index) => {
-          const [x, y, z] = project(...fibDir(index, items.length));
-          return (
-            <circle
-              key={item}
-              data-ledger-dot={item}
-              cx={x}
-              cy={y}
-              r={z > 0 ? 1.8 : 1.2}
-              opacity={z > 0 ? 1 : 0.4}
-            >
-              <title>{item}</title>
-            </circle>
-          );
-        })}
-      </g>
-    </svg>
-  );
-}
-function Beam({
-  from,
-  to,
-  source,
-  destination,
-}: {
-  from: string;
-  to: string;
-  source: string;
-  destination: string;
-}) {
-  return (
-    <div className="receipt-beam">
-      <div className="beam-end">
-        <small>{from}</small>
-        <strong>{source}</strong>
-      </div>
-      <svg viewBox="0 0 100 30" aria-hidden="true" className="beam-wire">
-        <path className="beam-track" d="M4 15H96" />
-        <path className="beam-dashes" d="M4 15H96" />
-        <circle className="beam-particle" cx="7" cy="15" r="3" />
-        <path className="beam-arrow" d="m89 9 7 6-7 6" />
-      </svg>
-      <div className="beam-end">
-        <small>{to}</small>
-        <strong>{destination}</strong>
-      </div>
-    </div>
-  );
-}
-// These outlines describe operations, not measurements. Data-bearing marks
-// (segments, opcodes, checks, dots) are rendered only from actual receipts.
-const operationOutlines = {
-  memory: "M8 9H56V53H8ZM8 23H56M8 38H56M17 15H23M17 30H30M17 45H24",
-  registers:
-    "M12 14H52V50H12ZM21 22H43V29H21ZM21 35H43V42H21ZM21 6V14M32 6V14M43 6V14M21 50V58M32 50V58M43 50V58",
-  decode:
-    "M7 14H24V27H7ZM7 37H24V50H7ZM30 32H55M47 24L55 32L47 40M39 13H57M39 51H57",
-  policy: "M8 12H56L38 34V49L26 55V34ZM17 21H47",
-  files: "M19 8H48V46H19ZM12 16V53H41M26 19H40M26 26H40M26 33H34",
-  result: "M32 8A24 24 0 1 1 31.99 8M32 18V32L41 39",
-  syscall: "M6 15H24V49H6ZM40 15H58V49H40ZM24 27H40M34 21L40 27L34 33M40 39H24",
-};
-function Waiting({
-  children,
-  kind,
-}: {
-  children: React.ReactNode;
-  kind: keyof typeof operationOutlines;
-}) {
-  return (
-    <div className="visual-waiting">
-      <svg className="waiting-diagram" viewBox="0 0 64 64" aria-hidden="true">
-        <path d={operationOutlines[kind]} />
-        <path className="operation-scan" d="M6 8H58" />
-      </svg>
-      <span>{children}</span>
-    </div>
-  );
-}
-function StageVisual({
-  group,
-  run,
-  visible,
-}: {
-  group: Group;
-  run: Run | null;
-  visible: boolean;
-}) {
-  const output = currentOutput(group);
-  const event = group.active ? group.last_event : (output ?? group.last_event);
-  const complete = output?.status === "completed";
-  const blockId = group.last_event?.block_id;
-  switch (group.id) {
-    case "run": {
-      const observed = Object.values(run?.groups ?? {}).filter(
-        (g) => g.count > 0,
-      );
-      return (
-        <div className="orb-caption">
-          <Orb
-            items={observed.map((g) => g.id)}
-            label={`${observed.length} operation groups have recorded events`}
-          />
-          <div>
-            <strong>
-              {Array.isArray(output?.groups)
-                ? `${output.groups.length} trace groups registered`
-                : "Waiting for a run"}
-            </strong>
-            <code>
-              Engines: {output?.decoder ?? "—"} · {output?.backend ?? "—"}
-            </code>
-            <small>
-              {Array.isArray(output?.groups)
-                ? "Group tracking enabled"
-                : "Awaiting trace group registration"}
-            </small>
-          </div>
-        </div>
-      );
-    }
-    case "ingest":
-      return (
-        <div className="input-illustration">
-          <div className="binary-sheet" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <i className="scan-light" />
-          </div>
-          <div>
-            <strong>{run?.input_name ?? "Open a binary to begin"}</strong>
-            <span>
-              Payload: {bytes(run?.input?.bytes)}
-              {run?.input ? " read" : " · input size not recorded"}
-            </span>
-            <code className="hash-strip" data-testid="ingest-hash">
-              {run?.input?.sha256 ?? "Awaiting the input fingerprint"}
-            </code>
-            <small>SHA-256</small>
-          </div>
-        </div>
-      );
-    case "load": {
-      const segments = output?.details?.segments;
-      if (!Array.isArray(segments))
-        return (
-          <Waiting kind="memory">
-            {group.active
-              ? "Validating the ELF and mapping its load segments"
-              : "Load mappings have not been recorded"}
-          </Waiting>
-        );
-      const largest = Math.max(...segments.map((s) => s.memory_bytes));
-      return (
-        <div className="segment-illustration" data-source-seq={output?.seq}>
-          {segments.slice(0, 4).map((s) => (
-            <div
-              className="segment-row"
-              key={s.address}
-              data-address={s.address}
-              data-bytes={s.memory_bytes}
-            >
-              <code>{s.address}</code>
-              <div className="segment-track">
-                <span
-                  style={{
-                    width: `${largest ? (s.memory_bytes / largest) * 100 : 0}%`,
-                  }}
-                />
-                <i className="scan-light" />
-              </div>
-              <span>
-                {bytes(s.memory_bytes)} · R{s.writable ? "W" : "–"}
-                {s.executable ? "X" : "–"}
-              </span>
-            </div>
-          ))}
-          <small>
-            {segments.length} mapped segments · mapped-region permissions
-            enforced
-            {segments.length > 4 ? " · first four shown" : ""}
-          </small>
-        </div>
-      );
-    }
-    case "initialize":
-      return complete ? (
-        <div className="register-illustration" data-source-seq={output.seq}>
-          {[
-            ["Entry RIP", output.entry_rip],
-            ["Guest RSP", output.guest_rsp],
-            ["RV64 stack", bytes(output.rv64_stack_bytes)],
-          ].map(([key, value]) => (
-            <div key={key}>
-              <small>{key}</small>
-              <code>{value}</code>
-            </div>
-          ))}
-          <small>
-            {number(output.state_words)} architectural state registers
-            initialized
-          </small>
-        </div>
-      ) : (
-        <Waiting kind="registers">
-          {group.active
-            ? "Initializing guest registers and stacks"
-            : "Guest state has not been initialized"}
-        </Waiting>
-      );
-    case "decode": {
-      const instructions =
-        output?.type === "harvest" ? output.instructions : null;
-      if (!Array.isArray(instructions))
-        return (
-          <Waiting kind="decode">
-            {group.active
-              ? `Decoding the reached block at ${group.last_event?.rip ?? "—"}`
-              : "No decoded instructions yet"}
-          </Waiting>
-        );
-      return (
-        <div
-          className="decode-illustration"
-          data-source-seq={output!.seq}
-          data-block-id={output!.block_id}
-        >
-          <div className="raw-byte-source">
-            <small>
-              RAW BYTES ·{" "}
-              {bytes(
-                instructions.reduce(
-                  (n, i) => n + i.bytes.replaceAll(" ", "").length / 2,
-                  0,
-                ),
-              )}
-            </small>
-            <div className="raw-byte-chips">
-              {instructions.map((i) => (
-                <code key={i.ip}>{i.bytes}</code>
-              ))}
-            </div>
-          </div>
-          <TranslationArrow />
-          <div
-            className="opcode-scroller"
-            role="region"
-            tabIndex={0}
-            aria-label="Decoded instruction bytes"
-          >
-            <ol className="opcode-track">
-              {instructions.map((i) => (
-                <li key={i.ip} data-ip={i.ip} data-bytes={i.bytes}>
-                  <code>{i.ip}</code>
-                  <span>{i.asm}</span>
-                </li>
-              ))}
-            </ol>
-            <small>
-              {instructions.length} instructions decoded · block{" "}
-              {output!.block_id} · Receipt: #{output!.seq}
-            </small>
-          </div>
-        </div>
-      );
-    }
-    case "audit":
-      return Array.isArray(output?.checks) ? (
-        <ul className="policy-illustration" data-source-seq={output.seq}>
-          {output.checks.map((check: any) => (
-            <li key={check.rule} className={`policy-${check.verdict}`}>
-              <span aria-hidden="true" />
-              <strong title={check.detail ?? check.label}>
-                {policyLabels[check.rule] ?? check.label}
-              </strong>
-              <small>
-                {check.verdict === "rejected"
-                  ? "Rejected"
-                  : check.verdict === "guarded"
-                    ? "Runtime checked"
-                    : "Passed"}
-              </small>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Waiting kind="policy">
-          {group.active
-            ? "Inspecting instruction, stack, memory and branch policy"
-            : "No instruction-policy findings recorded"}
-        </Waiting>
-      );
-    case "lower":
-    case "codegen":
-      return (
-        <TranslationVisual
-          group={group}
-          run={run}
-          output={output}
-          decoded={related(run, "decode", blockId)}
-          lowered={related(run, "lower", blockId)}
-          visible={visible}
-        />
-      );
-    case "artifacts": {
-      const files = [
-        ...new Map(
-          [
-            ...(run?.recent ?? []).filter((e) => e.type === "artifact"),
-            ...(output?.type === "artifact" ? [output] : []),
-          ].map((e) => [e.seq, e]),
-        ).values(),
-      ]
-        .sort((a, b) => b.seq - a.seq)
-        .slice(0, 3);
-      return files.length ? (
-        <ul className="file-illustration">
-          {files.map((file) => (
-            <li key={file.seq} data-source-seq={file.seq}>
-              <span className="receipt-file" aria-hidden="true">
-                ↳
-              </span>
-              <div>
-                <code>{file.name}</code>
-                <small>
-                  {bytes(file.bytes)} · SHA-256 {file.sha256.slice(0, 12)}…
-                </small>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Waiting kind="files">
-          {group.active
-            ? "Persisting source, CLIF and RV64 artifacts"
-            : "No artifacts saved"}
-        </Waiting>
-      );
-    }
-    case "execute":
-      return (
-        <div className="execution-illustration">
-          <div className="execution-register" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div>
-            <strong data-testid="timeline-rv64-steps">
-              {number(run?.counters.rv64_steps)}
-            </strong>
-            <span>RV64 instructions interpreted</span>
-            <small>
-              {number(run?.counters.block_executions)} basic block executions
-            </small>
-          </div>
-        </div>
-      );
-    case "syscall":
-      return event ? (
-        <div data-source-seq={event.seq}>
-          <Beam
-            from="Guest call"
-            to="Mediated host call"
-            source={
-              event.detail?.name
-                ? `sys_${event.detail.name}${typeof event.detail.number === "number" ? ` (0x${event.detail.number.toString(16)})` : ""}`
-                : event.number !== undefined
-                  ? `#${event.number}`
-                  : "—"
-            }
-            destination={
-              event.type === "syscall_completed"
-                ? `Returned ${event.detail?.result ?? "—"}`
-                : event.type === "syscall_failed"
-                  ? "Failed"
-                  : "Awaiting result"
-            }
-          />
-          <small className="visual-caption">
-            {event.syscall_rip ?? event.detail?.rip ?? ""}
-            {event.elapsed_ns !== undefined
-              ? ` · ${duration(event.elapsed_ns)}`
-              : ""}{" "}
-            · Receipt: #{event.seq}
-          </small>
-        </div>
-      ) : (
-        <Waiting kind="syscall">No system call has been observed</Waiting>
-      );
-    case "cache":
-      return (
-        <div className="cache-illustration">
-          <div className="cache-tiles">
-            {(run?.history ?? []).slice(-4).map((p) => (
-              <div key={p.seq} data-source-seq={p.seq}>
-                <small>Compilation</small>
-                <strong>{p.blocks}</strong>
-                <code>{bytes(p.bytes)} source reached</code>
-              </div>
-            ))}
-          </div>
-          <small>
-            {number(run?.counters.compiled_blocks)} compiled blocks ·{" "}
-            {number(run?.counters.cache_invalidations)} cache invalidations
-          </small>
-        </div>
-      );
-    case "result":
-      return run?.engine_result ? (
-        <PerformanceSummary run={run} />
-      ) : (
-        <Waiting kind="result">
-          {run && terminal(run.status)
-            ? "Run ended without a terminal engine receipt"
-            : "Waiting for the engine's final result"}
-        </Waiting>
-      );
-    default:
-      return null;
-  }
-}
-function SceneVisual({
-  scene,
-  run,
-  visible,
-}: {
-  scene: Scene;
-  run: Run | null;
-  visible: boolean;
-}) {
-  if (scene.id === "initialize")
-    return (
-      <div className="prepare-illustration">
-        {scene.sources.map((source) => (
-          <StageVisual
-            key={source.id}
-            group={source}
-            run={run}
-            visible={visible}
-          />
-        ))}
-      </div>
-    );
-  if (!["ingest", "execute"].includes(scene.id))
-    return <StageVisual group={scene.primary} run={run} visible={visible} />;
-  return (
-    <div className="scene-output">
-      <StageVisual group={scene.primary} run={run} visible={visible} />
-      {scene.id === "ingest" && (
-        <small className="scene-context">
-          {Array.isArray(run?.groups.run.output?.groups)
-            ? `${run.groups.run.output.groups.length} trace groups registered${run.input ? " · ELF read & fingerprinted" : ""}`
-            : "Awaiting trace group registration"}
-        </small>
-      )}
-      {scene.id === "execute" && (
-        <small className="scene-context" data-testid="scene-cache">
-          {number(run?.counters.compiled_blocks)} compiled blocks ·{" "}
-          {number(run?.counters.cache_invalidations)} cache invalidations
-        </small>
-      )}
-    </div>
-  );
-}
 function TimelineStep({
   group,
   run,
@@ -523,6 +23,10 @@ function TimelineStep({
   onFocus,
   enabled,
   confirming,
+  clock,
+  evidence,
+  reduced,
+  onEvidence,
 }: {
   group: Scene;
   run: Run | null;
@@ -532,6 +36,10 @@ function TimelineStep({
   onFocus: () => void;
   enabled: boolean;
   confirming: boolean;
+  clock: Walkthrough;
+  evidence: IllustrationEvidence;
+  reduced: boolean;
+  onEvidence: () => void;
 }) {
   const element = useRef<HTMLLIElement>(null);
   const pointerFocus = useRef(false);
@@ -653,7 +161,16 @@ function TimelineStep({
           </span>
         </button>
         <div className="stage-illustration" data-stage-visual={group.id}>
-          <SceneVisual scene={group} run={run} visible={visible} />
+          <CardIllustration
+            scene={group}
+            run={run}
+            visible={visible}
+            selected={selected}
+            clock={selected ? clock : idleClock}
+            evidence={evidence}
+            reduced={reduced}
+            onEvidence={onEvidence}
+          />
           <span className="receipt-glow" aria-hidden="true" />
         </div>
         <div className="timeline-provenance">
@@ -687,6 +204,7 @@ export function PipelineTimeline({
   onPause,
   confirmation,
   confirmationFor,
+  onEvidence,
 }: {
   groups: Scene[];
   run: Run | null;
@@ -700,7 +218,9 @@ export function PipelineTimeline({
   onPause: (value: boolean) => void;
   confirmation?: React.ReactNode;
   confirmationFor: string | null;
+  onEvidence: () => void;
 }) {
+  const [present, setPresent] = useState(true);
   const [reduced, setReduced] = useState(false),
     [visible, setVisible] = useState(true);
   useEffect(() => {
@@ -802,7 +322,23 @@ export function PipelineTimeline({
     }
     center(id);
   }
-  const enabled = !paused && !obscured && !reduced && visible && !!run;
+  const evidence = useIllustrationEvidence(run);
+  useEffect(() => {
+    const element = document.getElementById(`timeline-${selected}`);
+    if (!element) return;
+    const observer = new IntersectionObserver(([entry]) =>
+      setPresent(entry.isIntersecting),
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [selected, run?.id]);
+  const enabled =
+    !paused && !obscured && !reduced && visible && present && !!run;
+  const currentScene = groups.find((s) => s.id === selected);
+  const clock = useWalkthrough(
+    `${run?.id}:${selected}`,
+    enabled && !!currentScene && hasStoryData(currentScene, run),
+  );
   return (
     <section
       className="pipeline-timeline"
@@ -812,6 +348,23 @@ export function PipelineTimeline({
       data-navigation="manual"
       data-paused={paused}
     >
+      <FactoryBackdrop
+        key={run?.id ?? "idle"}
+        scene={selected}
+        active={
+          enabled && (groups.find((s) => s.id === selected)?.count ?? 0) > 0
+        }
+        reduced={reduced}
+        run={run}
+      />
+      <TelemetryGauge
+        run={run}
+        groups={groups}
+        stage={selected}
+        clock={clock}
+        enabled={enabled}
+        reduced={reduced}
+      />
       <ArchitectureRail
         run={run}
         groups={groups}
@@ -867,6 +420,10 @@ export function PipelineTimeline({
               onFocus={() => focusCard(group.id)}
               enabled={enabled}
               confirming={confirmationFor === group.id}
+              clock={clock}
+              evidence={evidence}
+              reduced={reduced}
+              onEvidence={onEvidence}
             />
           ))}
         </ol>

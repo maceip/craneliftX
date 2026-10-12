@@ -14,32 +14,32 @@ No backend or engine behavior changes.
 
 ## Visual mapping
 
-| Designer detail | Production implementation |
-| --- | --- |
-| Forest/peach palette, radial background, 48px grid | `webapp/src/designer.css` |
-| Inter and JetBrains Mono typography | Self-hosted Latin variable fonts, with OFL licenses in `webapp/public/fonts` |
-| Four-node architecture rail | `ArchitectureRail.tsx`, tied to the viewed group, observed receipts and actual engine time |
-| Card radii, borders, selected outline, typography, status colors | Shared styles across the designer's 9 cards |
-| Bytes → disassembly illustration | Actual `harvest` instructions and original bytes |
-| x86 → CLIF → RV64 illustrations | `TranslationVisual.tsx`, previews of saved artifacts for the exact block ID and RIP |
-| Dashed translation paths, scanning, execution bars | Animate only on the visible, selected card, including recorded results, with pause and reduced-motion support |
-| Floating transport, dial and matrix summary | Existing controls and measured values, restyled to match the export |
+| Designer detail                                                  | Production implementation                                                                                                                |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Forest/peach palette, radial background, 48px grid               | `webapp/src/designer.css`                                                                                                                |
+| Inter and JetBrains Mono typography                              | Self-hosted Latin variable fonts, with OFL licenses in `webapp/public/fonts`                                                             |
+| Four-node architecture rail                                      | `ArchitectureRail.tsx`, tied to the viewed group, observed receipts and actual engine time                                               |
+| Card radii, borders, selected outline, typography, status colors | Shared styles across the designer's 9 cards                                                                                              |
+| Bytes → disassembly illustration                                 | Actual `harvest` instructions and original bytes                                                                                         |
+| x86 → CLIF → RV64 illustrations                                  | `TranslationVisual.tsx`, previews of saved artifacts for the exact block ID and RIP                                                      |
+| Operation illustrations                                          | Five-step reader-paced sequences for file identity, memory mapping, decode, policy, IR, RV64 emission, execution, host calls and results |
+| Floating transport, dial and matrix summary                      | Existing controls and measured values, restyled to match the export                                                                      |
 
 Production now follows the designer's nine-card composition, titles and numbering.
 The thirteen engine groups remain unchanged. `pipelineScenes.ts` is a presentation
 projection, with each original group assigned exactly once:
 
-| Card | Title | Original trace groups |
-| --- | --- | --- |
-| 01 | Ingest binary | `run`, `ingest` |
-| 02 | Prepare guest | `load`, `initialize` |
-| 03 | Disassemble block | `decode` |
-| 04 | Verify safety policy | `audit` |
-| 05 | Lift to Cranelift IR | `lower` |
-| 06 | Compile to RV64 | `codegen`, `artifacts` |
-| 07 | Execute RV64 code | `execute`, `cache` |
-| 08 | Handle system call | `syscall` |
-| 09 | Execution summary | `result` |
+| Card | Title                | Original trace groups  |
+| ---- | -------------------- | ---------------------- |
+| 01   | Ingest binary        | `run`, `ingest`        |
+| 02   | Prepare guest        | `load`, `initialize`   |
+| 03   | Disassemble block    | `decode`               |
+| 04   | Verify safety policy | `audit`                |
+| 05   | Lift to Cranelift IR | `lower`                |
+| 06   | Compile to RV64      | `codegen`, `artifacts` |
+| 07   | Execute RV64 code    | `execute`, `cache`     |
+| 08   | Handle system call   | `syscall`              |
+| 09   | Execution summary    | `result`               |
 
 Card event/span counts include their constituent groups; the footer cites the
 newest original receipt. Nested span durations are not summed. Partial memory
@@ -52,7 +52,7 @@ continues to expose all thirteen original groups and the unmodified journal.
 Selecting a raw group in Evidence returns to its containing card. Restart uses
 the card's primary group ID and retains the existing fresh-execution contract.
 Cards share dimensions and retain the preceding/following card. The architecture
-rail remains a read-only diagram. The separate artist factory assets are not used.
+rail remains a read-only diagram. The updated 2026-10-12 factory renderer is now used as a subdued background on the selected card. A single WebGL canvas moves between card hosts; a new run receives a fresh renderer. The foreground diagrams explain actual recorded operations.
 The [factory correction handoff](FACTORY_HANDOFF.md) defines their nine scene
 states, Cranelift/RV64 copy and reader-controlled animation contract before integration.
 
@@ -94,3 +94,39 @@ Compare reference and integrated screenshots, inspect all cards and recorded
 transitions, then repeat browser acceptance against the exact deployed commit.
 The local review evidence lives under `.isr-state/designer-import`; deployment
 proofs live under `.isr-state/deploy`.
+
+## Recorded operation walkthroughs
+
+`CardIllustration.tsx` owns the foreground diagrams. `walkthrough.ts` supplies a
+5.2-second presentation clock that starts only after the selected card has
+recorded data, pauses with visibility/Evidence/motion controls, and resets when a
+new card or run is selected. It never changes engine counters, status or time.
+Reduced motion presents the complete still diagram. Raw receipts remain in
+Evidence; captions identify recorded walkthroughs.
+
+Memory diagrams distinguish file bytes and zero-fill, show actual permissions,
+and separate the guest stack from the RV64 interpreter stack. Byte and
+instruction selection is linked by recorded IP. Policy gates retain guarded,
+passed and rejected distinctions. IR nodes are selected from the actual bounded
+CLIF preview; their relationship to source is explicitly block-level. RV64
+rows reveal the saved bytes. Execution tiles show the busiest recorded
+translations, with logarithmic intensity and exact counts on inspection.
+
+Completed runs recover TCP exchanges and hot blocks from a streaming journal
+read capped at 16 MiB, retaining at most 24 exchanges, 24 translations, 80
+progress samples and eight invalidations. Larger journals are explicitly
+identified as samples. The original journal is unchanged. Snapshot evidence
+remains usable if the download fails. Selecting a summary track opens Evidence.
+
+The gauge has a peach engine hand (one revolution per recorded second) and a
+separate mint walkthrough ring. The numeric time is always measured engine time;
+a completed run keeps it fixed while the labeled walkthrough ring progresses.
+Pause/reduced motion suppress visual interpolation without stopping telemetry.
+
+`illustrations.spec.ts` captures before/operation/result frames for all nine
+cards, checks visible changes and pause/resume, compares memory, instruction,
+IR, RV64, syscall and execution data against independent receipts, verifies
+engine-hand and walkthrough-ring behavior, and checks the shared factory
+canvas on desktop and phone layouts. Different real ELF inputs must produce
+different byte-group diagrams and actual memory sizes. These checks supplement
+the existing real-engine, navigation, restart, recovery and upload acceptance.

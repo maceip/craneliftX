@@ -928,9 +928,9 @@ test("timeline motion follows the reader, preserves neighbors and pauses indepen
   await expect(
     page.locator('.timeline-step:not([data-motion="off"])'),
   ).toHaveCount(1);
-  await expect(page.locator('[data-stage-visual="result"]')).toHaveText(
-    "Run ended without a terminal engine receipt",
-  );
+  await expect(
+    page.locator('[data-stage-visual="result"] .story-empty'),
+  ).toHaveText("Run ended without a terminal engine receipt");
   await info.attach("timeline-receipt", {
     body: JSON.stringify({
       id: final.id,
