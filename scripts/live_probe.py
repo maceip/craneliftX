@@ -94,7 +94,12 @@ class LiveConsumer:
         assert self.events == journal_events, "SSE payloads differ from committed journal"
         assert self.reconnections == 1
         compiled = [r for r in self.receipts if r["event"]["type"] == "compilation_progress"]
-        assert len(compiled) > 1 and all(r["runner_alive"] for r in compiled)
+        # The tail of a valid live stream can still be in the socket buffer when
+        # the process exits. Require positive live delivery and exact complete
+        # journal reconciliation, rather than requiring every receipt to beat
+        # process exit (a scheduler race on fast runs).
+        live_compiled = [r for r in compiled if r["runner_alive"]]
+        assert len(live_compiled) > 1, "compilation was only observed after process exit"
         terminal_time = int(journal_events[-1]["timestamp_unix_ns"])
         before_result = [r for r in compiled if int(r["received_unix_ns"]) < terminal_time]
         assert len(before_result) > 1, "compilation was only observed after completion"
@@ -106,6 +111,8 @@ class LiveConsumer:
                 "events_received": len(self.events), "reconnections": self.reconnections,
                 "gaps": 0, "duplicates": 0, "matches_durable_journal": True,
                 "compilation_updates_before_result": len(before_result),
+                "compilation_updates_while_runner_alive": len(live_compiled),
+                "compilation_updates_received_after_exit": len(compiled) - len(live_compiled),
                 "first_compilation_received_unix_ns": before_result[0]["received_unix_ns"],
                 "last_compilation_received_unix_ns": before_result[-1]["received_unix_ns"],
                 "groups": catalog}
