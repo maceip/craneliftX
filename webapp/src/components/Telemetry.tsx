@@ -1,6 +1,6 @@
 import React from "react";
-import { groupState, number, Run, terminal } from "../pipeline";
-import { stageLabel, stageStatus } from "../pipelineCopy";
+import { number, Run, terminal } from "../pipeline";
+import { Scene, sceneStatus } from "../pipelineScenes";
 
 // A display font, not telemetry: lit pixels spell values from engine receipts.
 const digits: Record<string, string[]> = {
@@ -46,20 +46,19 @@ export function MatrixNumber({ value }: { value: string }) {
 export function TelemetryGauge({
   run,
   stage,
+  groups,
 }: {
   run: Run | null;
   stage: string;
+  groups: Scene[];
 }) {
   const elapsed = run ? run.elapsed_ns / 1e9 : null;
   // This is a seconds dial, never a percentage-complete ring. It moves only
   // when an engine receipt supplies a new monotonic elapsed timestamp.
   const angle = elapsed === null ? null : ((elapsed % 60) * Math.PI) / 30;
-  const groups = Object.values(run?.groups ?? {}).sort(
-    (a, b) => a.order - b.order,
-  );
   // The map locates the stage being presented, not each sub-millisecond engine
   // transition. Observed dots stay lit when that group opens another span.
-  const current = run?.groups[stage] ? stage : null;
+  const current = groups.some((group) => group.id === stage) ? stage : null;
   return (
     <div className="telemetry-stack">
       <ol
@@ -71,7 +70,7 @@ export function TelemetryGauge({
         data-cursor={run?.cursor ?? 0}
       >
         {groups.map((group) => {
-          const state = groupState(group, run?.status);
+          const state = group.state;
           return (
             <li
               key={group.id}
@@ -80,8 +79,8 @@ export function TelemetryGauge({
               data-observed={group.count > 0}
               data-current={current === group.id}
               aria-current={current === group.id ? "step" : undefined}
-              title={`${group.order}. ${stageLabel(group)} · ${stageStatus(group, run?.status)}`}
-              aria-label={`${stageLabel(group)}: ${stageStatus(group, run?.status)}${current === group.id ? ", displayed stage" : ""}`}
+              title={`${group.order}. ${group.label} · ${sceneStatus(group, run?.status)}`}
+              aria-label={`${group.label}: ${sceneStatus(group, run?.status)}${current === group.id ? ", displayed stage" : ""}`}
             >
               <span className="thermometer-dot" />
             </li>

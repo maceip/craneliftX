@@ -19,17 +19,40 @@ No backend or engine behavior changes.
 | Forest/peach palette, radial background, 48px grid | `webapp/src/designer.css` |
 | Inter and JetBrains Mono typography | Self-hosted Latin variable fonts, with OFL licenses in `webapp/public/fonts` |
 | Four-node architecture rail | `ArchitectureRail.tsx`, tied to the viewed group, observed receipts and actual engine time |
-| Card radii, borders, selected outline, typography, status colors | Shared styles across all 13 cards |
+| Card radii, borders, selected outline, typography, status colors | Shared styles across the designer's 9 cards |
 | Bytes → disassembly illustration | Actual `harvest` instructions and original bytes |
 | x86 → CLIF → RV64 illustrations | `TranslationVisual.tsx`, previews of saved artifacts for the exact block ID and RIP |
 | Dashed translation paths, scanning, execution bars | Existing visible/live span and fresh-receipt motion gates, with pause and reduced-motion support |
 | Floating transport, dial and matrix summary | Existing controls and measured values, restyled to match the export |
 
-The prototype combines thirteen engine groups into nine scenes. Production
-keeps all thirteen, including run registration, separate mapping and context
-initialization, artifacts and code-cache activity. Cards share dimensions and
-retain the visible preceding/following card. The architecture rail is a read-only
-diagram, not a second navigation bar.
+Production now follows the designer's nine-card composition, titles and numbering.
+The thirteen engine groups remain unchanged. `pipelineScenes.ts` is a presentation
+projection, with each original group assigned exactly once:
+
+| Card | Title | Original trace groups |
+| --- | --- | --- |
+| 01 | Ingest binary | `run`, `ingest` |
+| 02 | Prepare guest | `load`, `initialize` |
+| 03 | Disassemble block | `decode` |
+| 04 | Verify safety policy | `audit` |
+| 05 | Lift to Cranelift IR | `lower` |
+| 06 | Compile to RV64 | `codegen`, `artifacts` |
+| 07 | Execute RV64 code | `execute`, `cache` |
+| 08 | Handle system call | `syscall` |
+| 09 | Execution summary | `result` |
+
+Card event/span counts include their constituent groups; the footer cites the
+newest original receipt. Nested span durations are not summed. Partial memory
+preparation cannot claim the guest context is ready. Any constituent failure
+remains visible. Translation previews retain the primary codegen block identity
+rather than taking an artifact receipt as a new block.
+
+The stage map, rail, reading order and restart prompts use nine cards. Evidence
+continues to expose all thirteen original groups and the unmodified journal.
+Selecting a raw group in Evidence returns to its containing card. Restart uses
+the card's primary group ID and retains the existing fresh-execution contract.
+Cards share dimensions and retain the preceding/following card. The architecture
+rail remains a read-only diagram. The separate artist factory assets are not used.
 
 The prototype's sample numbers, timestamps, illustrative IR/assembly,
 scene-indexed timer, always-running animations and placeholder Evidence actions
@@ -42,7 +65,7 @@ Evidence. Reading recorded output never changes engine time or replays execution
 ## Acceptance
 
 `npm --prefix webapp run test:experience` records desktop and mobile journeys
-through all thirteen cards. It checks the no-input hold, exact forward ring
+through all nine cards. It checks the no-input hold, exact forward ring
 sequence, scrolling/click/touch/keyboard navigation, hover opacity, real clock,
 gauge/card separation, self-hosted fonts and exact artifact preview contents
 against independently downloaded, SHA-256-checked receipts. The full browser

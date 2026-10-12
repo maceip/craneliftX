@@ -107,8 +107,8 @@ span can become active again when the next block reaches that operation.
 ## Connected timeline and motion
 
 The dark launch screen offers **Run interactive pipeline** and **Inspect your binary**. During a run,
-all thirteen groups occupy a connected vertical timeline, centered on one large
-operation card. The preceding and following cards remain partly visible and
+the thirteen trace groups are presented in the designer's nine-card vertical timeline,
+centered on one large card. The mapping is documented in [Designer integration](DESIGNER_INTEGRATION.md). The preceding and following cards remain partly visible and
 dimmed. There is no navigation bar or persistent side inspector. **Evidence**
 opens an explicit modal containing the original event inspector, counters,
 network verification, activity graph and downloadable ledger.
@@ -117,16 +117,16 @@ padding, flat elevation and typography. Operation glyphs share one size per
 breakpoint; controls share a single height, radius and type size. Motion uses
 one accent, cycle duration and receipt-pulse duration across the timeline.
 
-Each group has an operation-specific illustration: input scanning, ELF segment
+Each card shows its constituent groups' actual output: input scanning, ELF segment
 mapping, register initialization, decoded instruction bytes, policy findings,
 x86-to-CLIF and CLIF-to-RV64 flows, artifact receipts, execution, syscall bridging,
-compilation history, and the terminal result. The recovered scanner, sphere and
+cache counts, and the terminal result. Artifacts and cache retain their full
+original inspectors in Evidence. The scanner and
 beam motifs use actual input hashes, segment addresses and lengths, instruction
 bytes, block IDs, emitted code sizes, artifact hashes, and runtime counters.
-Sphere dots correspond one-for-one to observed groups or decoded instructions.
 Related decode/CLIF/RV64 values are joined only when their block IDs match.
 
-A new run starts on Initialize Pipeline and stays there until the user scrolls
+A new run starts on Ingest binary and stays there until the user scrolls
 or clicks another card. There are no timed holds, automatic stage advances or
 engine pauses. The runtime proceeds at full speed, and the browser continues
 applying actual ledger updates to every card. The caption distinguishes the
@@ -148,7 +148,7 @@ stops these animations; the engine and live data keep running. Motion controls
 disappear when the run ends. **Evidence** opens the event inspector without
 changing execution.
 
-Above the seconds dial, the thermometer has one dot per catalog group. Its steady
+Above the seconds dial, the thermometer has one dot per presentation card. Its steady
 ring locates the card being inspected, including after execution ends. Observed
 dots stay filled when an operation runs again; failures retain their failure
 color. This is an inspection map, not a claim that the engine is currently
@@ -240,7 +240,7 @@ It exercises:
 - Previously visited card confirmation, Escape/Cancel, new Rust-server execution with the identical
   input hash, repeated prerequisite stages, and a new preserved TCP connection.
   Active uploaded runs continue until confirmation, then are reaped and rerun.
-- Desktop and mobile walkthroughs of all 13 cards from a real Rust server run:
+- Desktop and mobile walkthroughs of all nine cards from a real Rust server run:
   the engine completes while the first card stays selected, even after seven
   idle seconds; wheel/click navigation, readable centered cards and one matching
   thermometer ring; no backward ring jumps during forward navigation; unchanged

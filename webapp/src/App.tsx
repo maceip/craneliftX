@@ -1,3 +1,4 @@
+import { pipelineScenes, sceneForGroup } from "./pipelineScenes";
 import React, { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -321,7 +322,7 @@ export function App() {
   const [id, setId] = useState<string | null>(() =>
     new URLSearchParams(location.search).get("run"),
   );
-  const [selected, setSelected] = useState("run"),
+  const [selected, setSelected] = useState("ingest"),
     [inspection, setInspection] = useState<LedgerEvent | null>(null);
   const [raw, setRaw] = useState(false),
     [filter, setFilter] = useState("all"),
@@ -366,7 +367,7 @@ export function App() {
     const pop = () => {
       setRestartGroup(null);
       setInitial(null);
-      setSelected("run");
+      setSelected("ingest");
       setInspection(null);
       setId(new URLSearchParams(location.search).get("run"));
     };
@@ -377,7 +378,7 @@ export function App() {
     setRestartGroup(null);
     setInitial(null);
     setPaused(false);
-    setSelected("run");
+    setSelected("ingest");
     setInspection(null);
     setActionError(null);
     setId(next);
@@ -408,7 +409,7 @@ export function App() {
       });
       selectRun(state.id);
       setInitial(state);
-      setSelected("run");
+      setSelected("ingest");
       setRaw(false);
     } catch (e) {
       setActionError((e as Error).message);
@@ -459,6 +460,8 @@ export function App() {
       ...(run?.groups[g.id] ?? blankGroup(g)),
       label: stageLabel(g),
     })) ?? [];
+  const scenes = pipelineScenes(run, config?.groups ?? []);
+  const selectedScene = sceneForGroup(selected);
   const group = groups.find((g) => g.id === selected),
     shown =
       inspection ??
@@ -502,7 +505,7 @@ export function App() {
       />
       {!id ? (
         <main className="launch-screen">
-          <ArchitectureRail run={null} groups={groups} />
+          <ArchitectureRail run={null} groups={scenes} />
           <h1>
             Zero-trust binary execution via live <span>ISA re-targeting.</span>
           </h1>
@@ -596,11 +599,11 @@ export function App() {
                 {run.message}
               </p>
             )}
-          <TelemetryGauge run={run} stage={selected} />
+          <TelemetryGauge run={run} groups={scenes} stage={selectedScene} />
           <PipelineTimeline
-            groups={groups}
+            groups={scenes}
             run={run}
-            selected={selected}
+            selected={selectedScene}
             onView={(id) => {
               setSelected(id);
               setInspection(null);
@@ -616,7 +619,7 @@ export function App() {
               restartGroup && run ? (
                 <RestartConfirmation
                   stage={
-                    groups.find((g) => g.id === restartGroup)?.label ??
+                    scenes.find((g) => g.id === restartGroup)?.label ??
                     restartGroup
                   }
                   busy={restarting}

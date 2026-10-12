@@ -1,3 +1,8 @@
+import {
+  pipelineScenes,
+  sceneStatus,
+  sceneForGroup,
+} from "../src/pipelineScenes";
 import { elf } from "./elf";
 import { test, expect, Page } from "@playwright/test";
 import { createHash } from "node:crypto";
@@ -101,7 +106,7 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   });
   await page.getByRole("button", { name: "Run interactive pipeline" }).click();
   await expect(page).toHaveURL(/run=/);
-  await expect(page.locator(".timeline-stage-button")).toHaveCount(13);
+  await expect(page.locator(".timeline-stage-button")).toHaveCount(9);
   await expect(
     page.getByRole("status").filter({ hasText: "Live stream" }),
   ).toBeVisible();
@@ -195,11 +200,40 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   } as Run;
   for (const event of journal) projected = applyLedger(projected, event);
   expect(projected.groups).toEqual(final.groups);
-  for (const group of Object.values(final.groups))
-    await expect(page.getByTestId(`group-${group.id}`)).toHaveAttribute(
-      "data-state",
-      groupState(group, final.status),
+  const scenes = pipelineScenes(final, Object.values(final.groups));
+  expect(scenes).toHaveLength(9);
+  expect(
+    scenes.flatMap((scene) => scene.sources.map((g) => g.id)).sort(),
+  ).toEqual(Object.keys(final.groups).sort());
+  expect(scenes.reduce((count, scene) => count + scene.count, 0)).toBe(
+    final.cursor,
+  );
+  for (const scene of scenes) {
+    const button = page.getByTestId(`group-${scene.id}`);
+    await expect(button).toHaveAttribute("data-state", scene.state);
+    await expect(button.locator("strong")).toHaveText(scene.label);
+    await expect(button.locator("small")).toHaveText(
+      `${scene.count.toLocaleString("en-US")} ${scene.count === 1 ? "event" : "events"} · ${scene.completed.toLocaleString("en-US")} completed ${scene.completed === 1 ? "span" : "spans"}`,
     );
+  }
+  const partial = {
+    ...final,
+    groups: {
+      ...final.groups,
+      initialize: blankGroup(final.groups.initialize),
+    },
+  };
+  const partialPrepare = pipelineScenes(
+    partial,
+    Object.values(final.groups),
+  ).find((scene) => scene.id === "initialize")!;
+  expect(partialPrepare.state).toBe("Observed");
+  expect(sceneStatus(partialPrepare, partial.status)).toBe(
+    "Partially recorded",
+  );
+  const primaryCodegen = scenes.find((scene) => scene.id === "codegen")!;
+  expect(primaryCodegen.primary).toBe(final.groups.codegen);
+  expect(primaryCodegen.last_event).toEqual(final.groups.artifacts.last_event);
   expect(final.groups.audit.completed).toBe(final.counters.compiled_blocks);
   expect(final.groups.audit.output?.verdict).toBe("accepted");
   await openEvidence(page, "audit");
@@ -228,6 +262,20 @@ test("13 groups consume real Rust server events live, recover a connection, and 
   expect(JSON.parse(await page.getByTestId("raw-event").innerText())).toEqual(
     final.groups.decode.output,
   );
+  for (const source of Object.values(final.groups)) {
+    await openEvidence(page, source.id);
+    await expect(
+      page.getByLabel("Inspect operation group").locator("option"),
+    ).toHaveCount(13);
+    await expect(page.getByLabel("Inspect operation group")).toHaveValue(
+      source.id,
+    );
+    await page.getByRole("button", { name: "Back to execution" }).click();
+    await expect(page.locator(".timeline-step.is-current")).toHaveAttribute(
+      "data-group",
+      sceneForGroup(source.id),
+    );
+  }
   await openEvidence(page, "artifacts");
   await page.getByRole("button", { name: "View output" }).click();
   const artifact = final.groups.artifacts.output!;
@@ -446,7 +494,7 @@ test("unavailable execution and invalid requests are visible and rejected", asyn
   ).toBe(404);
   await upload(page, "wrong-format.elf", Buffer.from("This is not an ELF"));
   await expect.poll(async () => (await runSummary(page)).status).toBe("failed");
-  await expect(page.getByTestId("group-load")).toHaveAttribute(
+  await expect(page.getByTestId("group-initialize")).toHaveAttribute(
     "data-state",
     "Failed",
   );
@@ -592,7 +640,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   await upload(page, "timeline-syscalls.elf", program);
   await expect.poll(() => sequence(page)).toBeGreaterThan(100);
   expect((await runSummary(page)).status).toBe("running");
-  await expect(page.locator(".stage-thermometer li")).toHaveCount(13);
+  await expect(page.locator(".stage-thermometer li")).toHaveCount(9);
   await expect(
     page.locator('.stage-thermometer [data-current="true"]'),
   ).toHaveCount(1);
@@ -720,19 +768,21 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   // Scrolling updates the inspection map without changing engine execution.
   await page.mouse.wheel(0, -20000);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-  const firstCard = page.locator("#timeline-run .timeline-card");
+  const firstCard = page.locator("#timeline-ingest .timeline-card");
   await expect
     .poll(() =>
       firstCard.evaluate((el) => Number(getComputedStyle(el).opacity)),
     )
     .toBe(1);
-  await expect(page.locator("#timeline-run .completion-detent")).toBeVisible();
+  await expect(
+    page.locator("#timeline-ingest .completion-detent"),
+  ).toBeVisible();
   await expect(
     page.locator('.stage-thermometer [data-current="true"]'),
   ).toHaveCount(1);
   await expect(page.getByTestId("stage-thermometer")).toHaveAttribute(
     "data-current-stage",
-    "run",
+    "ingest",
   );
   await page.screenshot({ path: info.outputPath("scroll-history-mobile.png") });
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -811,10 +861,12 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   for (const group of ["lower", "codegen"]) {
     const output = final.groups[group].output!;
     await expect(
-      page.locator(`[data-stage-visual="${group}"] > [data-block-id]`),
+      page.locator(`[data-stage-visual="${group}"] [data-block-id]`),
     ).toHaveAttribute("data-block-id", String(output.block_id));
     await expect(
-      page.locator(`[data-stage-visual="${group}"] > [data-source-seq]`),
+      page.locator(
+        `[data-stage-visual="${group}"] .translation-visual[data-source-seq]`,
+      ),
     ).toHaveAttribute("data-source-seq", String(output.seq));
   }
   const journal = (
@@ -830,7 +882,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
   expect(motions.some((m: any) => m.kind === "active-span")).toBe(true);
   expect(motions.some((m: any) => m.kind === "receipt")).toBe(true);
   for (const motion of motions)
-    expect(journal[motion.seq - 1]?.group).toBe(motion.group);
+    expect(sceneForGroup(journal[motion.seq - 1]?.group)).toBe(motion.group);
   const operations = await page.evaluate(
     () => (window as any).operationReceipts,
   );
@@ -859,10 +911,13 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     projected = applyLedger(projected, event);
     if (bySeq.has(event.seq)) {
       const receipt: any = bySeq.get(event.seq);
-      expect(projected.groups[receipt.group].count).toBeGreaterThan(0);
+      expect(
+        pipelineScenes(projected, Object.values(projected.groups)).find(
+          (scene) => scene.id === receipt.group,
+        )!.count,
+      ).toBeGreaterThan(0);
       expect(receipt.observed).toEqual(
-        Object.values(projected.groups)
-          .sort((a, b) => a.order - b.order)
+        pipelineScenes(projected, Object.values(projected.groups))
           .filter((g) => g.count > 0)
           .map((g) => g.id),
       );

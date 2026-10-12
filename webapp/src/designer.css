@@ -927,3 +927,30 @@
 .focus-shell .state-observed i {
   background: #9ac67c;
 }
+
+/* Nine designer scenes share the original thirteen trace groups. */
+.focus-shell .scene-output,
+.focus-shell .prepare-illustration {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+.focus-shell .scene-context {
+  color: #9aa596;
+  line-height: 1.6;
+}
+.focus-shell .prepare-illustration .register-illustration {
+  margin-top: 0;
+}
+.focus-shell .prepare-illustration .register-illustration > div {
+  padding: 13px 14px;
+}
+@media (max-width: 600px) {
+  .focus-shell .prepare-illustration {
+    gap: 12px;
+  }
+  .focus-shell .prepare-illustration .register-illustration > div {
+    padding: 10px 8px;
+  }
+}

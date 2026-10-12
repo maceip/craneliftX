@@ -3,12 +3,12 @@ import { fibDir, makeProj } from "thinking-orbs";
 import { ArchitectureRail } from "./ArchitectureRail";
 import { TranslationArrow, TranslationVisual } from "./TranslationVisual";
 import { PerformanceSummary } from "./Telemetry";
-import { policyLabels, stageStatus } from "../pipelineCopy";
+import { Scene, sceneStatus } from "../pipelineScenes";
+import { policyLabels } from "../pipelineCopy";
 import {
   bytes,
   duration,
   Group,
-  groupState,
   LedgerEvent,
   number,
   Run,
@@ -470,6 +470,49 @@ function StageVisual({
       return null;
   }
 }
+function SceneVisual({
+  scene,
+  run,
+  visible,
+}: {
+  scene: Scene;
+  run: Run | null;
+  visible: boolean;
+}) {
+  if (scene.id === "initialize")
+    return (
+      <div className="prepare-illustration">
+        {scene.sources.map((source) => (
+          <StageVisual
+            key={source.id}
+            group={source}
+            run={run}
+            visible={visible}
+          />
+        ))}
+      </div>
+    );
+  if (!["ingest", "execute"].includes(scene.id))
+    return <StageVisual group={scene.primary} run={run} visible={visible} />;
+  return (
+    <div className="scene-output">
+      <StageVisual group={scene.primary} run={run} visible={visible} />
+      {scene.id === "ingest" && (
+        <small className="scene-context">
+          {Array.isArray(run?.groups.run.output?.groups)
+            ? `${run.groups.run.output.groups.length} trace groups registered${run.input ? " · ELF read & fingerprinted" : ""}`
+            : "Awaiting trace group registration"}
+        </small>
+      )}
+      {scene.id === "execute" && (
+        <small className="scene-context" data-testid="scene-cache">
+          {number(run?.counters.compiled_blocks)} compiled blocks ·{" "}
+          {number(run?.counters.cache_invalidations)} cache invalidations
+        </small>
+      )}
+    </div>
+  );
+}
 function TimelineStep({
   group,
   run,
@@ -480,7 +523,7 @@ function TimelineStep({
   liveAfter,
   confirming,
 }: {
-  group: Group;
+  group: Scene;
   run: Run | null;
   selected: boolean;
   context: string;
@@ -495,7 +538,7 @@ function TimelineStep({
     [prominence, setProminence] = useState(0);
   const seq = group.last_event?.seq ?? 0,
     seen = useRef(seq);
-  const state = groupState(group, run?.status);
+  const state = group.state;
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) =>
       setVisible(entry.isIntersecting),
@@ -551,6 +594,7 @@ function TimelineStep({
       id={`timeline-${group.id}`}
       className={`timeline-step ${selected ? "is-current" : ""}`}
       data-group={group.id}
+      data-source-groups={group.sources.map((source) => source.id).join(" ")}
       data-context={context}
       data-state={state}
       data-motion={busy ? "active-span" : flash ? "receipt" : "off"}
@@ -588,7 +632,9 @@ function TimelineStep({
         >
           <span>
             <strong>{group.label}</strong>
-            <small>
+            <small
+              title={`Trace groups: ${group.sources.map((source) => source.id).join(", ")}`}
+            >
               {group.count
                 ? `${number(group.count)} ${group.count === 1 ? "event" : "events"} · ${number(group.completed)} completed ${group.completed === 1 ? "span" : "spans"}`
                 : "No events recorded"}
@@ -598,11 +644,11 @@ function TimelineStep({
             className={`timeline-state state-${state.toLowerCase().replaceAll(" ", "-")}`}
           >
             <i aria-hidden="true" />
-            {stageStatus(group, run?.status)}
+            {sceneStatus(group, run?.status)}
           </span>
         </button>
         <div className="stage-illustration" data-stage-visual={group.id}>
-          <StageVisual group={group} run={run} visible={visible} />
+          <SceneVisual scene={group} run={run} visible={visible} />
           <span
             key={`${seq}:${selected}`}
             className="receipt-glow"
@@ -643,7 +689,7 @@ export function PipelineTimeline({
   confirmation,
   confirmationFor,
 }: {
-  groups: Group[];
+  groups: Scene[];
   run: Run | null;
   selected: string;
   onSelect: (id: string, revisit: boolean) => void;
@@ -773,7 +819,10 @@ export function PipelineTimeline({
         run={run}
         groups={groups}
         stage={selected}
-        animate={enabled && (run?.groups[selected]?.active ?? 0) > 0}
+        animate={
+          enabled &&
+          (groups.find((scene) => scene.id === selected)?.active ?? 0) > 0
+        }
       />
       <div className="focus-transport" data-expanded={!!confirmation}>
         {confirmation}

@@ -1,7 +1,7 @@
 import { expect, Page, test } from "@playwright/test";
 import { Run } from "../src/pipeline";
 import { elf } from "./elf";
-import { stageLabel } from "../src/pipelineCopy";
+import { sceneLabel } from "../src/pipelineScenes";
 
 const currentId = (page: Page) => new URL(page.url()).searchParams.get("run");
 const state = async (page: Page, id = currentId(page)): Promise<Run> =>
@@ -63,7 +63,7 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
   await expect(footer).toHaveAttribute("data-expanded", "true");
   expect((await footer.boundingBox())!.height).toBeGreaterThan(before);
   const confirm = page.getByRole("button", {
-    name: `Restart Analysis from ${stageLabel(original.groups.lower)} ?`,
+    name: `Restart Analysis from ${sceneLabel("lower")} ?`,
     exact: true,
   });
   await expect(confirm).toBeFocused();
@@ -93,7 +93,7 @@ test("a previously visited card opens a glowing confirmation and restarts the ex
     "audit",
   );
   await expect(panel).toContainText(
-    `Restart Analysis from ${stageLabel(original.groups.audit)} ?`,
+    `Restart Analysis from ${sceneLabel("audit")} ?`,
   );
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   expect(restartRequests).toBe(0);
@@ -188,7 +188,7 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
   expect((await state(page)).status).toBe("running");
   await page
     .getByRole("button", {
-      name: `Restart Analysis from ${stageLabel(original.groups.initialize)} ?`,
+      name: `Restart Analysis from ${sceneLabel("initialize")} ?`,
       exact: true,
     })
     .click();

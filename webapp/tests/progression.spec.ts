@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { pipelineScenes } from "../src/pipelineScenes";
 import { test, expect } from "@playwright/test";
 import { Run } from "../src/pipeline";
 import { createHash } from "node:crypto";
@@ -58,7 +60,7 @@ for (const viewport of [
       const snapshot = async (): Promise<Run> =>
         (await page.request.get(`/api/pipeline/runs/${id}`)).json();
       try {
-        await expect(current).toHaveAttribute("data-group", "run");
+        await expect(current).toHaveAttribute("data-group", "ingest");
         const firstCursor = Number(await ring.getAttribute("data-cursor"));
         const initialScroll = await page.evaluate(() => scrollY);
         await expect
@@ -70,7 +72,7 @@ for (const viewport of [
         expect(final.verification?.first_connection_responses).toBe(12);
         // Deliberately outwait both rejected 4s/6s timers, without any input.
         await page.waitForTimeout(7000);
-        await expect(current).toHaveAttribute("data-group", "run");
+        await expect(current).toHaveAttribute("data-group", "ingest");
         expect(await page.evaluate(() => scrollY)).toBe(initialScroll);
         await expect(page.getByRole("status")).toContainText(
           "Recorded results",
@@ -79,9 +81,22 @@ for (const viewport of [
           "data-elapsed-ns",
           String(final.elapsed_ns),
         );
-        const groups = Object.values(final.groups).sort(
-          (a, b) => a.order - b.order,
+        const groups = pipelineScenes(final, Object.values(final.groups));
+        expect(groups.map((g) => g.label)).toEqual(
+          [
+            ...readFileSync(
+              new URL(
+                "../../docs/design-source/chunder-pipeline.dc.html",
+                import.meta.url,
+              ),
+              "utf8",
+            ).matchAll(/<h2[^>]*>([^<]+)<\/h2>/g),
+          ]
+            .slice(0, 9)
+            .map((match) => match[1]),
         );
+        await expect(page.locator(".timeline-step")).toHaveCount(9);
+        await expect(ring.locator("li")).toHaveCount(9);
         const visits: { group: string; seq: number }[] = [];
         for (let i = 0; i < groups.length; i++) {
           const group = groups[i];
@@ -152,7 +167,7 @@ for (const viewport of [
             )!;
             expect(receipt).toBeTruthy();
             expect(name).toBe(
-              `block-${String(group.last_event!.block_id).padStart(5, "0")}-${group.last_event!.rip.slice(2)}.${name!.split(".").at(-1)}`,
+              `block-${String(group.primary.last_event!.block_id).padStart(5, "0")}-${group.primary.last_event!.rip.slice(2)}.${name!.split(".").at(-1)}`,
             );
             const response = await page.request.get(
               `/api/pipeline/runs/${id}/artifacts/${name}`,
@@ -182,6 +197,25 @@ for (const viewport of [
             );
             await expect(preview.locator("pre")).toHaveText(expected);
           }
+          const clipped = await step.evaluate((el) => {
+            const footer = Math.min(
+              el.querySelector(".timeline-provenance")!.getBoundingClientRect()
+                .top,
+              el
+                .querySelector(".stage-illustration > :first-child")!
+                .getBoundingClientRect().bottom,
+            );
+            return [
+              ...el.querySelectorAll(
+                ".scene-context, .prepare-illustration small, .register-illustration > div",
+              ),
+            ]
+              .filter(
+                (item) => item.getBoundingClientRect().bottom > footer + 1,
+              )
+              .map((item) => item.textContent);
+          });
+          expect(clipped).toEqual([]);
           // Fixed telemetry must leave the currently viewed card unobscured.
           const cardBox = (await step.locator(".timeline-card").boundingBox())!;
           const gaugeBox = (await page
@@ -205,7 +239,7 @@ for (const viewport of [
         );
         expect(stageChanges).toEqual(groups.map((g) => g.id));
         // Hovering a neighbor must not abruptly dim either card.
-        const neighbor = page.locator("#timeline-cache .timeline-card");
+        const neighbor = page.locator("#timeline-syscall .timeline-card");
         await page.mouse.move(5, 5);
         // Finish the scroll-driven fade before measuring hover in isolation.
         await expect
@@ -232,10 +266,10 @@ for (const viewport of [
         // Scroll backwards: the viewed card and map must move together.
         await page.mouse.wheel(0, -30000);
         await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
-        await expect(current).toHaveAttribute("data-group", "run");
-        await expect(ring).toHaveAttribute("data-current-stage", "run");
+        await expect(current).toHaveAttribute("data-group", "ingest");
+        await expect(ring).toHaveAttribute("data-current-stage", "ingest");
         await expect(
-          page.locator("#timeline-run .completion-detent"),
+          page.locator("#timeline-ingest .completion-detent"),
         ).toBeVisible();
         await expect(page.getByTestId("telemetry-gauge")).toHaveAttribute(
           "data-elapsed-ns",
@@ -251,7 +285,9 @@ for (const viewport of [
           .split("\n")
           .map((line) => JSON.parse(line));
         for (const visit of visits)
-          expect(journal[visit.seq - 1]?.group).toBe(visit.group);
+          expect(
+            groups.find((g) => g.id === visit.group)!.sources.map((g) => g.id),
+          ).toContain(journal[visit.seq - 1]?.group);
         await info.attach(
           viewport.name === "desktop"
             ? "progression-receipt"
@@ -263,6 +299,9 @@ for (const viewport of [
               stage_changes: stageChanges,
               engine_elapsed_ns: final.elapsed_ns,
               all_observed_groups_presented: true,
+              scene_groups: Object.fromEntries(
+                groups.map((g) => [g.id, g.sources.map((source) => source.id)]),
+              ),
               stage_ring_tracks_manual_navigation: true,
               idle_hold_ms: 7000,
               no_navigation_writes: true,
