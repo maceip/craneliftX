@@ -1,11 +1,11 @@
-# Chunder: legacy curated ISR API
+# Ski: legacy curated ISR API
 
 The current frontend uses the process runtime and all 13 ledger groups. See
 [the live pipeline UI guide](PIPELINE_UI.md) for its setup and streaming contract.
 This document describes the retained `/api/runs` three-tier API and its earlier
 frontend; its browser controls and acceptance checks do not describe the current UI.
 
-Public website: **https://chunder.public.computer/**.
+Public website: **https://ski.public.computer/**.
 
 The browser controls a curated Rust worker. Each worker owns its live x86 code,
 GuestContext objects, buffers, TCP sockets, and embedded interpreter. Translation
@@ -173,7 +173,7 @@ After public routing is configured, run the browser suite against that exact URL
 
 ```sh
 cd webapp
-ISR_BASE_URL=https://chunder.public.computer npm run test:e2e
+ISR_BASE_URL=https://ski.public.computer npm run test:e2e
 ```
 
 External-site mode verifies Baby, Medium, full Large, live updates, artifacts,
@@ -214,23 +214,23 @@ deployment is recorded separately below.
 
 ## Public deployment
 
-Chunder runs on `vectorheart` at `78.141.219.102`. The authoritative Knot zone
-already contained `chunder.public.computer A 78.141.219.102`; deployment verified
-that record on both nameservers and public resolvers without changing it.
+Ski runs on `vectorheart` at `78.141.219.102`. The owner changed DNS to
+`ski.public.computer A 78.141.219.102` before the October 12 hostname migration.
+Deployment verifies the record and TLS without modifying DNS.
 
 The existing internal service and state paths retain their original names so
 saved journals and service ownership remain intact:
 
 | Component | Location |
 | --- | --- |
-| Release | `/srv/craneliftx/releases/20261011T040216Z-880b009502e2` |
+| Releases | `/srv/craneliftx/releases/<timestamp>-<commit>` |
 | Active release | `/srv/craneliftx/current` |
-| systemd unit | `craneliftx.service` (description: Chunder live ISR demo coordinator) |
+| systemd unit | `craneliftx.service` (description: Ski live ISR demo coordinator) |
 | Coordinator | `127.0.0.1:8879` |
 | Durable reports | `/var/lib/craneliftx/runs.sqlite` |
-| Public proxy | `/etc/caddy/chunder.caddy`, imported by the shared Caddyfile |
+| Public proxy | `/etc/caddy/ski.caddy`, imported by the shared Caddyfile |
 
-`deploy/chunder.caddy` is the deployed site configuration. Caddy terminates HTTPS
+`deploy/ski.caddy` is the deployed site configuration. Caddy terminates HTTPS
 with a Let's Encrypt certificate, redirects HTTP to HTTPS, and flushes streamed
 events immediately. The browser loads the same compiled assets recorded in the
 release manifest. The source, build output, and deployment configuration have
@@ -242,7 +242,11 @@ the new site was added is
 `/etc/caddy/Caddyfile.before-chunder-20261011T040216Z-880b009502e2`. A rollback must
 preserve any later edits to the shared proxy configuration and the durable report
 database. The deployment added one site route and verified preservation of the
-46 existing routes before reloading Caddy.
+46 existing routes before reloading Caddy. The October 12 migration replaces
+only this site route and its Caddy import with `ski.public.computer` and
+`/etc/caddy/ski.caddy`. It backs up the shared Caddyfile, site configuration,
+service unit and durable databases before activating the new release.
+Historical deployment receipts below retain the hostname used when recorded.
 
 ## Public acceptance run
 
@@ -266,7 +270,7 @@ systemd restarted it, the unfinished run became **Interrupted**, saved Large
 results survived, no worker was orphaned, and a new Baby run passed. The shared
 Caddy service was not stopped for this check.
 
-Inspect the [saved public Large run](https://chunder.public.computer/?run=cab4d532d06c4776a299d4ad1f1a385d)
+Inspect the [saved public Large run](https://ski.public.computer/?run=cab4d532d06c4776a299d4ad1f1a385d)
 and [deployment receipt](evidence/2026-10-11-chunder-public.json). Full reports,
 browser screenshots, the HTML test report, and a consistent SQLite backup are
 retained under `.isr-state/deploy/`. The release manifest verifies 49 selected

@@ -510,7 +510,7 @@ async def journal(request):
     state = manager(request).snapshot(request.path_params["run_id"])
     if not state or not state.get("ledger"):
         return response({"error": "No engine journal yet"}, 404)
-    return FileResponse(state["ledger"], media_type="application/x-ndjson", filename=f"chunder-{state['id']}.jsonl")
+    return FileResponse(state["ledger"], media_type="application/x-ndjson", filename=f"ski-{state['id']}.jsonl")
 
 
 async def artifact(request):

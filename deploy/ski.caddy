@@ -1,5 +1,5 @@
-# Public routing for the dedicated Chunder service on vectorheart.
-chunder.public.computer {
+# Public routing for the dedicated Ski service on vectorheart.
+ski.public.computer {
     @assets path /dist/*
     header @assets Cache-Control "no-cache"
     header X-Content-Type-Options "nosniff"

@@ -1,5 +1,5 @@
 [Unit]
-Description=Chunder live ISR demo coordinator
+Description=Ski live ISR demo coordinator
 After=network.target
 
 [Service]

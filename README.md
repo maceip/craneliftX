@@ -1,7 +1,7 @@
-# Chunder
+# Ski
 
 An in-process x86-64 → RISC-V ISR engine, with a live demonstration at
-[chunder.public.computer](https://chunder.public.computer/).
+[ski.public.computer](https://ski.public.computer/).
 
 The active project is the Rust crate at this repository's root:
 
@@ -172,7 +172,7 @@ tests, not formal verification or proof for arbitrary x86 binaries.
 
 ## Live pipeline UI
 
-Chunder displays all 13 operation groups from the process runtime and consumes
+Ski displays all 13 operation groups from the process runtime and consumes
 its original ledger events over SSE while execution continues. Open a supported
 static x86-64 Linux ELF or run the freestanding Rust TCP server through Cranelift
 RV64 and the interpreter. Inspect decoded instructions, generated artifacts,

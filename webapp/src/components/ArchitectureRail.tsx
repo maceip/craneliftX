@@ -47,8 +47,8 @@ export function ArchitectureRail({
     >
       <div className="rail-location">
         <img
-          src="/dist/chunder-icon.png"
-          alt="Chunder"
+          src="/dist/ski-icon.png"
+          alt="Ski"
           width={18}
           height={18}
         />

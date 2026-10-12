@@ -1,4 +1,4 @@
-# Chunder live execution pipeline
+# Ski live execution pipeline
 
 The frontend displays the current state of the actual `isr-process` runtime.
 It accepts a static Linux x86-64 ELF or starts the repository's freestanding
@@ -278,6 +278,6 @@ screenshots for clipping, brightness, map alignment and unexpected scrolling;
 passing assertions alone are not visual acceptance.
 
 Run the full browser suite before publishing. After publishing, rerun it against
-`ISR_BASE_URL=https://chunder.public.computer`, inspect the public walkthroughs,
+`ISR_BASE_URL=https://ski.public.computer`, inspect the public walkthroughs,
 and verify deployed assets and source commit. Report local behavior, public
 behavior and engine evidence separately; never substitute a build for those checks.
