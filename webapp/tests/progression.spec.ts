@@ -345,6 +345,18 @@ for (const viewport of [
         await expect(current).toHaveAttribute("data-motion", "off");
         await page.getByTestId("group-initialize").focus();
         await page.keyboard.press("Tab");
+        // The card now has real inspection controls. Tab visits each memory
+        // region before reaching the next card; all of them keep this card
+        // selected and respect reduced motion.
+        await expect(current).toHaveAttribute("data-group", "initialize");
+        await expect(
+          page.locator("#timeline-initialize .memory-region").first(),
+        ).toBeFocused();
+        const controls = await page
+          .locator("#timeline-initialize .card-story button")
+          .count();
+        for (let i = 0; i < controls; i++) await page.keyboard.press("Tab");
+        await expect(page.getByTestId("group-decode")).toBeFocused();
         await expect(current).toHaveAttribute("data-group", "decode");
         await expect(current).toHaveAttribute("data-motion", "off");
         await page.emulateMedia({ reducedMotion: "no-preference" });

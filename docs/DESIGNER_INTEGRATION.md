@@ -86,7 +86,7 @@ sequence, scrolling/click/touch/keyboard navigation, hover opacity, real clock,
 gauge/card separation, self-hosted fonts and exact artifact preview contents
 against independently downloaded, SHA-256-checked receipts. It also checks actual
 animation starts on all nine cards after execution has finished, inactive
-neighbors, focus without activation, moving scan frames, pause, reduced motion
+neighbors, focus without activation, moving factory frames, pause, reduced motion
 and restored-run playback. The full browser suite also exercises motion during
 live execution, failures, reconnects, uploads, restart and the real Rust TCP server.
 
@@ -111,6 +111,10 @@ passed and rejected distinctions. IR nodes are selected from the actual bounded
 CLIF preview; their relationship to source is explicitly block-level. RV64
 rows reveal the saved bytes. Execution tiles show the busiest recorded
 translations, with logarithmic intensity and exact counts on inspection.
+Instruction and execution previews fit inside the card so wheel and touch
+gestures continue through the timeline. Large decoded blocks show their first
+four and final instructions; execution shows the busiest nine translations
+(eight on phones). The complete data remains in Evidence.
 
 Completed runs recover TCP exchanges and hot blocks from a streaming journal
 read capped at 16 MiB, retaining at most 24 exchanges, 24 translations, 80

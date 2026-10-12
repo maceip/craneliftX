@@ -258,7 +258,9 @@ test("card confirmation preserves an active upload until confirmed, then reaps a
     "data-group",
     "decode",
   );
-  await page.locator("#timeline-initialize .stage-illustration").click();
+  // The illustration now contains memory-inspection buttons. Revisit through
+  // the card heading to request the fresh-execution confirmation.
+  await page.getByTestId("group-initialize").click();
   const original = await state(page);
   const panel = page.getByRole("region", {
     name: "Restart analysis confirmation",

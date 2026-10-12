@@ -29,6 +29,7 @@
   grid-template-rows: 18px minmax(0, 1fr) 28px;
   gap: 12px;
   position: relative;
+  overflow: visible;
 }
 .walkthrough-meta {
   display: flex;
@@ -1391,4 +1392,42 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Bounded previews leave vertical wheel/touch navigation with the page. */
+.focus-shell .decode-story .opcode-scroller {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.focus-shell .decode-story .opcode-track {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.focus-shell .decode-story .opcode-track li:nth-child(n + 5):not(:last-child),
+.decode-story .raw-byte-chips button:nth-child(n + 5):not(:last-child) {
+  display: none;
+}
+.focus-shell .decode-story .opcode-track li {
+  min-height: 0;
+}
+.decode-story .opcode-track li button {
+  height: 100%;
+  align-items: center;
+  padding-block: 3px;
+}
+.focus-shell .decode-story .raw-byte-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.decode-story .raw-byte-chips button {
+  flex: none;
+}
+.focus-shell .block-field {
+  overflow: hidden;
 }

@@ -118,6 +118,15 @@ function TimelineStep({
       <div
         className="timeline-card"
         onClick={onSelect}
+        onClickCapture={(event) => {
+          // Inspecting an object on a neighboring card selects that card too.
+          // Its own button then handles the inspection without a restart prompt.
+          if (
+            !selected &&
+            (event.target as Element).closest(".card-story button")
+          )
+            onFocus();
+        }}
         onPointerDownCapture={() => {
           pointerFocus.current = true;
         }}

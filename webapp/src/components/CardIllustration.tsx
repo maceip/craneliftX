@@ -289,7 +289,7 @@ function DecodeScene({
   if (!Array.isArray(instructions))
     return <Empty text="Waiting for a reached block to be decoded" />;
   const index = Math.min(
-    picked ?? Math.max(0, phase - 1),
+    picked ?? (phase === 4 ? instructions.length - 1 : Math.max(0, phase - 1)),
     instructions.length - 1,
   );
   return (
@@ -356,6 +356,9 @@ function DecodeScene({
         <small>
           {instructions.length} instructions ·{" "}
           {phase >= 3 ? "Block boundary recorded" : "Reached block"}
+          {instructions.length > 5
+            ? " · first four and final instruction shown"
+            : ""}
         </small>
       </div>
     </div>
@@ -446,7 +449,7 @@ function ExecuteScene({
     <div className="execute-story">
       <div className="block-field" data-ready={phase >= 1}>
         {blocks.length ? (
-          blocks.slice(0, 18).map((b) => (
+          blocks.slice(0, 9).map((b) => (
             <button
               type="button"
               key={b.block_id}
@@ -538,7 +541,9 @@ function SyscallScene({
   const exchanges = evidence.syscalls;
   const event =
     exchanges.find((e) => e.seq === picked) ??
-    exchanges.find((e) => e.detail?.name === "write" && e.detail?.result > 0) ??
+    exchanges
+      .filter((e) => e.detail?.name === "write" && e.detail?.result > 0)
+      .sort((a, b) => b.detail.result - a.detail.result)[0] ??
     exchanges[0] ??
     run.groups.syscall.last_event;
   if (!event) return <Empty text="No system call has been observed" />;
