@@ -15,6 +15,7 @@ import {
   timestamp,
 } from "./pipeline";
 import { request, usePipeline } from "./usePipeline";
+import { ArchitectureRail } from "./components/ArchitectureRail";
 import { PipelineTimeline } from "./components/PipelineTimeline";
 import { TelemetryGauge } from "./components/Telemetry";
 import { RestartConfirmation } from "./components/RestartConfirmation";
@@ -501,13 +502,7 @@ export function App() {
       />
       {!id ? (
         <main className="launch-screen">
-          <img
-            className="launch-logo"
-            src="/dist/chunder-icon.png"
-            alt="Chunder"
-            width={28}
-            height={28}
-          />
+          <ArchitectureRail run={null} groups={groups} />
           <h1>
             Zero-trust binary execution via live <span>ISA re-targeting.</span>
           </h1>
@@ -519,7 +514,8 @@ export function App() {
             with a mediated host syscall bridge.
           </p>
           <p className="launch-architecture">
-            x86-64 → iced-x86 → Cranelift IR → RV64
+            <span>x86-64</span> <i>→</i> iced-x86 <i>→</i> Cranelift IR <i>→</i>{" "}
+            <span>RV64</span>
           </p>
           <div className="launch-actions">
             <button

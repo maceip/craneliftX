@@ -1,5 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fibDir, makeProj } from "thinking-orbs";
+import { ArchitectureRail } from "./ArchitectureRail";
+import { TranslationArrow, TranslationVisual } from "./TranslationVisual";
 import { PerformanceSummary } from "./Telemetry";
 import { policyLabels, stageStatus } from "../pipelineCopy";
 import {
@@ -124,7 +126,15 @@ function Waiting({
     </div>
   );
 }
-function StageVisual({ group, run }: { group: Group; run: Run | null }) {
+function StageVisual({
+  group,
+  run,
+  visible,
+}: {
+  group: Group;
+  run: Run | null;
+  visible: boolean;
+}) {
   const output = currentOutput(group);
   const event = group.active ? group.last_event : (output ?? group.last_event);
   const complete = output?.status === "completed";
@@ -265,10 +275,23 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
           data-source-seq={output!.seq}
           data-block-id={output!.block_id}
         >
-          <Orb
-            items={instructions.map((i) => i.ip)}
-            label={`${instructions.length} dots, one per decoded instruction`}
-          />
+          <div className="raw-byte-source">
+            <small>
+              RAW BYTES ·{" "}
+              {bytes(
+                instructions.reduce(
+                  (n, i) => n + i.bytes.replaceAll(" ", "").length / 2,
+                  0,
+                ),
+              )}
+            </small>
+            <div className="raw-byte-chips">
+              {instructions.map((i) => (
+                <code key={i.ip}>{i.bytes}</code>
+              ))}
+            </div>
+          </div>
+          <TranslationArrow />
           <div
             className="opcode-scroller"
             role="region"
@@ -279,7 +302,6 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
               {instructions.map((i) => (
                 <li key={i.ip} data-ip={i.ip} data-bytes={i.bytes}>
                   <code>{i.ip}</code>
-                  <strong>{i.bytes}</strong>
                   <span>{i.asm}</span>
                 </li>
               ))}
@@ -318,51 +340,18 @@ function StageVisual({ group, run }: { group: Group; run: Run | null }) {
             : "No instruction-policy findings recorded"}
         </Waiting>
       );
-    case "lower": {
-      const decoded = related(run, "decode", blockId);
+    case "lower":
+    case "codegen":
       return (
-        <div data-block-id={blockId} data-source-seq={output?.seq}>
-          <Beam
-            from="Source"
-            to="Output · Cranelift IR"
-            source={
-              decoded?.instructions
-                ? `${decoded.instructions.length} x86 instructions`
-                : "—"
-            }
-            destination={complete ? bytes(output?.clif_bytes) : "Awaiting CLIF"}
-          />
-          <small className="visual-caption">
-            {group.last_event?.rip ?? "No reached block"}
-            {blockId !== undefined ? ` · block ${blockId}` : ""}
-            {complete
-              ? ` · Semantics lowered in ${duration(output?.elapsed_ns)}`
-              : ""}
-          </small>
-        </div>
+        <TranslationVisual
+          group={group}
+          run={run}
+          output={output}
+          decoded={related(run, "decode", blockId)}
+          lowered={related(run, "lower", blockId)}
+          visible={visible}
+        />
       );
-    }
-    case "codegen": {
-      const lowered = related(run, "lower", blockId);
-      return (
-        <div data-block-id={blockId} data-source-seq={output?.seq}>
-          <Beam
-            from="Input · Cranelift IR"
-            to="Output · RV64 machine code"
-            source={
-              lowered?.status === "completed" ? bytes(lowered.clif_bytes) : "—"
-            }
-            destination={complete ? bytes(output?.rv64_bytes) : "Awaiting RV64"}
-          />
-          <small className="visual-caption">
-            {complete
-              ? `Target: ${output?.target}`
-              : "Waiting for code-generation output"}
-            {blockId !== undefined ? ` · block ${blockId}` : ""}
-          </small>
-        </div>
-      );
-    }
     case "artifacts": {
       const files = [
         ...new Map(
@@ -613,7 +602,7 @@ function TimelineStep({
           </span>
         </button>
         <div className="stage-illustration" data-stage-visual={group.id}>
-          <StageVisual group={group} run={run} />
+          <StageVisual group={group} run={run} visible={visible} />
           <span
             key={`${seq}:${selected}`}
             className="receipt-glow"
@@ -780,6 +769,12 @@ export function PipelineTimeline({
       data-navigation="manual"
       data-paused={paused}
     >
+      <ArchitectureRail
+        run={run}
+        groups={groups}
+        stage={selected}
+        animate={enabled && (run?.groups[selected]?.active ?? 0) > 0}
+      />
       <div className="focus-transport" data-expanded={!!confirmation}>
         {confirmation}
         <div className="focus-stream-caption">{status}</div>

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { Run } from "../src/pipeline";
+import { createHash } from "node:crypto";
 
 // Keep successful walkthroughs too: passing assertions do not replace watching
 // the actual desktop/mobile transitions and checking readability.
@@ -36,6 +37,14 @@ for (const viewport of [
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
         "Zero-trust binary execution via live ISA re-targeting.",
       );
+      await page.evaluate(() => document.fonts.ready);
+      expect(
+        await page.evaluate(
+          () =>
+            document.fonts.check("600 22px Inter") &&
+            document.fonts.check('400 12px "JetBrains Mono"'),
+        ),
+      ).toBe(true);
       await page.screenshot({
         path: info.outputPath(`launch-${viewport.name}.png`),
       });
@@ -96,6 +105,9 @@ for (const viewport of [
           await expect(current).toHaveAttribute("data-group", group.id);
           await expect(ring).toHaveAttribute("data-current-stage", group.id);
           await expect(
+            page.getByRole("group", { name: "Pipeline architecture" }),
+          ).toHaveAttribute("data-stage", group.id);
+          await expect(
             page.locator('.stage-thermometer [aria-current="step"]'),
           ).toHaveCount(1);
           expect(
@@ -130,6 +142,55 @@ for (const viewport of [
           ).toBe(true);
           const seq = Number(await step.getAttribute("data-motion-seq"));
           expect(seq).toBe(group.last_event!.seq);
+          // The new design's code panels must contain saved output from this
+          // block, never the illustrative IR/assembly in the designer export.
+          for (const preview of await step.locator(".artifact-preview").all()) {
+            const name = await preview.getAttribute("data-artifact");
+            expect(name).toBeTruthy();
+            const receipt = final.recent.find(
+              (e) => e.type === "artifact" && e.name === name,
+            )!;
+            expect(receipt).toBeTruthy();
+            expect(name).toBe(
+              `block-${String(group.last_event!.block_id).padStart(5, "0")}-${group.last_event!.rip.slice(2)}.${name!.split(".").at(-1)}`,
+            );
+            const response = await page.request.get(
+              `/api/pipeline/runs/${id}/artifacts/${name}`,
+            );
+            expect(response.ok()).toBe(true);
+            const data = await response.body();
+            expect(createHash("sha256").update(data).digest("hex")).toBe(
+              receipt.sha256,
+            );
+            const expected = name!.endsWith(".clif")
+              ? data
+                  .subarray(0, 8192)
+                  .toString("utf8")
+                  .split("\n")
+                  .slice(0, 7)
+                  .join("\n")
+              : Array.from(
+                  { length: Math.ceil(Math.min(data.length, 48) / 8) },
+                  (_, row) =>
+                    [...data.subarray(row * 8, Math.min(row * 8 + 8, 48))]
+                      .map((b) => b.toString(16).padStart(2, "0"))
+                      .join(" "),
+                ).join("\n");
+            await expect(preview.locator("pre")).toHaveAttribute(
+              "data-loaded",
+              "true",
+            );
+            await expect(preview.locator("pre")).toHaveText(expected);
+          }
+          // Fixed telemetry must leave the currently viewed card unobscured.
+          const cardBox = (await step.locator(".timeline-card").boundingBox())!;
+          const gaugeBox = (await page
+            .locator(".telemetry-stack")
+            .boundingBox())!;
+          expect(
+            gaugeBox.x >= cardBox.x + cardBox.width ||
+              gaugeBox.y + gaugeBox.height <= cardBox.y,
+          ).toBe(true);
           visits.push({ group: group.id, seq });
           await page.screenshot({
             path: info.outputPath(

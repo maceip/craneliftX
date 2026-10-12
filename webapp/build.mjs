@@ -9,6 +9,8 @@ const options = {
   minify: !watch,
   sourcemap: true,
   target: ["es2022"],
+  // These self-hosted design fonts are copied from public above.
+  external: ["/dist/fonts/*"],
   outdir: "dist",
   define: { "process.env.NODE_ENV": watch ? '"development"' : '"production"' },
 };

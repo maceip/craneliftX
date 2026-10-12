@@ -794,7 +794,7 @@ test("timeline motion follows real receipts, preserves neighbors and pauses inde
     ),
   ).toEqual(decode.instructions);
   await expect(
-    page.locator('[data-stage-visual="decode"] [data-ledger-dot]'),
+    page.locator('[data-stage-visual="decode"] .raw-byte-chips code'),
   ).toHaveCount(decode.instructions.length);
   expect(
     await page.locator(".segment-row").evaluateAll((items) =>
