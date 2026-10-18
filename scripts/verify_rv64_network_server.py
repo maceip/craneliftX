@@ -102,6 +102,7 @@ def verify(args, out, report):
                        "profile": "static Linux x86-64, freestanding Rust, scalar codegen"}
     command = [str(runner), str(binary), "--ledger-dir", str(out / "pipeline"),
                "--recompile-every-syscalls", "25", "--max-seconds", "120",
+               "--backend", getattr(args, "backend", "rv64"),
                "--events-bind", "127.0.0.1:0"]
     report["command"] = command
     responses = report["responses"] = []
@@ -175,7 +176,11 @@ def verify(args, out, report):
     assert terminal["type"] == "result" and terminal["status"] == "completed", terminal
     counters = terminal["report"]
     assert counters["exit_code"] == 0 and counters["accepted_connections"] == 3
-    assert counters["rv64_steps"] > 0 and counters["native_x86_instructions_executed"] == 0
+    backend = getattr(args, "backend", "rv64")
+    if backend == "x86_64":
+        assert counters["native_x86_instructions_executed"] > 0
+    else:
+        assert counters["rv64_steps"] > 0 and counters["native_x86_instructions_executed"] == 0
     assert counters["network_read_bytes"] == sum(r["payload_bytes"] + 4 for r in responses) + 4
     assert counters["network_written_bytes"] == sum(r["payload_bytes"] + 12 for r in responses)
     totals = [block for e in events if e["type"] == "block_execution_totals" for block in e["blocks"]]
@@ -257,6 +262,7 @@ def main():
     parser.add_argument("--runner", type=Path, default=ROOT / "target/release/isr-process")
     parser.add_argument("--rustc")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--backend", default="rv64", choices=["rv64", "x86_64"])
     args = parser.parse_args()
     out = (args.output or ROOT / ".isr-state/rv64-network" / f"{time.time_ns()}-{uuid.uuid4().hex[:8]}").resolve()
     out.mkdir(parents=True, exist_ok=False)

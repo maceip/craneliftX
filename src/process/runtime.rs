@@ -24,7 +24,8 @@ use super::{
 };
 use crate::{
     ledger::RunLedger,
-    riscv_exec::{RiscvCpu, RETURN_ADDRESS},
+    riscv_exec::{MemoryAccess, RiscvCpu, RETURN_ADDRESS},
+    EngineError,
 };
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -40,6 +41,8 @@ pub(super) struct Runtime {
     stack: Vec<u8>,
     deadline: Instant,
     last_progress: Instant,
+    /// Set by the native helpers when a tag, PAC or mapping check fails.
+    pub native_fault: Option<(u64, EngineError)>,
 }
 impl Runtime {
     pub fn initialize(
@@ -107,6 +110,7 @@ impl Runtime {
                     stack: vec![0; 64 * 1024],
                     deadline,
                     last_progress: Instant::now(),
+                    native_fault: None,
                 })
             },
             |runtime| {
@@ -196,16 +200,34 @@ impl Runtime {
             .as_ref()
             .ok_or_else(|| memory::error("x86_64 block has no JIT page"))?;
 
+        // Every native access goes through the helpers on this context, so the
+        // block is built around a NativeGuest rather than a bare register file.
+        let cookie = self as *mut Runtime;
+        let mut guest = super::native::NativeGuest::new(cookie);
+        guest.regs.copy_from_slice(&self.state);
+        self.native_fault = None;
+
         // Cast the JIT page pointer to a native function and call it.
         // SAFETY: the JIT page contains valid x86-64 machine code compiled
-        // from audited/lowered Cranelift IR, and the page is marked RX.
+        // from audited/lowered Cranelift IR, the page is marked RX, and the
+        // helpers are ordinary C-ABI functions that only touch Runtime.
         let f: NativeBlockFn = unsafe { std::mem::transmute(jit_page.ptr()) };
-        let steps = unsafe { f(self.state.as_mut_ptr(), std::ptr::null()) };
+        let steps = unsafe { f(&mut guest, std::ptr::null()) };
 
-        if steps == u64::MAX - 3 {
-            return Err(memory::error("CFI violation in native block").into());
+        self.state.copy_from_slice(&guest.regs);
+        if let Some((kind, pc)) = guest.take_fault() {
+            let err = self
+                .native_fault
+                .take()
+                .map(|(_, e)| e)
+                .unwrap_or_else(|| memory::error(format!("native memory fault kind {kind} at 0x{pc:x}")));
+            return Err(err.into());
         }
-        if steps == 2 {
+        if let Some((_, err)) = self.native_fault.take() {
+            return Err(err.into());
+        }
+
+        if steps == super::native::FAULT_STACK as u64 || steps == 2 {
             return Err(memory::error("stack fault in native block").into());
         }
 
@@ -222,6 +244,73 @@ impl Runtime {
             self.last_progress = Instant::now();
         }
         Ok(())
+    }
+
+    /// Checked load for native-compiled blocks. Mirrors the interpreter's
+    /// load path: tag screen, then PAC verify on code pointers.
+    pub fn native_load(&mut self, guest_ptr: u64, size: u64, pc: u64) -> u64 {
+        let biased = guest_ptr.wrapping_add(super::memory::GUEST_BIAS);
+        let mut bus = ProcessBus {
+            code: &[],
+            memory: &mut self.memory,
+            state: &mut self.state,
+            stack: &mut self.stack,
+            heap: &mut self.heap,
+            pac: &mut self.pac,
+        };
+        // SAFETY: ProcessBus maps only owned slices and checked guest regions.
+        let loaded = unsafe { bus.load(biased, size as usize, pc) };
+        match loaded {
+            Ok(raw) => match bus.authenticate_load(biased, size as usize, raw, pc) {
+                Ok((value, _)) => value,
+                Err(err) => {
+                    self.native_fault = Some((pc, err));
+                    0
+                }
+            },
+            Err(err) => {
+                self.native_fault = Some((pc, err));
+                0
+            }
+        }
+    }
+
+    /// Checked store for native-compiled blocks. PAC signing runs first so an
+    /// unsigned substitution is refused before any byte is written.
+    pub fn native_store(
+        &mut self,
+        guest_ptr: u64,
+        size: u64,
+        value: u64,
+        constant_provenance: bool,
+        pc: u64,
+    ) {
+        let biased = guest_ptr.wrapping_add(super::memory::GUEST_BIAS);
+        let mut bus = ProcessBus {
+            code: &[],
+            memory: &mut self.memory,
+            state: &mut self.state,
+            stack: &mut self.stack,
+            heap: &mut self.heap,
+            pac: &mut self.pac,
+        };
+        let signed = match bus.authenticate_store(
+            biased,
+            size as usize,
+            value,
+            constant_provenance,
+            pc,
+        ) {
+            Ok(v) => v,
+            Err(err) => {
+                self.native_fault = Some((pc, err));
+                return;
+            }
+        };
+        // SAFETY: ProcessBus maps only owned slices and checked guest regions.
+        if let Err(err) = unsafe { bus.store(biased, size as usize, signed, pc) } {
+            self.native_fault = Some((pc, err));
+        }
     }
 
     /// Serve a call to the guest's own `malloc`/`calloc`/`realloc`/`free`.
@@ -354,12 +443,11 @@ impl Runtime {
                      "live_bytes": heap.live_bytes, "quarantined": heap.quarantined,
                      "placement_draws": heap.placement_draws},
             "mpk": {"available": self.domain.available(), "reason": self.domain.reason()},
-            // Heap tags and PAC are enforced on the ProcessBus path only, which
-            // the RV64 interpreter uses. Native x86_64 executes raw loads and
-            // stores and does not go through that path.
-            "mitigation_path": "interpreter_process_bus",
-            "native_execution_path": false,
-            "native_note": "x86_64 native is experimental: W^X + diversification only; heap tags and PAC are not enforced on raw native loads/stores"
+            // Heap tags and PAC run on ProcessBus, which both the RV64
+            // interpreter and the native backend's checked helpers use.
+            "mitigation_path": "process_bus",
+            "native_execution_path": true,
+            "native_note": "native blocks call checked load/store helpers (tags + PAC); syscalls are served by the runtime at block boundaries, never as host syscalls"
         })
     }
 }

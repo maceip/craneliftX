@@ -26,9 +26,10 @@ use iced_x86::{Code, Instruction, Mnemonic, OpKind, Register};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub enum Backend {
     /// RISC-V 64-bit, executed by the in-process interpreter.
-    #[default]
     Rv64,
-    /// x86-64 native, executed directly on the host CPU.
+    /// Host-native (x86-64 on Intel, aarch64 on Apple Silicon), executed
+    /// directly on the CPU with checked memory helpers. This is the default.
+    #[default]
     X86_64,
 }
 
@@ -64,16 +65,22 @@ fn ty(width: u16) -> Type {
 struct Lower<'a> {
     b: FunctionBuilder<'a>,
     stack_fault: Option<Block>,
+    mem_fault: Option<Block>,
     rip: u64,
     backend: Backend,
     div: &'a Diversification,
     cfi: Option<&'a EntryBitmap>,
     /// Variable index that holds RSP after diversification permutation.
     rsp_var: u32,
+    /// The block context (NativeGuest / register file).
+    ctx: Value,
     /// Cranelift function reference to `isr_cfi_check` (x86_64 only).
     cfi_check_fn: Option<cranelift_codegen::ir::FuncRef>,
     /// Cranelift signature reference for `isr_cfi_check` (x86_64 only).
     cfi_check_sig: Option<cranelift_codegen::ir::SigRef>,
+    /// Signatures for the native checked memory helpers.
+    load_sig: Option<cranelift_codegen::ir::SigRef>,
+    store_sig: Option<cranelift_codegen::ir::SigRef>,
 }
 
 impl Lower<'_> {
@@ -231,6 +238,9 @@ impl Lower<'_> {
         }
     }
     fn load(&mut self, p: Value, w: u16) -> Result<Value, EngineError> {
+        if self.backend == Backend::X86_64 {
+            return self.native_load(p, w);
+        }
         let p = self.ptr(p, w);
         let v = self.b.ins().load(ty(w), MemFlags::new(), p, 0);
         Ok(if w < 64 {
@@ -239,7 +249,11 @@ impl Lower<'_> {
             v
         })
     }
-    fn store(&mut self, p: Value, w: u16, v: Value) {
+    fn store(&mut self, p: Value, w: u16, v: Value, constant: bool) {
+        if self.backend == Backend::X86_64 {
+            self.native_store(p, w, v, constant);
+            return;
+        }
         let p = self.ptr(p, w);
         let v = if w < 64 {
             self.b.ins().ireduce(ty(w), v)
@@ -248,13 +262,100 @@ impl Lower<'_> {
         };
         self.b.ins().store(MemFlags::new(), v, p, 0);
     }
+
+    /// Load through the runtime's checked helper so tags and PAC apply.
+    fn native_load(&mut self, p: Value, w: u16) -> Result<Value, EngineError> {
+        self.bounds_check(p, w);
+        let load_sig = self.load_sig.expect("x86_64 load signature");
+        let cookie = self.b.ins().load(
+            types::I64,
+            MemFlags::new(),
+            self.ctx,
+            super::native::NATIVE_COOKIE_OFFSET,
+        );
+        let load_fn = self.b.ins().load(
+            types::I64,
+            MemFlags::new(),
+            self.ctx,
+            super::native::NATIVE_LOAD_FN_OFFSET,
+        );
+        let size = self.c(u64::from(w / 8));
+        let pc = self.c(self.rip);
+        let call = self.b.ins().call_indirect(load_sig, load_fn, &[cookie, p, size, pc]);
+        let raw = self.b.inst_results(call)[0];
+        self.check_native_fault();
+        // Helper returns the zero-extended load already.
+        Ok(raw)
+    }
+
+    /// Store through the runtime's checked helper so tags and PAC apply.
+    /// `constant` marks immediate/lea provenance for PAC signing.
+    fn native_store(&mut self, p: Value, w: u16, v: Value, constant: bool) {
+        self.bounds_check(p, w);
+        let store_sig = self.store_sig.expect("x86_64 store signature");
+        let cookie = self.b.ins().load(
+            types::I64,
+            MemFlags::new(),
+            self.ctx,
+            super::native::NATIVE_COOKIE_OFFSET,
+        );
+        let store_fn = self.b.ins().load(
+            types::I64,
+            MemFlags::new(),
+            self.ctx,
+            super::native::NATIVE_STORE_FN_OFFSET,
+        );
+        let size = self.c(u64::from(w / 8));
+        // Helpers write only `size` bytes of the value; high bytes are ignored.
+        let constant_v = self.c(u64::from(constant));
+        let pc = self.c(self.rip);
+        self.b.ins().call_indirect(
+            store_sig,
+            store_fn,
+            &[cookie, p, size, v, constant_v, pc],
+        );
+        self.check_native_fault();
+    }
+
+    fn bounds_check(&mut self, v: Value, w: u16) {
+        let plain = self.b.ins().band_imm(v, POINTER_ADDRESS_MASK as i64);
+        let bad = self.b.ins().icmp_imm(
+            IntCC::UnsignedGreaterThan,
+            plain,
+            (ADDRESS_LIMIT - u64::from(w / 8)) as i64,
+        );
+        self.b.ins().trapnz(bad, TrapCode::HEAP_OUT_OF_BOUNDS);
+    }
+
+    /// After a checked helper call, leave the block if the fault slot is set.
+    fn check_native_fault(&mut self) {
+        let kind = self.b.ins().load(
+            types::I64,
+            MemFlags::new(),
+            self.ctx,
+            super::native::NATIVE_FAULT_KIND_OFFSET,
+        );
+        let fault = self.b.ins().icmp_imm(IntCC::NotEqual, kind, 0);
+        let leave = self.mem_fault_block();
+        let resume = self.b.create_block();
+        self.b.ins().brif(fault, leave, &[], resume, &[]);
+        self.b.switch_to_block(resume);
+        self.b.seal_block(resume);
+    }
+
+    fn mem_fault_block(&mut self) -> Block {
+        *self.mem_fault.get_or_insert_with(|| self.b.create_block())
+    }
     fn write(&mut self, i: &Instruction, n: u32, v: Value) -> Result<(), EngineError> {
         match i.op_kind(n) {
             OpKind::Register => self.put_reg(i.op_register(n), v, i),
             OpKind::Memory => {
                 let w = self.width(i, n)?;
                 let p = self.address(i)?;
-                self.store(p, w, v);
+                // An immediate (or lea of a code address) is the only source
+                // with constant provenance for PAC signing.
+                let constant = immediate(i, 1).is_some() || i.mnemonic() == Mnemonic::Lea;
+                self.store(p, w, v, constant);
                 Ok(())
             }
             _ => Err(fail(i, "unsupported destination operand")),
@@ -371,7 +472,8 @@ impl Lower<'_> {
         let sp = self.var(self.rsp_var as usize);
         let sp = self.b.ins().iadd_imm(sp, -8);
         self.set(self.rsp_var as usize, sp);
-        self.store(sp, 64, v);
+        // Return addresses on the stack are not PAC-covered; constant is irrelevant.
+        self.store(sp, 64, v, true);
     }
     fn pop(&mut self) -> Result<Value, EngineError> {
         let sp = self.var(self.rsp_var as usize);
@@ -446,17 +548,10 @@ pub fn lower_block(
 
     let ctx = b.block_params(entry)[0];
 
-    // Compute which variable holds RSP after diversification.
+    // Compute which Cranelift variable holds guest RSP after diversification.
+    // div.variable(7) is the variable index for guest register 7 (RSP).
     let rsp_var = if backend == Backend::X86_64 {
-        // Find which variable index maps to guest register 7 (RSP).
-        let mut v = 7u32;
-        for guest in 0..16 {
-            if div.variable(guest) == 7 {
-                v = guest as u32;
-                break;
-            }
-        }
-        v
+        div.variable(7)
     } else {
         7 // RSP is always variable 7 for RV64
     };
@@ -474,6 +569,24 @@ pub fn lower_block(
             colocated: false,
         });
         (Some(func_ref), Some(sig_ref))
+    } else {
+        (None, None)
+    };
+
+    // Checked memory helper signatures for x86_64 (tags + PAC on every access).
+    let (load_sig, store_sig) = if backend == Backend::X86_64 {
+        let mut load_sig = Signature::new(CallConv::SystemV);
+        for _ in 0..4 {
+            load_sig.params.push(AbiParam::new(types::I64));
+        }
+        load_sig.returns.push(AbiParam::new(types::I64));
+        let load_sig = b.import_signature(load_sig);
+        let mut store_sig = Signature::new(CallConv::SystemV);
+        for _ in 0..6 {
+            store_sig.params.push(AbiParam::new(types::I64));
+        }
+        let store_sig = b.import_signature(store_sig);
+        (Some(load_sig), Some(store_sig))
     } else {
         (None, None)
     };
@@ -521,13 +634,17 @@ pub fn lower_block(
     let mut l = Lower {
         b,
         stack_fault: None,
+        mem_fault: None,
         rip: 0,
         backend,
         div,
         cfi,
         rsp_var,
+        ctx,
         cfi_check_fn,
         cfi_check_sig,
+        load_sig,
+        store_sig,
     };
 
     for i in trace {
@@ -725,9 +842,13 @@ pub fn lower_block(
                 }
             }
             Syscall => {
-                l.set(2, next);
+                // Guest RCX gets the return address and R11 gets RFLAGS, as on
+                // Linux x86-64. Use the diversified variable indices.
+                let rcx = l.div.variable(2) as usize;
+                l.set(rcx, next);
                 let f = l.var(17);
-                l.set(11, f);
+                let r11 = l.div.variable(11) as usize;
+                l.set(r11, f);
             }
             _ => return Err(fail(i, "instruction unsupported by process lowerer")),
         }
@@ -762,6 +883,26 @@ pub fn lower_block(
             // Return sentinel for stack fault.
             let two = l.c(2);
             l.b.ins().return_(&[two]);
+        } else {
+            l.b.ins().return_(&[]);
+        }
+    }
+    if let Some(fault) = l.mem_fault {
+        l.b.switch_to_block(fault);
+        l.b.seal_block(fault);
+        // Persist the register file so the runtime can inspect RIP at the fault.
+        for i in 0..16 {
+            let var_idx = div.variable(i);
+            let v = l.var(var_idx as usize);
+            l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
+        }
+        for i in 16..18 {
+            let v = l.var(i);
+            l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
+        }
+        if backend == Backend::X86_64 {
+            let three = l.c(super::native::FAULT_MEMORY);
+            l.b.ins().return_(&[three]);
         } else {
             l.b.ins().return_(&[]);
         }

@@ -103,7 +103,7 @@ def build(name: str) -> Path:
     return output
 
 
-def run(binary: Path, tag: str, flags: list[str]) -> dict:
+def run(binary: Path, tag: str, flags: list[str], backend: str) -> dict:
     ledger = LEDGERS / tag
     if ledger.exists():
         shutil.rmtree(ledger)
@@ -114,6 +114,8 @@ def run(binary: Path, tag: str, flags: list[str]) -> dict:
         str(ledger),
         "--max-seconds",
         "60",
+        "--backend",
+        backend,
         *flags,
     ]
     done = subprocess.run(
@@ -151,7 +153,14 @@ def binary_sha(binary: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--keep-ledgers", action="store_true")
+    parser.add_argument(
+        "--backend",
+        default="x86_64",
+        choices=["x86_64", "rv64"],
+        help="compilation backend under test (default: x86_64 host-native)",
+    )
     args = parser.parse_args()
+    backend = args.backend
 
     subprocess.run(
         ["cargo", "build", "--locked", "--release", "--bin", "isr-process"],
@@ -164,8 +173,8 @@ def main() -> int:
 
     for name, (control_exits, control_flags, fault_kinds) in EXPECTED.items():
         binary = build(name)
-        hardened = run(binary, f"{name}-hardened", [])
-        control = run(binary, f"{name}-control", control_flags)
+        hardened = run(binary, f"{name}-hardened", [], backend)
+        control = run(binary, f"{name}-control", control_flags, backend)
         error = hardened["stderr"] or ""
         faulted = hardened["returncode"] != 0 and "Mitigation {" in error
         results[name] = {
@@ -201,8 +210,8 @@ def main() -> int:
     # Grooming is measured, not faulted: adjacency must collapse when placement
     # is randomized, and be total when it is not.
     grooming = build("heap_grooming")
-    randomized = run(grooming, "grooming-randomized", [])
-    ordered = run(grooming, "grooming-ordered", ["--no-random-placement"])
+    randomized = run(grooming, "grooming-randomized", [], backend)
+    ordered = run(grooming, "grooming-ordered", ["--no-random-placement"], backend)
     random_adjacent = (randomized["report"] or {}).get("exit_code")
     ordered_adjacent = (ordered["report"] or {}).get("exit_code")
     results["heap_grooming"] = {
@@ -228,7 +237,7 @@ def main() -> int:
     # every mitigation armed. It is driven end to end because it never exits on
     # its own -- running it standalone would only prove the deadline fires.
     network = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "verify_rv64_network_server.py")],
+        [sys.executable, str(ROOT / "scripts" / "verify_rv64_network_server.py"), "--backend", backend],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -246,6 +255,7 @@ def main() -> int:
 
     receipt = {
         "expectations": "each hardened run must be rejected; each control run must complete",
+        "backend": backend,
         "results": results,
         "failures": failures,
         "passed": not failures,

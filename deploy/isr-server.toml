@@ -13,14 +13,9 @@ path = "/opt/isr/guest-server"
 
 [execution]
 # Compilation backend:
-#   "rv64"   — interpreted RISC-V with full heap tags, PAC, and CFI (production default)
-#   "x86_64" — experimental native: W^X + diversification only. Heap tags and PAC
-#              do NOT apply on raw native loads/stores. Requires
-#              allow_experimental_native = true.
-backend = "rv64"
-
-# Opt in to the experimental native backend (required for backend = "x86_64").
-# allow_experimental_native = true
+#   "x86_64" — host-native with checked loads/stores (heap tags, PAC, CFI) (default)
+#   "rv64"   — interpreted RISC-V (same mitigations, slower)
+backend = "x86_64"
 
 # Maximum execution time per guest run (seconds).
 max_seconds = 300

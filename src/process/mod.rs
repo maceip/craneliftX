@@ -13,6 +13,7 @@ mod lam;
 mod lower;
 mod memory;
 mod mpk;
+mod native;
 mod observe;
 mod pac;
 mod runtime;
@@ -64,7 +65,7 @@ impl Default for Options {
             max_seconds: 120,
             recompile_every_syscalls: 0,
             hardening: Hardening::default(),
-            backend: Backend::Rv64,
+            backend: Backend::X86_64,
         }
     }
 }

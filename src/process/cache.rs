@@ -60,6 +60,8 @@ impl BlockCache {
                 return Err(error("compiled block cache limit reached").into());
             }
             // Generate a fresh diversification for this block compilation.
+            // Register permutation is x86_64-only; keep identity for RV64.
+            // NOTE: permutation must not reuse RIP/RFLAGS variable ids 16/17.
             let div = if self.backend == Backend::X86_64 {
                 Diversification::new(self.rng()?)
             } else {

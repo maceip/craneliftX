@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 # iced-x86 requires either std or no_std even for decoder-only builds.
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }
-cranelift-codegen = { version = "0.115", default-features = false, features = ["riscv64", "x86"] }
+cranelift-codegen = { version = "0.115", default-features = false, features = ["riscv64", "x86", "arm64"] }
 libc = "0.2"
 cranelift-frontend = "0.115"
 target-lexicon = "0.13"

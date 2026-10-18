@@ -112,7 +112,7 @@ struct LoggingConfig {
     events_bind: Option<String>,
 }
 
-fn default_backend() -> String { "rv64".into() }
+fn default_backend() -> String { "x86_64".into() }
 fn default_max_seconds() -> u64 { 300 }
 fn default_max_rv64_steps() -> u64 { 5_000_000_000 }
 fn default_true() -> bool { true }
@@ -240,19 +240,7 @@ fn generate_prometheus_metrics() -> String {
 fn run_guest(config: &Config, _shutdown: Arc<AtomicBool>) -> Result<(), Box<dyn std::error::Error>> {
     let backend = match config.execution.backend.as_str() {
         "rv64" => Backend::Rv64,
-        "x86_64" => {
-            // Native execution does not run loads/stores through ProcessBus,
-            // so heap tags and PAC do not apply. Only opt in explicitly.
-            if !config.execution.allow_experimental_native {
-                return Err(format!(
-                    "backend x86_64 is experimental: heap tags and PAC do not apply on the native path. \
-                     Set execution.allow_experimental_native = true to proceed, or use backend = \"rv64\" \
-                     (the hardened production default)."
-                )
-                .into());
-            }
-            Backend::X86_64
-        }
+        "x86_64" => Backend::X86_64,
         _ => return Err(format!("unknown backend: {}", config.execution.backend).into()),
     };
 
@@ -422,9 +410,8 @@ Config example:
   path = "/opt/isr/guest-server"
 
   [execution]
-  backend = "rv64"
+  backend = "x86_64"
   max_seconds = 300
-  # allow_experimental_native = true   # required only for backend = "x86_64"
 
   [hardening]
   tags = true

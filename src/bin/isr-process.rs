@@ -26,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "--help" => {
-                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend rv64|x86_64] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no native fallback.\n--backend selects the compilation target (rv64=interpreted with full heap/PAC/CFI mitigations, x86_64=native experimental: W^X+diversification only; heap tags and PAC do not apply).\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection; each is for A/B against the same binary.");
+                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend x86_64|rv64] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no host-kernel fallback.\n--backend selects the compilation target (x86_64=host-native with checked loads/stores, tags, PAC, CFI, W^X; rv64=interpreted).\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection; each is for A/B against the same binary.");
                 return Ok(());
             }
             "--events-bind" => {

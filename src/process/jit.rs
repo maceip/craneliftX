@@ -181,12 +181,15 @@ fn page_size() -> usize {
 /// Type of a compiled native block function.
 ///
 /// Arguments:
-///   ctx: pointer to the 18 guest registers (u64 array)
+///   ctx: pointer to a NativeGuest (register file + checked memory helpers)
 ///   cfi_bitmap: pointer to EntryBitmap (may be null if CFI disabled)
 ///
 /// Returns:
 ///   number of steps executed, or a sentinel on fault.
-pub type NativeBlockFn = unsafe extern "C" fn(*mut u64, *const crate::process::cfi::EntryBitmap) -> u64;
+pub type NativeBlockFn = unsafe extern "C" fn(
+    *mut crate::process::native::NativeGuest,
+    *const crate::process::cfi::EntryBitmap,
+) -> u64;
 
 #[cfg(test)]
 mod tests {

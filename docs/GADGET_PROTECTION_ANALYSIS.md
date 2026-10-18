@@ -113,15 +113,12 @@ Let's examine what an attacker needs in each scenario.
 - RV64: learn RV64 gadget semantics
 - x86-64 native: find new x86-64 gadgets in the recompiled code
 
-Neither is meaningfully harder if the attacker can read memory. The **heap mitigations are the actual defense on the interpreted path** — and that path is the only one where tags, PAC and quarantine are enforced.
+Neither is meaningfully harder if the attacker can read memory. The **heap mitigations are the actual defense** — and they are enforced on both backends: native loads/stores call the same `ProcessBus` helpers the interpreter uses (tags, PAC, quarantine), and syscalls are served by the runtime rather than the host kernel.
 
-> **Production posture (2026-10-17).** Heap tags and PAC run on `ProcessBus`
-> loads/stores, which the RV64 interpreter uses. The x86-64 native backend
-> issues raw Cranelift loads/stores and does **not** go through that path, so
-> the heap mitigations do not apply there. `isr-server` therefore defaults to
-> `rv64` and requires `allow_experimental_native = true` before it will run
-> `x86_64`. Do not cite the heap mitigations as covering the native backend
-> until native loads/stores are tag-checked.
+> **Production posture (2026-10-18).** `isr-server` defaults to `x86_64`
+> host-native. Every guest load/store goes through checked helpers
+> (`src/process/native.rs`) so shadow tags and pointer authentication apply.
+> The `rv64` interpreter remains available and uses the same ProcessBus path.
 
 ---
 

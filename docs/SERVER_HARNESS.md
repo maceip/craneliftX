@@ -22,10 +22,11 @@ The ISR Server Harness (`isr-server`) is a supervisor daemon that loads a static
 - `malloc`/`free`/`calloc`/`realloc` are transparently replaced with the hardened allocator
 - On the `rv64` backend, all memory accesses are checked against the shadow tag map
 
-**Production backend:** `rv64` (default). Heap tags, PAC and the mid-instruction
-CFI check are enforced there. The `x86_64` native backend is experimental: it
-runs W^X + diversification only, and raw native loads/stores bypass `ProcessBus`
-so heap tags and PAC do not apply. It requires `allow_experimental_native = true`.
+**Production backend:** `x86_64` (default) — host-native compilation with
+checked loads/stores. Heap tags, PAC and mid-instruction CFI apply on every
+memory access through `ProcessBus`. Syscalls are served by the runtime at
+block boundaries; the guest never issues host syscalls. The `rv64` interpreted
+backend remains available with the same mitigations.
 
 ## Quick Start
 
@@ -109,8 +110,7 @@ docker run -d \
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
 | `guest` | `path` | — | Path to static x86-64 ELF |
-| `execution` | `backend` | `rv64` | `rv64` (hardened, default) or `x86_64` (experimental) |
-| `execution` | `allow_experimental_native` | false | Required for `backend = "x86_64"` |
+| `execution` | `backend` | `x86_64` | `x86_64` (host-native, default) or `rv64` (interpreted) |
 | `execution` | `max_seconds` | 300 | Per-run timeout |
 | `hardening` | `tags` | true | 16-byte shadow heap tagging |
 | `hardening` | `pac` | true | Pointer authentication codes |
@@ -143,15 +143,15 @@ docker run -d \
 
 | Mitigation | Works on Arbitrary Binary? | Mechanism |
 |------------|---------------------------|-----------|
-| Shadow heap tags | **Yes (rv64)** | Every load/store in the interpreter goes through `ProcessBus::screen()` |
-| Pointer authentication | **Yes (rv64)** | All code pointers in writable memory are signed/verified |
+| Shadow heap tags | **Yes** | Every load/store goes through `ProcessBus::screen()` (interpreter and native helpers) |
+| Pointer authentication | **Yes** | All code pointers in writable memory are signed/verified |
 | Randomized heap | **Yes** | `malloc`/`free` are intercepted by symbol scan or syscall fallback |
 | Mid-instruction CFI | **Yes** | Dispatch target must not fall inside a known instruction |
-| Register diversification | **x86_64 only** | Per-compilation random mapping in Cranelift backend |
-| W^X JIT pages | **x86_64 only** | `mmap` → `mprotect(PROT_READ|PROT_EXEC)` on all compiled code |
+| Register diversification | **Yes (native)** | Per-compilation random mapping in Cranelift backend |
+| W^X JIT pages | **Yes (native)** | `mmap` → `mprotect(PROT_READ|PROT_EXEC)` on all compiled code |
 
-The x86_64 native backend does **not** run loads/stores through `ProcessBus`,
-so heap tags and PAC are not enforced there.
+Native loads and stores call checked helpers that use the same `ProcessBus`
+path as the interpreter, so heap tags and PAC are enforced on both backends.
 
 ## Architecture
 

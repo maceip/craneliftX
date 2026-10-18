@@ -9,13 +9,19 @@ use cranelift_codegen::{
 };
 
 pub const TARGET_RV64: &str = "riscv64gc-unknown-none-elf";
-pub const TARGET_X86_64: &str = "x86_64-unknown-linux-gnu";
+
+/// Host triple for the native backend: compiled blocks must be executable by
+/// the current process, so we emit the host ISA rather than a fixed x86-64
+/// encoding (which would SIGILL on aarch64 hosts).
+fn host_target() -> String {
+    target_lexicon::Triple::host().to_string()
+}
 
 /// Compile Cranelift IR to machine code for the specified backend.
 pub fn compile(function: &Function, backend: Backend) -> Result<Vec<u8>, EngineError> {
     match backend {
         Backend::Rv64 => compile_to_riscv64(function),
-        Backend::X86_64 => compile_to_x86_64(function),
+        Backend::X86_64 => compile_to_native(function),
     }
 }
 
@@ -73,15 +79,15 @@ pub fn compile_to_riscv64(function: &Function) -> Result<Vec<u8>, EngineError> {
     Ok(compiled.code_buffer().to_vec())
 }
 
-/// Compile to x86-64 native code for direct execution on the host.
-pub fn compile_to_x86_64(function: &Function) -> Result<Vec<u8>, EngineError> {
-    let isa = make_isa(TARGET_X86_64, &[])?;
+/// Compile to host-native code for direct execution on this CPU.
+pub fn compile_to_native(function: &Function) -> Result<Vec<u8>, EngineError> {
+    let isa = make_isa(&host_target(), &[])?;
     let mut context = Context::for_function(function.clone());
     let compiled = context
         .compile(isa.as_ref(), &mut ControlPlane::default())
         .map_err(|e| EngineError::Codegen(format!("{e:?}")))?;
-    // x86-64 may have PC-relative relocations for the CFI bitmap; we allow
-    // internal relocations and patch them after copying to the JIT page.
+    // Internal PC-relative relocations are applied when the buffer is copied
+    // into the JIT page; external symbols are not supported.
     Ok(compiled.code_buffer().to_vec())
 }
 
