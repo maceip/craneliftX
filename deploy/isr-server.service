@@ -1,0 +1,36 @@
+[Unit]
+Description=ISR Hardened Server Harness
+Documentation=https://github.com/bytecodealliance/wasmtime/tree/main/cranelift
+After=network.target
+
+[Service]
+Type=simple
+User=isr
+Group=isr
+ExecStart=/usr/local/bin/isr-server /etc/isr/guest.toml
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/isr-server
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# MemoryDenyWriteExecute must be false because the JIT needs WX pages during
+# compilation (they are transitioned to RX immediately after).
+
+[Install]
+WantedBy=multi-user.target

@@ -1,10 +1,24 @@
-//! Guest initialization, RV64 execution and syscall continuation. Translation
-//! cache operations never replace this state or its descriptor table.
+//! Guest initialization, execution, allocator interception and syscall
+//! continuation. Translation cache operations never replace this state or its
+//! descriptor table.
+//!
+//! Hardening state lives here and nowhere the guest can reach: the shadow tag
+//! map, the pointer-authentication secret and the allocator metadata are Rust
+//! values owned by `Runtime`, and `ProcessBus` is the only path from a guest
+//! address to memory.
 use super::{
     audit,
     cache::CachedBlock,
+    csprng::Csprng,
+    heap::{Heap, HEAP_BASE, HEAP_SIZE},
+    input::AllocFn,
+    jit::NativeBlockFn,
+    lam::{self, LamStatus},
+    lower::Backend,
     memory::{self, GuestMemory, ProcessBus, CONTEXT_BASE, RV_STACK_BASE, STACK_TOP},
+    mpk,
     observe::operation,
+    pac::Pac,
     syscall::{Kernel, Outcome},
     Options, Report, Result,
 };
@@ -19,6 +33,10 @@ pub(super) struct Runtime {
     pub memory: GuestMemory,
     pub state: [u64; 18],
     pub kernel: Kernel,
+    pub heap: Heap,
+    pub pac: Pac,
+    pub lam: LamStatus,
+    pub domain: mpk::Domain,
     stack: Vec<u8>,
     deadline: Instant,
     last_progress: Instant,
@@ -40,10 +58,52 @@ impl Runtime {
                 state[16] = entry;
                 state[17] = 2;
                 let deadline = Instant::now() + Duration::from_secs(options.max_seconds);
+                let mut memory = memory;
+                // The heap is an ordinary writable guest mapping. Its metadata
+                // is not: Heap keeps every free list, size and tag in Rust.
+                memory.map(HEAP_BASE, HEAP_SIZE, true, false)?;
+                let lam = lam::probe();
+                let mut rng = Csprng::new().map_err(memory::error)?;
+                let mut secret = [0u8; 16];
+                rng.fill(&mut secret);
+                // Signing binds to the address a pointer is stored at, so the
+                // PAC map is seeded from the image's own writable data.
+                let code: Vec<std::ops::Range<u64>> = memory
+                    .regions
+                    .iter()
+                    .filter(|r| r.executable)
+                    .map(|r| r.start..r.start + r.data.len() as u64)
+                    .collect();
+                let mut pac = Pac::new(secret, code, options.hardening.pac);
+                let data: Vec<(u64, Vec<u8>)> = memory
+                    .regions
+                    .iter()
+                    .filter(|r| r.writable && !r.executable)
+                    .map(|r| (r.start, r.data.clone()))
+                    .collect();
+                if options.hardening.pac {
+                    for (base, bytes) in &data {
+                        let mut writes: Vec<(u64, [u8; 8])> = Vec::new();
+                        pac.seed_image(*base, bytes, &mut |at, word| writes.push((at, word)));
+                        for (at, word) in writes {
+                            memory.write(at, &word)?;
+                        }
+                    }
+                }
+                let heap = Heap::new(
+                    lam.scheme(),
+                    rng,
+                    options.hardening.tags,
+                    options.hardening.random_placement,
+                );
                 Ok(Self {
                     memory,
                     state,
                     kernel: Kernel::new(deadline),
+                    heap,
+                    pac,
+                    lam,
+                    domain: mpk::acquire(),
                     stack: vec![0; 64 * 1024],
                     deadline,
                     last_progress: Instant::now(),
@@ -51,7 +111,11 @@ impl Runtime {
             },
             |runtime| {
                 json!({"entry_rip":format!("0x{:x}",runtime.state[16]),"guest_rsp":format!("0x{:x}",runtime.state[7]),
-            "rv64_stack_bytes":runtime.stack.len(),"state_words":runtime.state.len(),"options":options})
+            "rv64_stack_bytes":runtime.stack.len(),"state_words":runtime.state.len(),"options":options,
+            "heap_base":format!("0x{HEAP_BASE:x}"),"heap_bytes":HEAP_SIZE,
+            "tag_scheme":runtime.lam.scheme().label,"lam":runtime.lam.label(),"lam_detail":runtime.lam.detail(),
+            "mpk":runtime.domain.available(),"mpk_reason":runtime.domain.reason(),
+            "hardening":options.hardening,"pac_static_pointers":runtime.pac.stats().static_pointers})
             },
         )
     }
@@ -69,18 +133,35 @@ impl Runtime {
         ledger: &mut RunLedger,
     ) -> Result<()> {
         audit::check_stack(&self.state, block.compiled.id, ledger)?;
+
+        match block.compiled.backend {
+            Backend::Rv64 => self.execute_rv64(block, report, options, ledger),
+            Backend::X86_64 => self.execute_x86_64(block, report, options, ledger),
+        }
+    }
+
+    fn execute_rv64(
+        &mut self,
+        block: &mut CachedBlock,
+        report: &mut Report,
+        options: &Options,
+        ledger: &mut RunLedger,
+    ) -> Result<()> {
         let mut cpu = RiscvCpu::default();
         cpu.regs[1] = RETURN_ADDRESS;
         cpu.regs[2] = RV_STACK_BASE + self.stack.len() as u64;
         cpu.regs[10] = CONTEXT_BASE;
+        cpu.authenticate_calls = self.pac.enabled();
         let mut bus = ProcessBus {
             code: &block.compiled.code,
             memory: &mut self.memory,
             state: &mut self.state,
             stack: &mut self.stack,
+            heap: &mut self.heap,
+            pac: &mut self.pac,
         };
-        // SAFETY: ProcessBus maps only owned slices and checked guest regions.
-        // Generated code never supplies a host pointer to this bus.
+        // SAFETY: ProcessBus maps only owned slices and checked guest regions,
+        // and every access is tag-checked before it is issued.
         let steps = unsafe {
             cpu.run(
                 &mut bus,
@@ -95,12 +176,123 @@ impl Runtime {
         block.executions += 1;
         // Bounded, time-based progress for hot cached code. No per-instruction I/O.
         if self.last_progress.elapsed() >= Duration::from_millis(250) {
-            self.update_network_counters(report);
+            self.update_counters(report);
             ledger.event("progress",json!({"status":"running","block_id":block.compiled.id,"rip":format!("0x{:x}",block.compiled.rip),
                 "next_rip":format!("0x{:x}",self.state[16]),"counters":report}))?;
             self.last_progress = Instant::now();
         }
         Ok(())
+    }
+
+    fn execute_x86_64(
+        &mut self,
+        block: &mut CachedBlock,
+        report: &mut Report,
+        _options: &Options,
+        ledger: &mut RunLedger,
+    ) -> Result<()> {
+        let jit_page = block
+            .jit_page
+            .as_ref()
+            .ok_or_else(|| memory::error("x86_64 block has no JIT page"))?;
+
+        // Cast the JIT page pointer to a native function and call it.
+        // SAFETY: the JIT page contains valid x86-64 machine code compiled
+        // from audited/lowered Cranelift IR, and the page is marked RX.
+        let f: NativeBlockFn = unsafe { std::mem::transmute(jit_page.ptr()) };
+        let steps = unsafe { f(self.state.as_mut_ptr(), std::ptr::null()) };
+
+        if steps == u64::MAX - 3 {
+            return Err(memory::error("CFI violation in native block").into());
+        }
+        if steps == 2 {
+            return Err(memory::error("stack fault in native block").into());
+        }
+
+        report.rv64_steps += steps;
+        block.rv64_steps += steps;
+        audit::check_stack(&self.state, block.compiled.id, ledger)?;
+        report.block_executions += 1;
+        report.native_x86_instructions_executed += block.compiled.source_instructions.len() as u64;
+        block.executions += 1;
+        if self.last_progress.elapsed() >= Duration::from_millis(250) {
+            self.update_counters(report);
+            ledger.event("progress",json!({"status":"running native","block_id":block.compiled.id,"rip":format!("0x{:x}",block.compiled.rip),
+                "next_rip":format!("0x{:x}",self.state[16]),"counters":report}))?;
+            self.last_progress = Instant::now();
+        }
+        Ok(())
+    }
+
+    /// Serve a call to the guest's own `malloc`/`calloc`/`realloc`/`free`.
+    ///
+    /// The guest binary is not modified and is not re-executed: the call is
+    /// intercepted at its entry address, the return address is popped exactly
+    /// as the guest's `call` left it, and the result is placed in rax.
+    pub fn allocator_call(
+        &mut self,
+        function: AllocFn,
+        report: &mut Report,
+        ledger: &mut RunLedger,
+    ) -> Result<()> {
+        let rip = self.state[16];
+        let size = self.state[5];
+        let second = self.state[4];
+        let pointer = self.state[5];
+        let result: u64 = match function {
+            AllocFn::Malloc => self.heap.allocate(size)?,
+            AllocFn::Calloc => {
+                let total = size.saturating_mul(second);
+                let address = self.heap.allocate(total)?;
+                let bytes = self.heap.scheme().strip(address);
+                if total != 0 {
+                    if let Ok(slice) = self.memory.read_mut(bytes, total as usize) {
+                        slice.fill(0);
+                    }
+                }
+                address
+            }
+            AllocFn::Realloc => {
+                let old = self.heap.scheme().strip(pointer);
+                let address = self.heap.allocate(size)?;
+                let copy = self
+                    .memory
+                    .read(old, size.min(self.live_size(old)) as usize)
+                    .map(|b| b.to_vec())
+                    .unwrap_or_default();
+                self.memory
+                    .write(self.heap.scheme().strip(address), &copy)?;
+                if pointer != 0 {
+                    self.heap.release(pointer, rip)?;
+                }
+                address
+            }
+            AllocFn::Free => {
+                if pointer != 0 {
+                    self.heap.release(pointer, rip)?;
+                }
+                0
+            }
+        };
+        // Return exactly as the guest's `call` expects.
+        let mut rsp = self.state[7];
+        let mut returned = [0u8; 8];
+        returned.copy_from_slice(self.memory.read(rsp, 8)?);
+        rsp = rsp.wrapping_add(8);
+        self.state[7] = rsp;
+        self.state[0] = result;
+        self.state[16] = u64::from_le_bytes(returned);
+        report.heap_calls += 1;
+        self.update_counters(report);
+        ledger.event(
+            "allocator_call",
+            json!({"rip":format!("0x{rip:x}"),"function":function.name(),
+            "size":size,"result":format!("0x{result:x}"),"counters":report}),
+        )?;
+        Ok(())
+    }
+    fn live_size(&self, address: u64) -> u64 {
+        self.heap.live_size(address).unwrap_or(0)
     }
     pub fn syscall(
         &mut self,
@@ -113,21 +305,61 @@ impl Runtime {
         ledger.event("syscall_started",json!({"number":self.state[0],"block_rip":format!("0x{block_rip:x}"),"syscall_rip":format!("0x{syscall_rip:x}"),
             "next_rip":format!("0x{:x}",self.state[16]),"syscall_seq":report.syscalls,"rv64_steps":report.rv64_steps,"block_executions":report.block_executions}))?;
         let start = Instant::now();
-        let outcome = match self.kernel.call(&mut self.state, &mut self.memory) {
+        let outcome = match self
+            .kernel
+            .call(&mut self.state, &mut self.memory, &mut self.heap)
+        {
             Ok(outcome) => outcome,
             Err(error) => {
                 ledger.event("syscall_failed",json!({"syscall_seq":report.syscalls,"number":self.state[0],"elapsed_ns":start.elapsed().as_nanos() as u64,"error":error.to_string()}))?;
                 return Err(error.into());
             }
         };
-        self.update_network_counters(report);
+        self.update_counters(report);
         ledger.event("syscall_completed",json!({"syscall_seq":report.syscalls,"elapsed_ns":start.elapsed().as_nanos() as u64,
             "detail":outcome.detail,"rv64_steps":report.rv64_steps,"block_executions":report.block_executions}))?;
         Ok(outcome)
+    }
+    pub fn update_counters(&self, report: &mut Report) {
+        self.update_network_counters(report);
+        let heap = self.heap.stats();
+        report.heap_allocations = heap.allocations;
+        report.heap_frees = heap.frees;
+        report.heap_live_bytes = heap.live_bytes;
+        report.heap_quarantined = heap.quarantined;
+        report.heap_tag_faults = heap.tag_faults;
+        let pac = self.pac.stats();
+        report.pac_signings = pac.signings;
+        report.pac_verifications = pac.verifications;
+        report.pac_faults = pac.auth_faults;
     }
     pub fn update_network_counters(&self, report: &mut Report) {
         report.accepted_connections = self.kernel.accepted;
         report.network_read_bytes = self.kernel.read_bytes;
         report.network_written_bytes = self.kernel.written_bytes;
+    }
+    /// Report the final mitigation state, including honest "unavailable" notes.
+    pub fn mitigation_summary(&self) -> serde_json::Value {
+        let heap = self.heap.stats();
+        let pac = self.pac.stats();
+        json!({
+            "tags": {"enabled": self.heap.tags_enabled(), "scheme": self.heap.scheme().label,
+                     "granule_bytes": super::heap::GRANULE, "lam": self.lam.label(),
+                     "lam_detail": self.lam.detail(), "faults": heap.tag_faults},
+            "pac": {"enabled": self.pac.enabled(), "signed_slots": pac.signed_slots,
+                    "static_pointers": pac.static_pointers, "verifications": pac.verifications,
+                    "faults": pac.auth_faults},
+            "heap": {"base": format!("0x{HEAP_BASE:x}"), "bytes": HEAP_SIZE,
+                     "allocations": heap.allocations, "frees": heap.frees,
+                     "live_bytes": heap.live_bytes, "quarantined": heap.quarantined,
+                     "placement_draws": heap.placement_draws},
+            "mpk": {"available": self.domain.available(), "reason": self.domain.reason()},
+            // Heap tags and PAC are enforced on the ProcessBus path only, which
+            // the RV64 interpreter uses. Native x86_64 executes raw loads and
+            // stores and does not go through that path.
+            "mitigation_path": "interpreter_process_bus",
+            "native_execution_path": false,
+            "native_note": "x86_64 native is experimental: W^X + diversification only; heap tags and PAC are not enforced on raw native loads/stores"
+        })
     }
 }

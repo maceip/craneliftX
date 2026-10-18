@@ -195,7 +195,7 @@ impl PreparedTrace {
             "codegen",
             observer,
             || codegen::compile_to_riscv64(&function),
-            |code| json!({"target":codegen::TARGET, "execution_isa":"RV64I", "code_bytes":code.len(), "code_sha256":sha256(code)}),
+            |code| json!({"target":codegen::TARGET_RV64, "execution_isa":"RV64I", "code_bytes":code.len(), "code_sha256":sha256(code)}),
         )?;
         Ok(Self {
             start_rip: trace[0].ip(),

@@ -59,3 +59,9 @@ webapp/dist/
 /.isr-state/
 /webapp/test-results/
 /webapp/playwright-report/
+
+# Compiled fixture binaries (rebuild from the .rs/.c sources)
+/tests/fixtures/bench_server_linux.elf
+/tests/fixtures/bench_server_native
+/tests/fixtures/bench_server_native_x86
+/tests/fixtures/*.elf

@@ -1,0 +1,74 @@
+# ISR Server Harness — example configuration
+#
+# Copy this file to /etc/isr/guest.toml and adjust for your deployment.
+
+[guest]
+# Absolute path to the static x86-64 ELF guest binary.
+# The binary MUST be statically linked. If your binary is dynamic, convert it
+# first with scripts/static-link.sh.
+path = "/opt/isr/guest-server"
+
+# Optional: a shell command to preprocess the binary before each run.
+# preprocess = "cp /opt/isr/guest-server.dynamic /tmp/guest-server && patchelf --set-interpreter /lib/ld-musl-x86_64.so.1 /tmp/guest-server"
+
+[execution]
+# Compilation backend:
+#   "rv64"   — interpreted RISC-V with full heap tags, PAC, and CFI (production default)
+#   "x86_64" — experimental native: W^X + diversification only. Heap tags and PAC
+#              do NOT apply on raw native loads/stores. Requires
+#              allow_experimental_native = true.
+backend = "rv64"
+
+# Opt in to the experimental native backend (required for backend = "x86_64").
+# allow_experimental_native = true
+
+# Maximum execution time per guest run (seconds).
+max_seconds = 300
+
+# Maximum interpreter steps (RV64 backend only; ignored for x86_64).
+max_rv64_steps = 5_000_000_000
+
+# Recompile the translation cache every N syscalls (0 = never).
+recompile_every_syscalls = 0
+
+# Allow the guest to bind() to non-loopback addresses.
+# Default is loopback-only for the first runtime profile.
+allow_non_loopback = false
+
+[hardening]
+# Sub-granule heap shadow tagging (16-byte granules, 8-bit tags).
+tags = true
+
+# Context-bound pointer authentication on code pointers.
+pac = true
+
+# ChaCha20-randomized heap slot selection.
+random_placement = true
+
+# Reject transfers into the middle of a known guest instruction.
+cfi = true
+
+[server]
+# Address for the admin HTTP endpoint (health, metrics).
+# Bind to 0.0.0.0 to expose outside the host; 127.0.0.1 for localhost only.
+admin_bind = "0.0.0.0:8080"
+
+[restart]
+# Restart policy:
+#   "always"     — restart after any exit (default)
+#   "on-failure" — restart only on non-zero exit
+#   "never"      — run once and exit
+policy = "always"
+
+# Seconds to wait before restarting after a crash.
+backoff_seconds = 5
+
+# Maximum restarts before giving up (0 = unlimited).
+max_restarts = 10
+
+[logging]
+# Directory for durable JSONL event ledgers.
+ledger_dir = "/var/log/isr-server"
+
+# Optional: bind address for live Server-Sent Events stream.
+# events_bind = "0.0.0.0:8081"

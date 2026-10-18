@@ -1,7 +1,7 @@
-//! Static x86-64 ELF process -> Cranelift RV64 -> interpreter -> syscall bridge.
+//! Static x86-64 ELF process -> Cranelift -> native or interpreted execution.
 use cranelift_isr::{
     ledger::RunLedger,
-    process::{self, Options},
+    process::{self, Backend, Options},
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "--help" => {
-                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0]\nisr-process --groups\nRuns a static Linux x86-64 ELF through RV64. Loopback TCP syscall profile; no native fallback.");
+                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend rv64|x86_64] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no native fallback.\n--backend selects the compilation target (rv64=interpreted with full heap/PAC/CFI mitigations, x86_64=native experimental: W^X+diversification only; heap tags and PAC do not apply).\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection; each is for A/B against the same binary.");
                 return Ok(());
             }
             "--events-bind" => {
@@ -47,6 +47,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 options.recompile_every_syscalls =
                     args.next().ok_or("missing recompile interval")?.parse()?
             }
+            "--no-tags" => options.hardening.tags = false,
+            "--no-pac" => options.hardening.pac = false,
+            "--no-random-placement" => options.hardening.random_placement = false,
+            "--no-cfi" => options.hardening.cfi = false,
+            "--backend" => {
+                let b = args.next().ok_or("missing backend name")?;
+                options.backend = match b.as_str() {
+                    "rv64" => Backend::Rv64,
+                    "x86_64" => Backend::X86_64,
+                    _ => return Err(format!("unknown backend: {b}").into()),
+                };
+            }
             _ if !a.starts_with('-') && file.is_none() => file = Some(PathBuf::from(a)),
             _ => return Err(format!("unknown or duplicate input: {a}").into()),
         }
@@ -66,9 +78,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(feed) = &live_feed {
         eprintln!("events: {}", feed.endpoint());
     }
+    let backend_label = options.backend.label();
     ledger.event(
         "started",
-        json!({"mode":"static ELF process","decoder":"iced-x86","backend":"Cranelift RV64",
+        json!({"mode":"static ELF process","decoder":"iced-x86","backend":backend_label,
         "live_events":live_feed.as_ref().map(|feed|feed.endpoint()),"native_fallback":false,"host_arch":std::env::consts::ARCH,"options":options}),
     )?;
     let result = process::run_file(&file, &options, &mut ledger);

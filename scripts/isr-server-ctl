@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# ISR Server Control Script
+# Usage: isr-server-ctl {start|stop|status|restart|logs}
+
+set -euo pipefail
+
+CONFIG="${ISR_CONFIG:-/etc/isr/guest.toml}"
+PIDFILE="${ISR_PIDFILE:-/run/isr-server.pid}"
+BINARY="${ISR_BINARY:-/usr/local/bin/isr-server}"
+
+case "${1:-}" in
+  start)
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      echo "isr-server is already running (pid $(cat "$PIDFILE"))"
+      exit 0
+    fi
+    echo "Starting isr-server with $CONFIG ..."
+    nohup "$BINARY" "$CONFIG" >/var/log/isr-server/stdout.log 2>/var/log/isr-server/stderr.log &
+    echo $! > "$PIDFILE"
+    echo "isr-server started (pid $!)"
+    ;;
+  stop)
+    if [ -f "$PIDFILE" ]; then
+      PID=$(cat "$PIDFILE")
+      echo "Stopping isr-server (pid $PID) ..."
+      kill "$PID" 2>/dev/null || true
+      rm -f "$PIDFILE"
+    else
+      echo "isr-server is not running"
+    fi
+    ;;
+  status)
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      echo "isr-server is running (pid $(cat "$PIDFILE"))"
+      curl -s "http://127.0.0.1:8080/health" 2>/dev/null || echo "health endpoint not responding"
+    else
+      echo "isr-server is not running"
+    fi
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  logs)
+    tail -f /var/log/isr-server/stderr.log /var/log/isr-server/stdout.log 2>/dev/null || true
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|status|restart|logs}"
+    exit 1
+    ;;
+esac

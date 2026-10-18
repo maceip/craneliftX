@@ -1,6 +1,10 @@
 //! Compiled code has a separate lifetime from guest state, memory and sockets.
 use super::{
     compile::{self, CompiledBlock},
+    csprng::Csprng,
+    diversify::Diversification,
+    jit::JitPage,
+    lower::Backend,
     memory::{error, GuestMemory},
     Report, Result,
 };
@@ -12,14 +16,38 @@ pub(super) struct CachedBlock {
     pub compiled: CompiledBlock,
     pub executions: u64,
     pub rv64_steps: u64,
+    /// JIT page for native x86-64 code (None for RV64 interpreted blocks).
+    pub jit_page: Option<JitPage>,
 }
-#[derive(Default)]
 pub(super) struct BlockCache {
     entries: BTreeMap<u64, CachedBlock>,
     unique: BTreeMap<u64, usize>,
     executed: BTreeSet<u64>,
+    /// Which backend to compile new blocks for.
+    backend: Backend,
+    /// CSPRNG for per-block diversification. Initialized on first use.
+    rng: Option<Csprng>,
 }
 impl BlockCache {
+    pub fn with_backend(backend: Backend) -> Self {
+        Self {
+            backend,
+            entries: BTreeMap::new(),
+            unique: BTreeMap::new(),
+            executed: BTreeSet::new(),
+            rng: None,
+        }
+    }
+    pub fn backend(&self) -> Backend {
+        self.backend
+    }
+    /// Ensure the CSPRNG is initialized. Called lazily on first compile.
+    fn rng(&mut self) -> Result<&mut Csprng> {
+        if self.rng.is_none() {
+            self.rng = Some(Csprng::new().map_err(error)?);
+        }
+        Ok(self.rng.as_mut().unwrap())
+    }
     pub fn get_or_compile(
         &mut self,
         memory: &GuestMemory,
@@ -31,8 +59,14 @@ impl BlockCache {
             if self.entries.len() >= 4096 {
                 return Err(error("compiled block cache limit reached").into());
             }
+            // Generate a fresh diversification for this block compilation.
+            let div = if self.backend == Backend::X86_64 {
+                Diversification::new(self.rng()?)
+            } else {
+                Diversification::identity()
+            };
             let compiled =
-                compile::prepare(memory, &self.unique, rip, report.compiled_blocks, ledger)?;
+                compile::prepare(memory, &self.unique, rip, report.compiled_blocks, self.backend, &div, ledger)?;
             for &(ip, len) in &compiled.source_instructions {
                 self.unique.insert(ip, len);
             }
@@ -40,6 +74,24 @@ impl BlockCache {
             report.emitted_rv64_bytes += compiled.code.len() as u64;
             report.unique_lifted_instructions = self.unique.len();
             report.unique_lifted_bytes = self.unique.values().sum();
+
+            // For x86_64 native, allocate W^X pages and copy the code.
+            let jit_page = if self.backend == Backend::X86_64 {
+                let mut page = JitPage::allocate(compiled.code.len())
+                    .map_err(|e| error(&format!("JIT allocation failed: {e}")))?;
+                // SAFETY: code fits in the allocated page.
+                unsafe { page.copy_code(&compiled.code) };
+                page.make_executable()
+                    .map_err(|e| error(&format!("W^X transition failed: {e}")))?;
+                ledger.event(
+                    "jit_page",
+                    json!({"rip":format!("0x{rip:x}"),"bytes":compiled.code.len(),"wx":true}),
+                )?;
+                Some(page)
+            } else {
+                None
+            };
+
             ledger.event(
                 "compilation_progress",
                 json!({"block_id":compiled.id,"rip":format!("0x{rip:x}"),"counters":report,
@@ -51,6 +103,7 @@ impl BlockCache {
                     compiled,
                     executions: 0,
                     rv64_steps: 0,
+                    jit_page,
                 },
             );
         }

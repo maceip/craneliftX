@@ -1,5 +1,16 @@
 //! Deliberately small Linux x86-64 syscall ABI, backed by host TCP sockets.
 //! Guest descriptors and memory are independent of host descriptors/pointers.
+//!
+//! The allocator is reached two ways, both of which terminate in `Heap`:
+//! * the runtime intercepts calls to the guest's own `malloc`/`free` symbols
+//!   (`Runtime::allocator_call`), so an unmodified static binary gets the
+//!   hardened heap without relinking;
+//! * the `ISR_*` syscalls below, for freestanding guests that have no allocator
+//!   of their own.
+//!
+//! Either way a pointer handed to a syscall is stripped of its tag here: the
+//! tag is a property of the guest's address space, never of the kernel's.
+use super::heap::{Heap, SYS_ISR_CALLOC, SYS_ISR_FREE, SYS_ISR_MALLOC, SYS_ISR_REALLOC};
 use super::memory::{error, GuestMemory};
 use crate::EngineError;
 use serde_json::{json, Value};
@@ -22,6 +33,8 @@ pub(super) struct Kernel {
     pub written_bytes: u64,
     pub accepted: u64,
     deadline: Instant,
+    brk_current: u64,
+    brk_original: u64,
 }
 pub(super) struct Outcome {
     pub exit: Option<i32>,
@@ -53,6 +66,8 @@ impl Kernel {
             written_bytes: 0,
             accepted: 0,
             deadline,
+            brk_current: 0x4000_0000,
+            brk_original: 0x4000_0000,
         }
     }
     pub fn open_descriptors(&self) -> usize {
@@ -69,14 +84,66 @@ impl Kernel {
         &mut self,
         state: &mut [u64; 18],
         memory: &mut GuestMemory,
+        heap: &mut Heap,
     ) -> Result<Outcome, EngineError> {
         let n = state[0];
-        let a = state[5];
-        let b = state[4];
-        let c = state[3];
-        let mut detail = json!({"number":n,"args":[format!("0x{a:x}"),format!("0x{b:x}"),format!("0x{c:x}")],"backend":"host syscall bridge"});
+        // Strip pointer metadata: the kernel addresses guest memory by its
+        // virtual address, and a tag must never reach a host pointer or a
+        // bounds check.
+        let scheme = heap.scheme();
+        let raw_a = state[5];
+        let raw_b = state[4];
+        let raw_c = state[3];
+        let raw_d = state[10];
+        let raw_e = state[8];
+        let raw_f = state[9];
+        let a = scheme.strip(raw_a);
+        let b = scheme.strip(raw_b);
+        let c = scheme.strip(raw_c);
+        let d = scheme.strip(raw_d);
+        let e = scheme.strip(raw_e);
+        let f = scheme.strip(raw_f);
+        let mut detail = json!({"number":n,"args":[format!("0x{a:x}"),format!("0x{b:x}"),format!("0x{c:x}"),format!("0x{d:x}"),format!("0x{e:x}"),format!("0x{f:x}")],"backend":"host syscall bridge"});
         let mut exit = None;
         let result: i64 = match n {
+            SYS_ISR_MALLOC | SYS_ISR_CALLOC | SYS_ISR_REALLOC | SYS_ISR_FREE => {
+                let rip = state[16];
+                // rdi = a, rsi = b, rdx = c, matching the Linux x86-64 ABI.
+                match n {
+                    SYS_ISR_MALLOC => heap.allocate(a)? as i64,
+                    SYS_ISR_CALLOC => {
+                        let total = a.saturating_mul(b);
+                        let address = heap.allocate(total)?;
+                        let at = scheme.strip(address);
+                        if total != 0 {
+                            if let Ok(slice) = memory.read_mut(at, total as usize) {
+                                slice.fill(0);
+                            }
+                        }
+                        address as i64
+                    }
+                    SYS_ISR_REALLOC => {
+                        let old = a;
+                        let address = heap.allocate(raw_b)?;
+                        let keep = heap.live_size(old).unwrap_or(0).min(c);
+                        let copy = memory
+                            .read(old, keep as usize)
+                            .map(|bytes| bytes.to_vec())
+                            .unwrap_or_default();
+                        memory.write(scheme.strip(address), &copy)?;
+                        if old != 0 {
+                            heap.release(a, rip)?;
+                        }
+                        address as i64
+                    }
+                    _ => {
+                        if raw_a != 0 {
+                            heap.release(raw_a, rip)?;
+                        }
+                        0
+                    }
+                }
+            }
             41 => {
                 // socket
                 detail["name"] = json!("socket");
@@ -255,6 +322,135 @@ impl Kernel {
                     0
                 } else {
                     -9
+                }
+            }
+            9 => {
+                // mmap: addr, length, prot, flags, fd, offset
+                detail["name"] = json!("mmap");
+                let addr = a;
+                let len = b;
+                let prot = c as i32;
+                let flags = d as i32;
+                let fd = e;
+                let _offset = f;
+                if len == 0 || len > 64 * 1024 * 1024 {
+                    -22
+                } else if fd != u64::MAX && fd > 1024 {
+                    -9
+                } else if fd != u64::MAX {
+                    // File-backed mmap not yet supported.
+                    -38
+                } else if flags & 0x20 == 0 {
+                    // MAP_ANONYMOUS required.
+                    -22
+                } else {
+                    let aligned_len = ((len + 4095) / 4096) * 4096;
+                    let fixed = flags & 0x10 != 0;
+                    let actual_addr = if fixed {
+                        addr
+                    } else {
+                        memory.find_free_mmap(addr, aligned_len).unwrap_or(0)
+                    };
+                    if actual_addr == 0 {
+                        -12
+                    } else {
+                        let writable = prot & 2 != 0;
+                        let executable = prot & 4 != 0;
+                        if writable && executable {
+                            return Err(error("mmap W^X violation"));
+                        }
+                        if let Err(err) = memory.map(actual_addr, aligned_len, writable, executable) {
+                            detail["error"] = json!(err.to_string());
+                            -12
+                        } else {
+                            detail["mapped"] = json!(format!("0x{actual_addr:x}+{aligned_len:x}"));
+                            actual_addr as i64
+                        }
+                    }
+                }
+            }
+            11 => {
+                // munmap
+                detail["name"] = json!("munmap");
+                if let Err(err) = memory.unmap(a, b) {
+                    detail["error"] = json!(err.to_string());
+                    -22
+                } else {
+                    0
+                }
+            }
+            10 => {
+                // mprotect
+                detail["name"] = json!("mprotect");
+                if let Err(err) = memory.mprotect(a, b, c as i32) {
+                    detail["error"] = json!(err.to_string());
+                    -22
+                } else {
+                    0
+                }
+            }
+            12 => {
+                // brk
+                detail["name"] = json!("brk");
+                if a == 0 {
+                    self.brk_current as i64
+                } else if a < self.brk_original || a > self.brk_original + 64 * 1024 * 1024 {
+                    -12
+                } else {
+                    let old = self.brk_current;
+                    if a > old {
+                        let len = a - old;
+                        let aligned_len = ((len + 4095) / 4096) * 4096;
+                        if memory.map(old, aligned_len, true, false).is_err() {
+                            -12
+                        } else {
+                            self.brk_current = old + aligned_len;
+                            self.brk_current as i64
+                        }
+                    } else {
+                        self.brk_current = a;
+                        a as i64
+                    }
+                }
+            }
+            39 => {
+                detail["name"] = json!("getpid");
+                std::process::id() as i64
+            }
+            102 => {
+                detail["name"] = json!("getuid");
+                1000
+            }
+            228 => {
+                // clock_gettime
+                detail["name"] = json!("clock_gettime");
+                use std::time::SystemTime;
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let ts_sec = now.as_secs() as i64;
+                let ts_nsec = now.subsec_nanos() as i64;
+                let timespec = [ts_sec.to_le_bytes(), ts_nsec.to_le_bytes()].concat();
+                if memory.write(b, &timespec).is_err() {
+                    -14
+                } else {
+                    0
+                }
+            }
+            318 => {
+                // getrandom
+                detail["name"] = json!("getrandom");
+                let mut buf = vec![0u8; b as usize];
+                match std::fs::File::open("/dev/urandom")
+                    .and_then(|mut f| f.read_exact(&mut buf).map(|_| ())) {
+                    Ok(()) => {
+                        if memory.write(a, &buf).is_err() {
+                            -14
+                        } else {
+                            b as i64
+                        }
+                    }
+                    Err(_) => -5,
                 }
             }
             60 | 231 => {

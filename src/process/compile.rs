@@ -2,6 +2,7 @@
 //! cache-miss compilation span; leaf operations each have their own group.
 use super::{
     audit, lower,
+    lower::Backend,
     memory::{error, GuestMemory},
     observe::operation,
     Result,
@@ -10,6 +11,7 @@ use crate::{
     codegen,
     harvest::harvest_bytes,
     ledger::{hex, sha256, RunLedger},
+    process::diversify::Diversification,
 };
 use cranelift_codegen::ir::Function;
 use iced_x86::{Formatter, Instruction, IntelFormatter, Mnemonic};
@@ -23,6 +25,7 @@ pub(super) struct CompiledBlock {
     pub syscall: Option<u64>,
     pub source_instructions: Vec<(u64, usize)>,
     pub x86_bytes: usize,
+    pub backend: Backend,
 }
 struct DecodedBlock {
     instructions: Vec<Instruction>,
@@ -64,28 +67,42 @@ fn decode(
         |b| json!({"x86_bytes":b.bytes.len(),"x86_instructions":b.instructions.len()}),
     )
 }
-fn lower(decoded: &DecodedBlock, context: Value, ledger: &mut RunLedger) -> Result<Function> {
+fn lower(
+    decoded: &DecodedBlock,
+    backend: Backend,
+    div: &Diversification,
+    context: Value,
+    ledger: &mut RunLedger,
+) -> Result<Function> {
     operation(
         ledger,
         "lower",
         context,
-        |_| Ok(lower::lower_block(&decoded.instructions)?),
+        |_| Ok(lower::lower_block(&decoded.instructions, backend, div, None)?),
         |f| json!({"clif_bytes":f.display().to_string().len()}),
     )
 }
-fn generate(function: &Function, context: Value, ledger: &mut RunLedger) -> Result<Vec<u8>> {
+fn generate(
+    function: &Function,
+    backend: Backend,
+    context: Value,
+    ledger: &mut RunLedger,
+) -> Result<Vec<u8>> {
     operation(
         ledger,
         "codegen",
         context,
-        |_| Ok(codegen::compile_to_riscv64(function)?),
-        |code| json!({"target":codegen::TARGET,"rv64_bytes":code.len(),"rv64_sha256":sha256(code)}),
+        |_| Ok(codegen::compile(function, backend)?),
+        |code| {
+            json!({"target":codegen::target_label(backend),"code_bytes":code.len(),"code_sha256":sha256(code)})
+        },
     )
 }
 fn persist(
     decoded: &DecodedBlock,
     function: &Function,
     code: &[u8],
+    backend: Backend,
     context: Value,
     ledger: &mut RunLedger,
 ) -> Result<()> {
@@ -102,7 +119,11 @@ fn persist(
                 &format!("{prefix}.clif"),
                 function.display().to_string().as_bytes(),
             )?;
-            ledger.artifact(&format!("{prefix}.rv64"), code)?;
+            let ext = match backend {
+                Backend::Rv64 => "rv64",
+                Backend::X86_64 => "x64",
+            };
+            ledger.artifact(&format!("{prefix}.{ext}"), code)?;
             Ok(())
         },
         |_| json!({"artifact_count":3}),
@@ -113,9 +134,11 @@ pub(super) fn prepare(
     known: &BTreeMap<u64, usize>,
     rip: u64,
     id: u64,
+    backend: Backend,
+    div: &Diversification,
     ledger: &mut RunLedger,
 ) -> Result<CompiledBlock> {
-    let context = json!({"rip":format!("0x{rip:x}"),"block_id":id});
+    let context = json!({"rip":format!("0x{rip:x}"),"block_id":id, "backend":backend.label(), "diversification":div.label()});
     operation(
         ledger,
         "lift",
@@ -129,9 +152,9 @@ pub(super) fn prepare(
                 context.clone(),
                 ledger,
             )?;
-            let function = lower(&decoded, context.clone(), ledger)?;
-            let code = generate(&function, context.clone(), ledger)?;
-            persist(&decoded, &function, &code, context.clone(), ledger)?;
+            let function = lower(&decoded, backend, div, context.clone(), ledger)?;
+            let code = generate(&function, backend, context.clone(), ledger)?;
+            persist(&decoded, &function, &code, backend, context.clone(), ledger)?;
             let syscall = decoded
                 .instructions
                 .last()
@@ -148,11 +171,12 @@ pub(super) fn prepare(
                     .iter()
                     .map(|i| (i.ip(), i.len()))
                     .collect(),
+                backend,
             })
         },
         |b| {
-            json!({"x86_bytes":b.x86_bytes,"x86_instructions":b.source_instructions.len(),"rv64_bytes":b.code.len(),
-        "rv64_sha256":sha256(&b.code),"target":codegen::TARGET,"syscall_boundary":b.syscall.is_some()})
+            json!({"x86_bytes":b.x86_bytes,"x86_instructions":b.source_instructions.len(),"code_bytes":b.code.len(),
+        "code_sha256":sha256(&b.code),"target":b.backend.label(),"syscall_boundary":b.syscall.is_some()})
         },
     )
 }

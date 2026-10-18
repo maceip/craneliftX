@@ -87,14 +87,25 @@ def select(eligible: list[dict], key: bytes | None,
     each eligible function is included when its keyed value falls under
     `fraction`; at least one is always kept so the deployment still exercises
     the lifted path.
+
+    Exploitation-risk functions (allocator calls, memcpy loops, indirect calls)
+    get a boosted threshold so they are far more likely to be selected.
     """
     names = [f["name"] for f in eligible]
     if key is None:
         return names, []
 
+    def _effective_fraction(f: dict) -> float:
+        """Boost fraction for high-risk functions."""
+        signals = f.get("exploit_signals", 0)
+        if signals > 0:
+            # Each signal adds 0.15 to the threshold, up to nearly 1.0
+            return min(0.95, fraction + signals * 0.15)
+        return fraction
+
     chosen = [
         f["name"] for f in eligible
-        if _unit_interval(f["name"], int(f.get("addr", 0)), key) < fraction
+        if _unit_interval(f["name"], int(f.get("addr", 0)), key) < _effective_fraction(f)
     ]
     if not chosen and eligible:
         # Never lift nothing: fall back to the highest-scoring candidate.

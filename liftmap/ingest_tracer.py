@@ -242,16 +242,37 @@ def analyze_function(name, insns, symbols_sorted, relocs=None):
     n_call = 0
     n_jump = 0
     n_ret = 0
+    has_memcpy_loop = False   # rep movsb / rep stosb / rep movsq
+    has_indirect_call = False # call reg / call [mem]
+    calls_allocator = False   # calls malloc / free / realloc / calloc
 
     def note_read(rname):
         if rname in ARG_REGS and rname not in written_regs:
             arg_regs_used.add(rname)
+
+    ALLOCATOR_NAMES = {"malloc", "free", "realloc", "calloc"}
 
     for ins in cs:
         groups = ins.groups
         is_call = CS_GRP_CALL in groups
         is_jump = CS_GRP_JUMP in groups
         is_ret = CS_GRP_RET in groups or ins.mnemonic in ("ret", "retq")
+
+        # Detect rep-prefixed string moves (memcpy-style loops)
+        if ins.mnemonic in ("rep movsb", "rep movsw", "rep movsd", "rep movsq",
+                            "rep stosb", "rep stosw", "rep stosd", "rep stosq",
+                            "rep movs", "rep stos"):
+            has_memcpy_loop = True
+
+        # Detect indirect calls / jumps (exploitation-relevant control flow)
+        if is_call or is_jump:
+            has_imm_target = any(op.type == X86_OP_IMM for op in ins.operands)
+            if not has_imm_target:
+                if is_call:
+                    has_indirect_call = True
+                elif is_jump and not is_ret:
+                    # Indirect jump (not ret) = JOP primitive
+                    has_indirect_call = True
 
         # CFG: fall-through to next instruction in this function
         nxt = ins.address + ins.size
@@ -304,6 +325,8 @@ def analyze_function(name, insns, symbols_sorted, relocs=None):
                 callee = symbol_at(symbols_sorted, target)
             if callee and callee.lstrip("_") != name.lstrip("_"):
                 calls.append(callee)
+                if callee.lstrip("_") in ALLOCATOR_NAMES:
+                    calls_allocator = True
         elif is_jump and target is not None:
             # tail call: a direct jump to another function's address
             callee = symbol_at(symbols_sorted, target)
@@ -392,6 +415,9 @@ def analyze_function(name, insns, symbols_sorted, relocs=None):
         "n_args": n_args,
         "signature": signature,
         "calls": calls,
+        "has_memcpy_loop": has_memcpy_loop,
+        "has_indirect_call": has_indirect_call,
+        "calls_allocator": calls_allocator,
     }
 
 
@@ -466,21 +492,45 @@ def analyze_binary(binary: str, on_event=None) -> dict:
     emit("callgraph", roots=roots,
          reachable=sum(1 for f in funcs if f.get("reachable")))
 
-    # ---- final lift/drop decision (performance-oriented, rule-based) ----
+    # ---- final lift/drop decision (performance + exploitation-risk oriented) ----
     # We LIFT frequently-executed NETWORK code that is NOT a super-tight loop,
     # and KEEP NATIVE the tight loops / orchestration glue / entry points.
+    # ADDITIONALLY we force-lift functions with exploitation-relevant primitives:
+    #   * allocator calls (heap manipulation)
+    #   * rep movsb/stosb (buffer-overflow memcpy primitives)
+    #   * indirect calls (ROP/JOP targets)
+    # These run under the mitigated interpreter even if their perf signal is low.
+    ALLOCATOR_NAMES = {"malloc", "free", "realloc", "calloc"}
     lift_names, keep_names = [], []
     for f in funcs:
+        exploit_signals = (
+            int(f["calls_allocator"])
+            + int(f["has_memcpy_loop"])
+            + int(f["has_indirect_call"])
+        )
+        exploit_score = exploit_signals * 0.35  # up to 1.05 bonus
+
         score = (0.5 * f["network_score"]
                  + 0.3 * f["frequency_score"]
                  - 0.6 * f["loop_density"]
-                 + (0.2 if f["pure_compute"] else 0.0))
+                 + (0.2 if f["pure_compute"] else 0.0)
+                 + exploit_score)
         f["lift_score"] = round(score, 3)
+        f["exploit_signals"] = exploit_signals
+
         # A single remill trace can execute a function that touches memory.
         # It cannot follow calls out of the lifted bytes, so those stay native.
-        # Count call instructions, not only resolved names: an unlinked .o
-        # has call relocations whose targets are still zero.
-        f["liftable_now"] = f["n_call"] == 0 and len(set(f["calls"])) == 0
+        # However, allocator calls are INTERCEPTED at runtime, so a function
+        # that only calls allocators (and nothing else) is still liftable.
+        non_allocator_callees = [
+            c for c in set(f["calls"])
+            if c.lstrip("_") not in ALLOCATOR_NAMES
+        ]
+        f["liftable_now"] = (
+            not f["has_indirect_call"]
+            and len(non_allocator_callees) == 0
+        )
+
         reasons = []
         decision = "KEEP_NATIVE"
         if not f["reachable"]:
@@ -489,11 +539,15 @@ def analyze_binary(binary: str, on_event=None) -> dict:
             reasons.append("program entry point")
         elif f["loop_density"] > LOOP_DENSITY_REJECT:
             reasons.append(f"tight loop (loop_density={f['loop_density']})")
-        elif f["n_call"] >= 3 or len(set(f["calls"])) >= 3:
+        elif exploit_signals == 0 and (f["n_call"] >= 3 or len(set(f["calls"])) >= 3):
+            # Only reject high call-count functions if they are NOT exploitation-risk.
+            # Risky functions with many allocator calls are still worth lifting.
             ncal = max(f["n_call"], len(set(f["calls"])))
             reasons.append(f"orchestration fan-out ({ncal} callees)")
-        elif f["network_score"] >= 0.25 or f["frequency_score"] >= 0.5:
+        elif f["network_score"] >= 0.25 or f["frequency_score"] >= 0.5 or exploit_signals > 0:
             decision = "LIFT"
+            if exploit_signals > 0:
+                reasons.append(f"exploit_risk_signals={exploit_signals}")
             reasons.append(f"network_score={f['network_score']}")
             reasons.append(f"loop_density={f['loop_density']} (not tight)")
             if not f["liftable_now"]:
@@ -511,7 +565,8 @@ def analyze_binary(binary: str, on_event=None) -> dict:
              lift_score=f["lift_score"], loop_density=f["loop_density"],
              call_fraction=f["call_fraction"], network_score=f["network_score"],
              frequency_score=f["frequency_score"],
-             liftable_now=f["liftable_now"])
+             liftable_now=f["liftable_now"],
+             exploit_signals=f["exploit_signals"])
 
     funcs.sort(key=lambda f: (-f["lift_score"], f["name"]))
     report = {

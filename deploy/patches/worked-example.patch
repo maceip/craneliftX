@@ -1,0 +1,730 @@
+--- a/src/bin/isr-demo.rs
++++ b/src/bin/isr-demo.rs
+@@ -238,20 +238,20 @@
+                         .read_exact(&mut buffer[..size])
+                         .map_err(|e| e.to_string())?;
+                     let mut steps = 0;
+-                    for (index, record) in buffer[..size].chunks_exact_mut(64).enumerate() {
++                    for (index, record) in buffer[..size]
++                        .as_chunks_mut::<64>()
++                        .0
++                        .iter_mut()
++                        .enumerate()
++                    {
+                         let variant = (done as usize / 64 + index + connection) % t.len();
+                         for round in 0..rounds {
+                             if stop.load(Ordering::Relaxed) {
+                                 return Ok(());
+                             }
+                             let kernel = (variant + round) % t.len();
+-                            steps += process(
+-                                record,
+-                                seed ^ word(record, 7),
+-                                kernel,
+-                                &t[kernel],
+-                                &mut executor,
+-                            )?;
++                            let pass_seed = seed ^ word(record, 7);
++                            steps += process(record, pass_seed, kernel, &t[kernel], &mut executor)?;
+                         }
+                     }
+                     server
+@@ -272,21 +272,24 @@
+                 let mut done = 0;
+                 while done < per_connection && !stop.load(Ordering::Relaxed) {
+                     let size = (per_connection - done).min(sent.len() as u64) as usize;
+-                    for bytes in sent[..size].chunks_exact_mut(8) {
++                    for bytes in sent[..size].as_chunks_mut::<8>().0 {
+                         state ^= state << 13;
+                         state ^= state >> 7;
+                         state ^= state << 17;
+                         bytes.copy_from_slice(&state.to_le_bytes());
+                     }
+                     client.write_all(&sent[..size]).map_err(|e| e.to_string())?;
+-                    for (index, record) in sent[..size].chunks_exact_mut(64).enumerate() {
++                    for (index, record) in
++                        sent[..size].as_chunks_mut::<64>().0.iter_mut().enumerate()
++                    {
+                         for round in 0..rounds {
+                             if stop.load(Ordering::Relaxed) {
+                                 return Ok(());
+                             }
++                            let pass_seed = seed ^ word(record, 7);
+                             reference(
+                                 record,
+-                                seed ^ word(record, 7),
++                                pass_seed,
+                                 (done as usize / 64 + index + connection + round) % variants,
+                             )?;
+                         }
+@@ -417,7 +420,12 @@
+     let start = Instant::now();
+     emit("stage",",\"kernel\":null,\"stage\":\"execute\",\"state\":\"started\",\"elapsed_ns\":0,\"error\":null");
+     if tier == "baby" {
+-        let mut record = [0xabu8; 64];
++        // A readable, real worked example: seven inputs and an empty output word.
++        let mut record = [0u8; 64];
++        for index in 0..7 {
++            record[index * 8..index * 8 + 8].copy_from_slice(&(index as u64 + 1).to_le_bytes());
++        }
++        let input_record = record;
+         let mut expected = record;
+         reference(&mut expected, seed, 0)?;
+         let before = context(&mut record, seed, 0);
+@@ -431,7 +439,7 @@
+         if record != expected {
+             return Err("baby memory mismatch".into());
+         }
+-        emit("context",&format!(",\"rax_before\":{},\"rax_after\":{},\"rcx_before\":{},\"rcx_after\":{},\"rip_before\":{},\"rip_after\":{},\"memory_before\":{},\"memory_after\":{}",quote(&format!("0x{:016x}",before.rax)),quote(&format!("0x{:016x}",word(&record,7))),quote(&format!("0x{:016x}",before.rcx)),quote(&format!("0x{:016x}",word(&record,6))),quote(&format!("0x{:016x}",before.rip)),quote(&format!("0x{:016x}",traces[0].next_rip())),quote(&hex(&[0xab;64])),quote(&hex(&record))));
++        emit("context",&format!(",\"rax_before\":{},\"rax_after\":{},\"rcx_before\":{},\"rcx_after\":{},\"rip_before\":{},\"rip_after\":{},\"memory_before\":{},\"memory_after\":{}",quote(&format!("0x{:016x}",before.rax)),quote(&format!("0x{:016x}",word(&record,7))),quote(&format!("0x{:016x}",before.rcx)),quote(&format!("0x{:016x}",word(&record,6))),quote(&format!("0x{:016x}",before.rip)),quote(&format!("0x{:016x}",traces[0].next_rip())),quote(&hex(&input_record)),quote(&hex(&record))));
+         counters.bytes.store(64, Ordering::Relaxed);
+         counters.verified.store(1, Ordering::Relaxed);
+         counters.steps.store(steps, Ordering::Relaxed);
+--- a/webapp/index.html
++++ b/webapp/index.html
+@@ -18,10 +18,10 @@
+   <meta name="twitter:card" content="summary_large_image">
+   <meta name="theme-color" content="#f5f5f7">
+   <link rel="icon" type="image/svg+xml" href="/dist/favicon.svg">
+-  <link rel="stylesheet" href="/dist/app-style.css?v=chunder_v1">
++  <link rel="stylesheet" href="/dist/app-style.css?v=worked_example_v1">
+ </head>
+ <body style="background-color: #F5F5F7; margin: 0; padding: 0;">
+   <div id="root"></div>
+-  <script type="module" src="/dist/app.js?v=chunder_v1"></script>
++  <script type="module" src="/dist/app.js?v=worked_example_v1"></script>
+ </body>
+ </html>
+--- a/webapp/src/App.tsx
++++ b/webapp/src/App.tsx
+@@ -1,4 +1,5 @@
+ import React, { useEffect, useRef, useState } from "react";
++import { WorkedExample } from "./WorkedExample";
+ import {
+   applyEvent,
+   EngineEvent,
+@@ -45,8 +46,6 @@
+     : n >= 1024
+       ? `${(n / 1024).toFixed(1)} KiB`
+       : `${n} B`;
+-const duration = (ns: number) =>
+-  ns >= 1e9 ? `${(ns / 1e9).toFixed(2)} s` : `${(ns / 1e6).toFixed(2)} ms`;
+ async function json(response: Response) {
+   const data = await response.json();
+   if (!response.ok)
+@@ -379,27 +378,7 @@
+             {run.message}
+           </p>
+         )}
+-        <ol className="pipeline">
+-          {stageRows.map((row, index) => (
+-            <li key={row.stage} data-state={row.state}>
+-              <span className="stage-number">0{index + 1}</span>
+-              <strong>
+-                {row.stage === "lower"
+-                  ? "Build CLIF"
+-                  : row.stage === "codegen"
+-                    ? "Emit RISC-V"
+-                    : row.stage[0].toUpperCase() + row.stage.slice(1)}
+-              </strong>
+-              <span>
+-                {row.state}
+-                {row.expected > 1 && row.finished > 0
+-                  ? ` · ${row.finished}/${row.expected}`
+-                  : ""}
+-              </span>
+-              <small>{row.ns ? duration(row.ns) : "—"}</small>
+-            </li>
+-          ))}
+-        </ol>
++        <WorkedExample run={run} stages={stageRows} />
+         <div className="progress-label">
+           <span>
+             {bytes(done)} / {bytes(total)} verified
+--- /dev/null
++++ b/webapp/src/WorkedExample.tsx
+@@ -0,0 +1,193 @@
++import React, { useState } from "react";
++import { number, Snapshot, text } from "./protocol";
++
++export type StageRow = {
++  stage: string;
++  finished: number;
++  expected: number;
++  state: string;
++  ns: number;
++};
++
++const steps = [
++  { title: "Read the x86 code", short: "Read code", term: "Harvest" },
++  { title: "Check the rules", short: "Check rules", term: "Audit" },
++  { title: "Express the same computation", short: "Build IR", term: "Cranelift IR" },
++  { title: "Make RISC-V machine code", short: "Emit RISC-V", term: "Codegen" },
++  { title: "Run it and compare the result", short: "Run & compare", term: "Execute" },
++];
++const mask = (1n << 64n) - 1n;
++const preset = [1n, 2n, 3n, 4n, 5n, 6n, 7n, 0n];
++const display = (value: bigint) =>
++  value <= 999999999n ? value.toLocaleString("en-US") : hex(value);
++const hex = (value: bigint) => `0x${value.toString(16).padStart(16, "0")}`;
++const time = (ns: number) =>
++  ns >= 1e9 ? `${(ns / 1e9).toFixed(2)} s` : `${(ns / 1e6).toFixed(2)} ms`;
++
++function words(raw: string): bigint[] | null {
++  if (!/^[0-9a-f]{128}$/i.test(raw)) return null;
++  return Array.from({ length: 8 }, (_, index) =>
++    BigInt(`0x${raw.slice(index * 16, index * 16 + 16).match(/../g)!.reverse().join("")}`),
++  );
++}
++function integer(raw: string): bigint | null {
++  return /^(0x[0-9a-f]+|[0-9]+)$/i.test(raw) ? BigInt(raw) : null;
++}
++function calculation(input: bigint[], seed: bigint) {
++  const sum = input.slice(0, 7).reduce((a, b) => (a + b) & mask, 0n);
++  const mixed = sum ^ seed;
++  const shifted = (mixed << 1n) & mask;
++  const added = (shifted + 17n) & mask;
++  return [sum, mixed, shifted, added, added | 5n];
++}
++
++function Transfer({ input, output }: { input: React.ReactNode; output: React.ReactNode }) {
++  return (
++    <div className="step-transfer">
++      <div><span className="io-label">Input</span>{input}</div>
++      <span className="transfer-arrow" aria-hidden="true">→</span>
++      <div><span className="io-label">Output</span>{output}</div>
++    </div>
++  );
++}
++
++export function WorkedExample({ run, stages }: { run: Snapshot | null; stages: StageRow[] }) {
++  const [step, setStep] = useState(0);
++  const artifact = run?.artifacts["0"];
++  const network = !!run && run.tier !== "baby";
++  const before = !network ? words(text(run?.context, "memory_before")) : null;
++  const after = !network ? words(text(run?.context, "memory_after")) : null;
++  const seed = integer(run?.seed ?? "42") ?? 42n;
++  const input = before ?? preset;
++  const values = calculation(input, seed);
++  const completed = run?.status === "completed" && run.result?.mismatches === 0;
++  const captured = !!before && !!after;
++  const auditPassed = run?.stages["0:audit"]?.state === "completed";
++  const syscallRejected = run?.security?.syscall_rejected === true && run.security.codegen_invoked === false;
++  const decoded = number(artifact, "instructions");
++  const riscv = text(artifact, "riscv");
++  const byteCount = riscv.length / 2;
++  const clif = text(artifact, "clif");
++  const entry = text(artifact, "entry_rip");
++  const exit = text(artifact, "exit_rip");
++  const delta = entry && exit ? BigInt(exit) - BigInt(entry) : null;
++  const evidence = captured
++    ? `Recorded from Baby run ${run!.id.slice(0, 8)} · seed ${run!.seed}`
++    : network
++      ? "Kernel 0 from this network run · individual records are not recorded"
++      : "Baby preset preview · run Baby to capture real values and generated code";
++
++  return (
++    <section className="walkthrough" aria-label="Worked example">
++      <div className="walkthrough-heading">
++        <h3>One record, five steps</h3>
++        <p>Read seven numbers, mix their sum with a seed, and write one answer. Follow how the engine carries that computation into a different instruction set.</p>
++      </div>
++      <ol className="pipeline">
++        {stages.map((row, index) => (
++          <li key={row.stage} data-state={row.state}>
++            <button type="button" aria-pressed={step === index} aria-controls="worked-step" onClick={() => setStep(index)}>
++              <span className="stage-number">0{index + 1} · {steps[index].term}</span>
++              <strong>{steps[index].short}</strong>
++              <span>{row.state}{row.expected > 1 && row.finished > 0 ? ` · ${row.finished}/${row.expected}` : ""}</span>
++              <small>{row.ns ? time(row.ns) : "—"}</small>
++            </button>
++          </li>
++        ))}
++      </ol>
++      <div id="worked-step" className="worked-step">
++        <p className="example-provenance">{evidence}</p>
++        <h4><span className="step-index">0{step + 1}</span>{steps[step].title}</h4>
++
++        {step === 0 && <>
++          <p>The worker starts at <strong>RIP</strong>, the address of the next x86 instruction. It reads a short block and stops at the return instruction, <code>RET</code>.</p>
++          <Transfer
++            input={<><strong>Live x86 function</strong><code>{entry || "RIP supplied when the run starts"}</code></>}
++            output={<><strong>{decoded ? `${decoded - 1} instructions + RET boundary` : "A decoded instruction list"}</strong><span>The return boundary is inspected, but not translated.</span></>}
++          />
++          {!network && <div className="record-view">
++            <div className="record-label"><strong>{captured ? "Captured input record" : "Baby input preset"}</strong><span>64 bytes = eight 64-bit words</span></div>
++            <div className="record-words">
++              {input.slice(0, 7).map((value, index) => <div key={index}><span>Number {index + 1}</span><code>{display(value)}</code></div>)}
++              <div className="output-word"><span>Output slot</span><code>{display(input[7])}</code></div>
++            </div>
++            <p className="step-note">The first seven words are inputs. The last word reserves space for the answer. RDI holds the address of this record; RSI holds seed {run?.seed ?? "42"}.</p>
++          </div>}
++          {network && <p className="step-note">Each network record has seven input words and one output word. Run Baby to inspect one record’s exact values from start to finish.</p>}
++          <details className="step-evidence"><summary>Connect the x86 instructions to the example</summary>
++            <pre>{"mov rax, [rdi]       ; read number 1\nmov rcx, [rdi + 8]   ; read number 2\nadd rax, rcx         ; add them\n…                   ; read and add numbers 3–7\nxor rax, rsi         ; mix in the seed\nshl rax, 1           ; shift left one bit\nadd rax, 17          ; add 17\nor  rax, 5           ; set the bits selected by 5\nmov [rdi + 56], rax  ; write the answer\nret                 ; stop here: leave RET to the caller"}</pre>
++            <p className="step-note">Annotated excerpt of the fixed kernel; the repeated additions are abbreviated.</p>
++            {artifact && <><h5>Exact x86 bytes from this run</h5><pre>{text(artifact, "x86").match(/.{1,48}/g)?.join("\n")}</pre></>}
++          </details>
++        </>}
++
++        {step === 1 && <>
++          <p>Before compiling, the audit checks the decoded instructions for forbidden system calls, unexpected stack-pointer changes, and disallowed absolute addresses.</p>
++          <Transfer
++            input={<><strong>The same decoded block</strong><span>Instructions from step 1</span></>}
++            output={<><strong>{auditPassed ? "This block passed its audit" : "Accept the block, or stop"}</strong><span>{auditPassed ? "Kernel 0 can proceed to Cranelift." : "A rejected block never reaches the compiler."}</span></>}
++          />
++          <div className="rule-check">
++            <div><strong>What this example does</strong><p>Reads the record through RDI, calculates an answer, and writes it back. It makes no system call and does not reassign RSP, the stack pointer.</p></div>
++            <div><strong>Separate rejection check</strong><p><code>0f 05</code> → <code>SYSCALL</code> → <strong>{syscallRejected ? "Rejected before codegen" : "must be rejected"}</strong></p><span className="step-note">{syscallRejected ? "The worker reported that compilation was never invoked for this test." : "Every run tests this forbidden two-byte buffer separately from the example."}</span></div>
++          </div>
++          <p className="step-note">This audit checks instruction rules. Register-based memory pointers still belong to the host process; it is not a memory sandbox.</p>
++        </>}
++
++        {step === 2 && <>
++          <p><strong>Cranelift IR</strong> (also called CLIF) is the compiler’s intermediate language. It describes the same reads, arithmetic, and writes without using x86 machine instructions.</p>
++          <Transfer
++            input={<><strong>Audited x86 instructions</strong><span>The computation from steps 1 and 2</span></>}
++            output={<><strong>One Cranelift function</strong><span>Reads the register context, performs the work, and saves updated registers.</span></>}
++          />
++          <table className="meaning-table"><thead><tr><th>x86 operation</th><th>Cranelift IR</th><th>Meaning in this example</th></tr></thead><tbody>
++            <tr><td><code>MOV</code> from memory</td><td><code>load.i64</code></td><td>Read a 64-bit number from the record.</td></tr>
++            <tr><td><code>ADD</code></td><td><code>iadd</code></td><td>Add it to the running sum.</td></tr>
++            <tr><td><code>XOR / SHL / OR</code></td><td><code>bxor / ishl / bor</code></td><td>Mix the seed and adjust the answer.</td></tr>
++            <tr><td><code>MOV</code> to memory</td><td><code>store</code></td><td>Save the answer in the output slot.</td></tr>
++          </tbody></table>
++          <details className="step-evidence"><summary>Inspect the actual Cranelift IR</summary>{clif ? <pre>{clif}</pre> : <p>Run Baby to see the compiler’s generated IR here.</p>}</details>
++        </>}
++
++        {step === 3 && <>
++          <p>Cranelift compiles that function into <strong>RISC-V machine code</strong>. The computation stays the same; the instruction encoding changes.</p>
++          <Transfer
++            input={<><strong>The Cranelift function</strong><span>Output from step 3</span></>}
++            output={<><strong>{byteCount ? `${byteCount} bytes of compiled output` : "RISC-V machine bytes"}</strong><span>Instructions and embedded data for the interpreter.</span></>}
++          />
++          <div className="target-lock"><span>Backend target</span><code>riscv64gc-unknown-none-elf</code></div>
++          {riscv ? <div className="machine-bytes"><p>Beginning of the actual compiled output</p><pre>{riscv.slice(0, 64).match(/.{1,8}/g)?.join(" ")}</pre></div> : <p className="step-note">Actual machine bytes appear here after the worker compiles the trace.</p>}
++          <p className="step-note">The embedded core executes fixed-width RV64 instructions. The host CPU does not execute these RISC-V bytes directly.</p>
++          <details className="step-evidence"><summary>Inspect all emitted RISC-V bytes</summary>{riscv ? <pre>{riscv.match(/.{1,48}/g)?.join("\n")}</pre> : <p>Run Baby to capture the generated code.</p>}</details>
++        </>}
++
++        {step === 4 && <>
++          <p>The embedded RISC-V core executes the generated instructions against the record and register context. The worker compares the result with an independent Rust calculation{String(run?.engine?.oracle ?? "").includes("native-x86") ? " and the native x86 function" : "; on an x86 host it also checks the native function"}.</p>
++          {!network && <>
++            <div className="calculation-label"><strong>{captured ? "Calculation from the captured inputs" : "Expected calculation for the Baby preset"}</strong><span>Unsigned 64-bit arithmetic</span></div>
++            <ol className="calculation">
++              {["Sum 7 inputs", `XOR seed ${run?.seed ?? "42"}`, "Shift left 1 bit", "Add 17", "OR with 5"].map((label, index) => <li key={label}><span>{label}</span><code>{display(values[index])}</code></li>)}
++            </ol>
++            <p className="step-note">XOR mixes bits that differ; OR sets the bits selected by 5. Values wrap at 64 bits. This arithmetic explanation is calculated from the inputs; the observed output below comes from the worker.</p>
++          </>}
++          <Transfer
++            input={<><strong>RISC-V code + register context</strong><span>{network ? "Reused for dependent passes across network records." : "The input record and seed from step 1."}</span></>}
++            output={<><strong>{captured ? `Observed output: ${display(after![7])}` : network && completed ? `${number(run?.result, "verified").toLocaleString("en-US")} records verified` : "Updated registers and memory"}</strong><span>{completed ? `Worker comparison: ${number(run?.result, "mismatches")} mismatches.` : "A match is reported only after the worker finishes successfully."}</span></>}
++          />
++          {captured && <table className="delta-table"><thead><tr><th>What changed</th><th>Before</th><th>After</th></tr></thead><tbody>
++            <tr><th>Output word <small>Bytes 56–63</small></th><td><code>{display(before![7])}</code></td><td><code>{display(after![7])}</code></td></tr>
++            {["rax", "rcx", "rip"].map(field => <tr key={field}><th>{field.toUpperCase()}<small>{field === "rax" ? "Answer register" : field === "rcx" ? "Last input read" : "Next x86 instruction"}</small></th><td><code>{text(run?.context, `${field}_before`)}</code></td><td><code>{text(run?.context, `${field}_after`)}</code></td></tr>)}
++          </tbody></table>}
++          {captured && <p className="step-note">The seven input words stay unchanged. All 16 general-purpose registers and the exit RIP are checked; the table shows the changed fields. {delta !== null && `RIP advances ${delta} bytes to RET.`} This demo does not resume native execution.</p>}
++          {network && <p className="step-note">This run records aggregate verification, not individual before/after records. Select Baby above for a complete single-record walkthrough.</p>}
++          {!run && <p className="step-note">Nothing has executed yet. Run Baby above to replace this preview with captured evidence.</p>}
++          {run && <p className={`comparison-result ${completed ? "is-verified" : ""}`} role="status">{completed ? `Verified by the worker · ${number(run.result, "riscv_steps").toLocaleString("en-US")} RISC-V instructions executed · ${text(run.engine, "oracle")}` : `Run ${run.status} · no completed comparison result`}</p>}
++        </>}
++        <div className="walkthrough-nav">
++          <span>Step {step + 1} of 5 · explore at your own pace</span>
++          <div><button type="button" disabled={step === 0} onClick={() => setStep(step - 1)}>Previous step</button><button type="button" disabled={step === 4} onClick={() => setStep(step + 1)}>Next step <span aria-hidden="true">→</span></button></div>
++        </div>
++      </div>
++    </section>
++  );
++}
+--- a/webapp/src/styles.css
++++ b/webapp/src/styles.css
+@@ -1,3 +1,5 @@
++@import "./worked-example.css";
++
+ :root {
+   font-family:
+     Inter,
+--- /dev/null
++++ b/webapp/src/worked-example.css
+@@ -0,0 +1,87 @@
++.walkthrough { margin: 0 0 28px; }
++.walkthrough-heading { max-width: 760px; margin-bottom: 20px; }
++.walkthrough-heading h3 { font-size: 17px; margin: 0 0 8px; }
++.walkthrough-heading p, .worked-step > p { font-size: 14px; line-height: 1.65; color: #526173; margin: 0 0 18px; }
++.walkthrough .pipeline { margin-bottom: 0; }
++.walkthrough .pipeline li { padding: 0; border: 0; background: none; display: block; }
++.walkthrough .pipeline button { width: 100%; min-height: 111px; padding: 13px; display: flex; flex-direction: column; gap: 7px; text-align: left; border: 1px solid #d8dce3; font-weight: 400; }
++.walkthrough .pipeline button > span:not(.stage-number) { font-size: 11px; color: #596371; }
++.walkthrough .pipeline li[data-state="Complete"] button { background: #f8fbf9; border-color: #bed7cb; }
++.walkthrough .pipeline li[data-state="Failed"] button { border-color: #b63e3e; }
++.walkthrough .pipeline button[aria-pressed="true"] { border-color: #245bc1; box-shadow: 0 0 0 1px #245bc1; }
++.walkthrough .pipeline button:hover { border-color: #245bc1; }
++.worked-step { border: 1px solid #d8dce3; border-radius: 10px; margin-top: 16px; padding: 22px; background: #fff; }
++.worked-step .example-provenance { font-size: 11px; margin-bottom: 15px; color: #596371; }
++.worked-step h4 { font-size: 19px; display: flex; align-items: center; gap: 12px; margin: 0 0 15px; }
++.step-index { border-radius: 6px; padding: 7px; font: 12px ui-monospace, monospace; color: #245bc1; background: #eef3fc; flex-shrink: 0; }
++.worked-step h5 { font-size: 12px; margin: 18px 0 8px; }
++.step-transfer { display: grid; grid-template-columns: minmax(0,1fr) 32px minmax(0,1fr); align-items: stretch; margin: 20px 0; }
++.step-transfer > div { display: flex; flex-direction: column; gap: 8px; background: #f5f6f8; border-radius: 8px; padding: 16px; min-width: 0; }
++.step-transfer .io-label { color: #596371; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
++.step-transfer strong { font-size: 14px; line-height: 1.5; }
++.step-transfer div > span:not(.io-label), .step-transfer code { font-size: 12px; line-height: 1.6; color: #526173; overflow-wrap: anywhere; }
++.transfer-arrow { align-self: center; text-align: center; font-size: 21px; color: #245bc1; }
++.record-label, .calculation-label { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 12px; margin: 20px 0 12px; }
++.record-label > span, .calculation-label > span { color: #596371; font-size: 11px; }
++.record-words { display: grid; grid-template-columns: repeat(8,minmax(0,1fr)); gap: 6px; }
++.record-words > div { border: 1px solid #d8dce3; border-radius: 6px; padding: 11px 8px; min-width: 0; }
++.record-words span { font-size: 10px; color: #596371; display: block; margin-bottom: 9px; }
++.record-words code { font-size: 15px; display: block; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
++.record-words .output-word { border-style: dashed; border-color: #245bc1; background: #f5f8fe; }
++.worked-step .step-note { font-size: 12px; line-height: 1.65; color: #596371; margin: 12px 0; }
++.step-evidence { border-top: 1px solid #d8dce3; padding-top: 16px; margin-top: 20px; }
++.step-evidence summary { font-size: 13px; font-weight: 600; cursor: pointer; color: #245bc1; }
++.step-evidence > p { font-size: 13px; color: #526173; line-height: 1.6; }
++.step-evidence pre { max-height: 300px; margin-bottom: 0; }
++.rule-check { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 22px; margin-top: 23px; }
++.rule-check strong { font-size: 13px; }
++.rule-check p { font-size: 13px; line-height: 1.65; color: #526173; margin: 10px 0; }
++.worked-step .meaning-table { font-family: inherit; font-size: 12px; }
++.worked-step .meaning-table th:first-child { width: 27%; }
++.worked-step .meaning-table th:nth-child(2) { width: 29%; }
++.worked-step th { font-size: 11px; }
++.worked-step th, .worked-step td { padding: 10px 8px; line-height: 1.6; }
++.target-lock { display: flex; flex-wrap: wrap; gap: 10px 20px; background: #f5f6f8; border-radius: 8px; padding: 14px 16px; font-size: 12px; }
++.target-lock > span { color: #596371; }
++.target-lock code { overflow-wrap: anywhere; }
++.machine-bytes p { font-size: 12px; color: #596371; margin-top: 20px; }
++.machine-bytes pre { white-space: pre-wrap; overflow-wrap: anywhere; }
++.calculation { list-style: none; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); padding: 0; margin: 0; gap: 8px; }
++.calculation li { border-left: 2px solid #d8dce3; padding: 9px 12px; min-width: 0; }
++.calculation li:last-child { border-color: #245bc1; background: #f5f8fe; }
++.calculation span { display: block; font-size: 11px; color: #596371; margin-bottom: 10px; }
++.calculation code { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
++.worked-step .delta-table { font-family: inherit; }
++.worked-step .delta-table th:first-child { width: 24%; }
++.delta-table th small { display: block; font-weight: 400; color: #596371; font-size: 10px; }
++.delta-table td code { font-size: 11px; }
++.worked-step .comparison-result { font-size: 12px; border-left: 3px solid #c5cad2; background: #f5f6f8; padding: 12px 14px; margin-top: 18px; }
++.worked-step .comparison-result.is-verified { border-color: #286046; color: #286046; background: #f8fbf9; }
++.walkthrough-nav { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 24px; padding-top: 18px; border-top: 1px solid #d8dce3; }
++.walkthrough-nav > span { font-size: 11px; color: #596371; }
++.walkthrough-nav > div { display: flex; gap: 8px; }
++.walkthrough-nav button { font-size: 12px; padding: 9px 12px; }
++@media (max-width: 760px) {
++  .walkthrough .pipeline { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
++  .walkthrough .pipeline li:last-child { grid-column: 1 / -1; }
++  .walkthrough .pipeline button { min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 7px; padding: 12px; }
++  .walkthrough .pipeline .stage-number, .walkthrough .pipeline strong { grid-column: 1 / -1; min-height: 0; }
++  .walkthrough .pipeline strong { font-size: 13px; }
++  .walkthrough .pipeline small { font-size: 10px; }
++  .worked-step { padding: 15px; }
++  .worked-step h4 { font-size: 17px; align-items: flex-start; line-height: 1.4; }
++  .worked-step > p, .walkthrough-heading p { font-size: 13px; }
++  .step-transfer { grid-template-columns: minmax(0,1fr); gap: 7px; }
++  .step-transfer > div { padding: 12px; }
++  .transfer-arrow { transform: rotate(90deg); font-size: 17px; }
++  .record-words { grid-template-columns: repeat(4,minmax(0,1fr)); }
++  .record-words code { font-size: 12px; }
++  .record-words span { font-size: 9px; }
++  .rule-check { grid-template-columns: minmax(0,1fr); gap: 10px; }
++  .worked-step .meaning-table { font-size: 11px; }
++  .worked-step th, .worked-step td { padding: 9px 4px; }
++  .calculation { grid-template-columns: repeat(2,minmax(0,1fr)); }
++  .calculation li:last-child { grid-column: 1 / -1; }
++  .calculation code { font-size: 17px; }
++  .delta-table td code { font-size: 10px; }
++}
+--- a/webapp/tests/demo.spec.ts
++++ b/webapp/tests/demo.spec.ts
+@@ -40,7 +40,7 @@
+   const state = await report(page);
+   expect(state.result.verified).toBe(1);
+   expect(state.security.codegen_invoked).toBe(false);
+-  expect(state.context.rax_after).toBe("0x636363636363631f");
++  expect(state.context.rax_after).toBe("0x000000000000007d");
+   expect(state.artifacts["0"].clif).toContain("function");
+   expect(state.artifacts["0"].riscv.length).toBeGreaterThan(100);
+   const replay = await request.get(`/api/runs/${state.id}/events?after=0`);
+@@ -106,6 +106,11 @@
+   expect(state.progress.connections).toBe(4);
+   expect(state.result.mismatches).toBe(0);
+   expect(state.engine.network).toContain("real TCP");
++  const guide = page.getByRole("region", { name: "Worked example" });
++  await expect(guide.getByText(/individual records are not recorded/)).toBeVisible();
++  await guide.getByRole("button", { name: /05 · Execute/ }).click();
++  await expect(guide.getByText("131,072 records verified", { exact: true })).toBeVisible();
++  await expect(guide.locator(".calculation")).toHaveCount(0);
+   const events = await (
+     await page.request.get(`/api/runs/${state.id}/events`)
+   ).text();
+@@ -175,6 +180,9 @@
+   const state = await report(page);
+   expect(state.result).toBeUndefined();
+   expect(state.progress.bytes).toBeLessThan(state.requested.bytes);
++  const guide = page.getByRole("region", { name: "Worked example" });
++  await guide.getByRole("button", { name: /05 · Execute/ }).click();
++  await expect(guide.locator(".comparison-result")).toHaveText("Run cancelled · no completed comparison result");
+ });
+ 
+ test("Coordinator crash becomes interrupted and persisted report survives restart", async ({
+--- /dev/null
++++ b/webapp/tests/fixtures/legacy-baby.json
+@@ -0,0 +1,173 @@
++{
++  "id": "210df634575748f1b413298d2c859906",
++  "tier": "baby",
++  "seed": "42",
++  "status": "completed",
++  "cursor": 18,
++  "created": 1791691501.2331963,
++  "stages": {
++    "0:harvest": {
++      "v": 1,
++      "type": "stage",
++      "kernel": 0,
++      "stage": "harvest",
++      "state": "completed",
++      "elapsed_ns": 648421,
++      "error": null,
++      "run_id": "210df634575748f1b413298d2c859906",
++      "seq": 4,
++      "time": 1791691501.252054
++    },
++    "0:audit": {
++      "v": 1,
++      "type": "stage",
++      "kernel": 0,
++      "stage": "audit",
++      "state": "completed",
++      "elapsed_ns": 804,
++      "error": null,
++      "run_id": "210df634575748f1b413298d2c859906",
++      "seq": 6,
++      "time": 1791691501.2531633
++    },
++    "0:lower": {
++      "v": 1,
++      "type": "stage",
++      "kernel": 0,
++      "stage": "lower",
++      "state": "completed",
++      "elapsed_ns": 93961,
++      "error": null,
++      "run_id": "210df634575748f1b413298d2c859906",
++      "seq": 8,
++      "time": 1791691501.2545552
++    },
++    "0:codegen": {
++      "v": 1,
++      "type": "stage",
++      "kernel": 0,
++      "stage": "codegen",
++      "state": "completed",
++      "elapsed_ns": 304295,
++      "error": null,
++      "run_id": "210df634575748f1b413298d2c859906",
++      "seq": 10,
++      "time": 1791691501.2563448
++    },
++    "None:execute": {
++      "v": 1,
++      "type": "stage",
++      "kernel": null,
++      "stage": "execute",
++      "state": "completed",
++      "elapsed_ns": 48941,
++      "error": null,
++      "run_id": "210df634575748f1b413298d2c859906",
++      "seq": 16,
++      "time": 1791691501.2610831
++    }
++  },
++  "artifacts": {
++    "0": {
++      "v": 1,
++      "type": "artifact",
++      "kernel": 0,
++      "x86": "488b07488b4f084801c8488b4f104801c8488b4f184801c8488b4f204801c8488b4f284801c8488b4f304801c84831f048c1e0014883c0114883c80548894738c3",
++      "clif": "function u0:0(i64) system_v {\nblock0(v0: i64):\n    v1 = load.i64 v0\n    v2 = load.i64 v0+8\n    v3 = load.i64 v0+16\n    v4 = load.i64 v0+24\n    v5 = load.i64 v0+32\n    v6 = load.i64 v0+40\n    v7 = load.i64 v0+48\n    v8 = load.i64 v0+56\n    v9 = load.i64 v0+64\n    v10 = load.i64 v0+72\n    v11 = load.i64 v0+80\n    v12 = load.i64 v0+88\n    v13 = load.i64 v0+96\n    v14 = load.i64 v0+104\n    v15 = load.i64 v0+112\n    v16 = load.i64 v0+120\n    v17 = iadd_imm v6, 0\n    v18 = load.i64 v17\n    v19 = iadd_imm v6, 8\n    v20 = load.i64 v19\n    v21 = iadd v18, v20\n    v22 = iadd_imm v6, 16\n    v23 = load.i64 v22\n    v24 = iadd v21, v23\n    v25 = iadd_imm v6, 24\n    v26 = load.i64 v25\n    v27 = iadd v24, v26\n    v28 = iadd_imm v6, 32\n    v29 = load.i64 v28\n    v30 = iadd v27, v29\n    v31 = iadd_imm v6, 40\n    v32 = load.i64 v31\n    v33 = iadd v30, v32\n    v34 = iadd_imm v6, 48\n    v35 = load.i64 v34\n    v36 = iadd v33, v35\n    v37 = bxor v36, v5\n    v38 = iconst.i64 1\n    v39 = ishl v37, v38  ; v38 = 1\n    v40 = iconst.i64 17\n    v41 = iadd v39, v40  ; v40 = 17\n    v42 = iconst.i64 5\n    v43 = bor v41, v42  ; v42 = 5\n    v44 = iadd_imm v6, 56\n    store v43, v44\n    store v43, v0\n    store v2, v0+8\n    store v35, v0+16\n    store v4, v0+24\n    store v5, v0+32\n    store v6, v0+40\n    store v7, v0+48\n    store v8, v0+56\n    store v9, v0+64\n    store v10, v0+72\n    store v11, v0+80\n    store v12, v0+88\n    store v13, v0+96\n    store v14, v0+104\n    store v15, v0+112\n    store v16, v0+120\n    v45 = iconst.i64 0x5bcf_415c_5d00\n    store v45, v0+128  ; v45 = 0x5bcf_415c_5d00\n    return\n}\n",
++      "riscv": "130101ff233411002330810013040100130101fe233c910023382101233431012330b10183370500833785008335050183358501033605028336850203370503833d85038332050403338504833305050338850583380506033e8506833e05078334850703b9060083b986003309390183b906013309390183b986013309390183b906023309390183b98602b309390103b90603b3892901b3c9c900939919009389190193e9590023bc3603233035012334f50023382501233cb5002330c5022334d5022338e502233cb503233055042334650423387504233c0505233015072334c5072338d507233c950617070000033747032330e508833481010339010183398100833d0100130101028330810003340100130101016780000000000000005d5c41cf5b0000",
++      "instructions": 19,
++      "entry_rip": "0x00005bcf415c5cc0",
++      "exit_rip": "0x00005bcf415c5d00",
++      "run_id": "210df634575748f1b413298d2c859906",
++      "seq": 11,
++      "time": 1791691501.2570283
++    }
++  },
++  "logs": [],
++  "progress_history": [
++    {
++      "seconds": 0.0,
++      "bytes": 64
++    }
++  ],
++  "worker_sha256": "627cf20001a49392212ea12133246e033fc6dd25726e651b881bc1539fc033fb",
++  "requested": {
++    "bytes": 64,
++    "connections": 0,
++    "kernels": 1,
++    "rounds": 1
++  },
++  "engine": {
++    "v": 1,
++    "type": "started",
++    "tier": "baby",
++    "seed": "42",
++    "total_bytes": 64,
++    "connections": 0,
++    "kernels": 1,
++    "rounds": 1,
++    "oracle": "native-x86-and-rust-reference",
++    "host_arch": "x86_64",
++    "backend": "riscv64gc-unknown-none-elf",
++    "network": "none",
++    "run_id": "210df634575748f1b413298d2c859906",
++    "seq": 2,
++    "time": 1791691501.2507179
++  },
++  "security": {
++    "v": 1,
++    "type": "security",
++    "syscall_rejected": true,
++    "stage": "audit",
++    "codegen_invoked": false,
++    "run_id": "210df634575748f1b413298d2c859906",
++    "seq": 12,
++    "time": 1791691501.2578092
++  },
++  "context": {
++    "v": 1,
++    "type": "context",
++    "rax_before": "0xfedcba9876543210",
++    "rax_after": "0x636363636363631f",
++    "rcx_before": "0x000000000000000c",
++    "rcx_after": "0xabababababababab",
++    "rip_before": "0x00005bcf415c5cc0",
++    "rip_after": "0x00005bcf415c5d00",
++    "memory_before": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
++    "memory_after": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababab1f63636363636363",
++    "run_id": "210df634575748f1b413298d2c859906",
++    "seq": 14,
++    "time": 1791691501.2594676
++  },
++  "progress": {
++    "v": 1,
++    "type": "progress",
++    "bytes": 64,
++    "total_bytes": 64,
++    "verified": 1,
++    "riscv_steps": 71,
++    "connections": 0,
++    "elapsed_ms": 0,
++    "run_id": "210df634575748f1b413298d2c859906",
++    "seq": 15,
++    "time": 1791691501.2602248
++  },
++  "result": {
++    "v": 1,
++    "type": "result",
++    "verified": 1,
++    "bytes": 64,
++    "riscv_steps": 71,
++    "mismatches": 0,
++    "trace_executions": 1,
++    "compilation_ns": 1047481,
++    "execution_ns": 50828,
++    "oracle": "native-x86-and-rust-reference",
++    "syscall_rejected": true,
++    "run_id": "210df634575748f1b413298d2c859906",
++    "seq": 17,
++    "time": 1791691501.2624695
++  },
++  "message": "Every record and context matched; syscall rejected before codegen.",
++  "finished": 1791691501.2634215
++}
+--- /dev/null
++++ b/webapp/tests/walkthrough.spec.ts
+@@ -0,0 +1,81 @@
++import { test, expect } from "@playwright/test";
++import { readFileSync } from "node:fs";
++
++test("Worked example: real Baby values, all five stages, keyboard and mobile", async ({ page }, testInfo) => {
++  const errors: string[] = [];
++  page.on("pageerror", error => errors.push(error.message));
++  await page.goto("/");
++  const guide = page.getByRole("region", { name: "Worked example" });
++  await expect(guide.getByText(/Baby preset preview/)).toBeVisible();
++  await expect(guide.locator(".record-words code")).toHaveText(["1", "2", "3", "4", "5", "6", "7", "0"]);
++  await guide.getByRole("button", { name: "Next step" }).focus();
++  await page.keyboard.press("Enter");
++  await expect(guide.getByRole("heading", { name: /Check the rules/ })).toBeVisible();
++  await expect(guide.getByRole("button", { name: /02 · Audit/ })).toHaveAttribute("aria-pressed", "true");
++  await guide.getByRole("button", { name: /05 · Execute/ }).click();
++  await expect(guide.getByText("Nothing has executed yet.", { exact: false })).toBeVisible();
++  await expect(guide.locator(".comparison-result")).toHaveCount(0);
++
++  await page.getByRole("button", { name: "Run Baby", exact: true }).click();
++  await expect(page.getByRole("heading", { name: "Verified", exact: true })).toBeVisible();
++  const id = new URL(page.url()).searchParams.get("run");
++  const report = await (await page.request.get(`/api/runs/${id}`)).json();
++  expect(report.result.mismatches).toBe(0);
++  expect(report.context.rax_after).toBe("0x000000000000007d");
++  expect(report.context.rcx_after).toBe("0x0000000000000007");
++  expect(report.context.memory_after.slice(0, 112)).toBe(report.context.memory_before.slice(0, 112));
++  expect(report.context.memory_after.slice(112)).toBe("7d00000000000000");
++  expect(BigInt(report.context.rip_after) - BigInt(report.context.rip_before)).toBe(64n);
++  await expect(guide.getByText(/Recorded from Baby run/)).toBeVisible();
++  await expect(guide.locator(".calculation code")).toHaveText(["28", "54", "108", "125", "125"]);
++  await expect(guide.getByText("Observed output: 125", { exact: true })).toBeVisible();
++  await expect(guide.getByText(/Verified by the worker/)).toBeVisible();
++  await expect(guide.locator(".delta-table")).toContainText(report.context.rip_after);
++
++  const stageButtons = guide.locator(".pipeline button");
++  for (let stage = 0; stage < 5; stage++) {
++    await stageButtons.nth(stage).click();
++    await expect(stageButtons.nth(stage)).toHaveAttribute("aria-pressed", "true");
++    if (stage === 0) {
++      await expect(guide.getByText("18 instructions + RET boundary")).toBeVisible();
++      await expect(guide.locator(".record-words code")).toHaveText(["1", "2", "3", "4", "5", "6", "7", "0"]);
++    }
++    if (stage === 1) await expect(guide.getByText("Rejected before codegen", { exact: true })).toBeVisible();
++    if (stage === 2) {
++      await guide.getByText("Inspect the actual Cranelift IR", { exact: true }).click();
++      await expect(guide.locator("pre")).toHaveText(report.artifacts["0"].clif);
++    }
++    if (stage === 3) {
++      await expect(guide.getByText(`${report.artifacts["0"].riscv.length / 2} bytes of compiled output`)).toBeVisible();
++      await guide.getByText("Inspect all emitted RISC-V bytes", { exact: true }).click();
++      await expect(guide.locator("details pre")).toHaveText(report.artifacts["0"].riscv.match(/.{1,48}/g).join("\n"));
++    }
++    await guide.screenshot({ path: testInfo.outputPath(`stage-${stage + 1}.png`) });
++  }
++  await page.screenshot({ path: testInfo.outputPath("baby-desktop.png"), fullPage: true });
++  await page.setViewportSize({ width: 390, height: 844 });
++  for (let stage = 0; stage < 5; stage++) {
++    await stageButtons.nth(stage).click();
++    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
++    await guide.screenshot({ path: testInfo.outputPath(`mobile-stage-${stage + 1}.png`) });
++  }
++  await page.reload();
++  await guide.getByRole("button", { name: /05 · Execute/ }).click();
++  await expect(guide.getByText("Observed output: 125", { exact: true })).toBeVisible();
++  expect(errors).toEqual([]);
++  await testInfo.attach("worked-example-report.json", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
++});
++
++test("Saved reports retain their original values rather than the new Baby preset", async ({ page }) => {
++  // Actual public report captured before the Baby preset changed; replay fixture only.
++  const old = JSON.parse(readFileSync(new URL("./fixtures/legacy-baby.json", import.meta.url), "utf8"));
++  await page.route(`**/api/runs/${old.id}`, route => route.fulfill({ json: old }));
++  await page.goto(`/?run=${old.id}`);
++  const guide = page.getByRole("region", { name: "Worked example" });
++  await expect(guide.locator(".record-words code").first()).toHaveText("0xabababababababab");
++  await guide.getByRole("button", { name: /05 · Execute/ }).click();
++  await expect(guide.getByText("Observed output: 0x636363636363631f", { exact: true })).toBeVisible();
++  await expect(guide.locator(".calculation code").last()).toHaveText("0x636363636363631f");
++  await expect(guide.locator(".delta-table")).toContainText(old.context.rip_after);
++  await expect(guide.getByText("Observed output: 125", { exact: true })).toHaveCount(0);
++});

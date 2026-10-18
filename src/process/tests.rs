@@ -1,6 +1,10 @@
+use super::heap::Heap;
+use super::lam::TagScheme;
 use super::memory::{GuestMemory, ProcessBus, CONTEXT_BASE, RV_STACK_BASE};
 use super::memory::{ADDRESS_LIMIT, GUEST_BIAS, STACK_TOP};
+use super::pac::Pac;
 use super::*;
+use crate::process::csprng::Csprng;
 use crate::EngineError;
 use crate::{
     codegen::compile_to_riscv64,
@@ -17,12 +21,24 @@ fn execute(
     state: &mut [u64; 18],
     memory: &mut GuestMemory,
 ) -> std::result::Result<u64, EngineError> {
+    execute_hardened(code, state, memory, false)
+}
+fn execute_hardened(
+    code: &[u8],
+    state: &mut [u64; 18],
+    memory: &mut GuestMemory,
+    tags: bool,
+) -> std::result::Result<u64, EngineError> {
     let mut stack = vec![0u8; 65536];
+    let mut heap = Heap::new(TagScheme::SOFTWARE, Csprng::from_seed_test(), tags, true);
+    let mut pac = Pac::new([0x5a; 16], Vec::new(), false);
     let mut bus = ProcessBus {
         code,
         memory,
         state,
         stack: &mut stack,
+        heap: &mut heap,
+        pac: &mut pac,
     };
     let mut cpu = RiscvCpu::default();
     cpu.regs[1] = RETURN_ADDRESS;
@@ -33,7 +49,7 @@ fn execute(
 }
 fn compile(bytes: &[u8], ip: u64) -> Vec<u8> {
     let (trace, _) = harvest_bytes(bytes, ip, 32).unwrap();
-    compile_to_riscv64(&lower::lower_block(&trace).unwrap()).unwrap()
+    compile_to_riscv64(&lower::lower_block(&trace, lower::Backend::Rv64, &Diversification::identity(), None).unwrap()).unwrap()
 }
 
 #[test]
@@ -317,7 +333,7 @@ fn rotates_inc_dec_and_unsupported_stack_widths() {
         &[0x0f, 0x0b][..],
     ] {
         let (trace, _) = harvest_bytes(bytes, 0x20000, 32).unwrap();
-        assert!(lower::lower_block(&trace).is_err(), "{bytes:x?}: {trace:?}");
+        assert!(lower::lower_block(&trace, lower::Backend::Rv64, &Diversification::identity(), None).is_err(), "{bytes:x?}: {trace:?}");
     }
 }
 
@@ -338,7 +354,11 @@ fn kernel_keeps_guest_descriptors_private_and_rejects_unsupported_services() {
         state[5] = a;
         state[4] = b;
         state[3] = c;
-        kernel.call(state, memory)
+        kernel.call(
+            state,
+            memory,
+            &mut Heap::new(TagScheme::SOFTWARE, Csprng::from_seed_test(), false, true),
+        )
     };
     invoke(&mut kernel, &mut state, &mut memory, 41, 2, 1, 0).unwrap();
     assert_eq!(state[0], 3);

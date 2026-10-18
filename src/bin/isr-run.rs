@@ -1,6 +1,6 @@
 //! File-to-RV64 trace runner. Every invocation writes its own durable ledger.
 use cranelift_isr::{
-    codegen::TARGET,
+    codegen::TARGET_RV64,
     ingest::{BinaryInput, Selection},
     ledger::RunLedger,
     pipeline::PreparedTrace,
@@ -174,7 +174,7 @@ fn main() {
         ledger.directory().join("events.jsonl").display()
     );
     let result = ledger.event("started", json!({"args":args, "host_arch":std::env::consts::ARCH,
-        "decoder":"iced-x86", "backend":TARGET, "executor":"embedded RV64I", "scope":"single_trace"}))
+        "decoder":"iced-x86", "backend":TARGET_RV64, "executor":"embedded RV64I", "scope":"single_trace"}))
         .map_err(|e| -> Box<dyn std::error::Error> {e.into()}).and_then(|()| run(&args, &mut ledger));
     if let Err(error) = result {
         if let Err(log_error) = ledger.event(

@@ -1,19 +1,50 @@
 //! Basic-block lowering for the isolated process runtime. Every reached x86
-//! instruction, including branches/calls/returns and flag effects, runs as RV64.
-use super::memory::{ADDRESS_LIMIT, GUEST_BIAS, STACK_BOTTOM, STACK_TOP};
+//! instruction, including branches/calls/returns and flag effects, is lowered
+//! to Cranelift IR and then compiled to either RV64 (interpreted) or x86-64
+//! (native) machine code.
+use super::{
+    cfi::EntryBitmap,
+    diversify::Diversification,
+    memory::{ADDRESS_LIMIT, GUEST_BIAS, STACK_BOTTOM, STACK_TOP},
+};
 use crate::{
     x86::{immediate, register_view},
     EngineError,
 };
 use cranelift_codegen::{
     ir::{
-        condcodes::IntCC, types, AbiParam, Block, Function, InstBuilder, MemFlags, Signature,
-        TrapCode, Type, Value,
+        condcodes::IntCC, types, AbiParam, Block, ExternalName, ExtFuncData, Function,
+        InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind, TrapCode, Type,
+        UserExternalNameRef, Value,
     },
     isa::CallConv,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use iced_x86::{Code, Instruction, Mnemonic, OpKind, Register};
+
+/// Which backend the lowered block will be compiled for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub enum Backend {
+    /// RISC-V 64-bit, executed by the in-process interpreter.
+    #[default]
+    Rv64,
+    /// x86-64 native, executed directly on the host CPU.
+    X86_64,
+}
+
+impl Backend {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Backend::Rv64 => "riscv64",
+            Backend::X86_64 => "x86_64",
+        }
+    }
+}
+
+/// Bits reserved for pointer metadata under every tag scheme: the software tag
+/// occupies 56:63 and the LAM_U57 tag occupies 57:62, so clearing the whole top
+/// byte is correct for both and leaves a 48-bit guest address intact.
+pub const POINTER_ADDRESS_MASK: u64 = !(0xffu64 << 56);
 
 fn fail(i: &Instruction, reason: &'static str) -> EngineError {
     EngineError::Lower {
@@ -29,11 +60,22 @@ fn ty(width: u16) -> Type {
         _ => types::I64,
     }
 }
+
 struct Lower<'a> {
     b: FunctionBuilder<'a>,
     stack_fault: Option<Block>,
     rip: u64,
+    backend: Backend,
+    div: &'a Diversification,
+    cfi: Option<&'a EntryBitmap>,
+    /// Variable index that holds RSP after diversification permutation.
+    rsp_var: u32,
+    /// Cranelift function reference to `isr_cfi_check` (x86_64 only).
+    cfi_check_fn: Option<cranelift_codegen::ir::FuncRef>,
+    /// Cranelift signature reference for `isr_cfi_check` (x86_64 only).
+    cfi_check_sig: Option<cranelift_codegen::ir::SigRef>,
 }
+
 impl Lower<'_> {
     fn c(&mut self, v: u64) -> Value {
         self.b.ins().iconst(types::I64, v as i64)
@@ -42,7 +84,7 @@ impl Lower<'_> {
         self.b.use_var(Variable::from_u32(index as u32))
     }
     fn set(&mut self, index: usize, v: Value) {
-        if index == 7 {
+        if index == self.rsp_var as usize {
             // Stop at the first invalid RSP, including transient pivots that a
             // later instruction would restore. The failure exit saves the
             // offending RSP/RIP; the runtime rejects it before any syscall.
@@ -84,31 +126,46 @@ impl Lower<'_> {
             self.b.ins().sextend(types::I64, n)
         }
     }
+
+    /// Map a guest register to its Cranelift variable, applying diversification.
     fn reg(&mut self, r: Register, i: &Instruction) -> Result<Value, EngineError> {
         let (index, w, shift) = register_view(r).ok_or_else(|| fail(i, "non-integer register"))?;
-        let mut v = self.var(index);
+        let var_idx = if index < 16 {
+            self.div.variable(index) as usize
+        } else {
+            index
+        };
+        let mut v = self.var(var_idx);
         if shift != 0 {
             v = self.b.ins().ushr_imm(v, i64::from(shift));
         }
         Ok(self.mask(v, w))
     }
+
+    /// Write a value to a guest register, applying diversification.
     fn put_reg(&mut self, r: Register, v: Value, i: &Instruction) -> Result<(), EngineError> {
         let (index, w, shift) = register_view(r).ok_or_else(|| fail(i, "non-integer register"))?;
+        let var_idx = if index < 16 {
+            self.div.variable(index) as usize
+        } else {
+            index
+        };
         let mut v = self.mask(v, w);
         if w < 32 {
             if shift != 0 {
                 v = self.b.ins().ishl_imm(v, i64::from(shift));
             }
-            let old = self.var(index);
+            let old = self.var(var_idx);
             let old = self
                 .b
                 .ins()
                 .band_imm(old, !(((1u64 << w) - 1) << shift) as i64);
             v = self.b.ins().bor(old, v);
         }
-        self.set(index, v);
+        self.set(var_idx, v);
         Ok(())
     }
+
     fn address(&mut self, i: &Instruction) -> Result<Value, EngineError> {
         if i.segment_prefix() != Register::None {
             return Err(fail(i, "segment addressing unsupported"));
@@ -135,10 +192,13 @@ impl Lower<'_> {
         }
         Ok(v)
     }
+
+    /// Bound-check a guest address and bias it into the bus's window.
     fn ptr(&mut self, v: Value, w: u16) -> Value {
+        let plain = self.b.ins().band_imm(v, POINTER_ADDRESS_MASK as i64);
         let bad = self.b.ins().icmp_imm(
             IntCC::UnsignedGreaterThan,
-            v,
+            plain,
             (ADDRESS_LIMIT - u64::from(w / 8)) as i64,
         );
         self.b.ins().trapnz(bad, TrapCode::HEAP_OUT_OF_BOUNDS);
@@ -208,6 +268,7 @@ impl Lower<'_> {
         self.b.ins().uextend(types::I64, v)
     }
     fn flag(&mut self, n: u16) -> Value {
+        // RFLAGS is always variable 17 (not diversified)
         let f = self.var(17);
         self.bit(f, n)
     }
@@ -258,6 +319,7 @@ impl Lower<'_> {
             f = self.b.ins().bor(f, o);
             f = self.b.ins().bor(f, af);
         }
+        // RFLAGS is always variable 17 (not diversified)
         let old = self.var(17);
         if preserve_carry {
             f = self.b.ins().band_imm(f, !1);
@@ -306,23 +368,74 @@ impl Lower<'_> {
         ))
     }
     fn push(&mut self, v: Value) {
-        let sp = self.var(7);
+        let sp = self.var(self.rsp_var as usize);
         let sp = self.b.ins().iadd_imm(sp, -8);
-        self.set(7, sp);
+        self.set(self.rsp_var as usize, sp);
         self.store(sp, 64, v);
     }
     fn pop(&mut self) -> Result<Value, EngineError> {
-        let sp = self.var(7);
+        let sp = self.var(self.rsp_var as usize);
         let v = self.load(sp, 64)?;
         let sp = self.b.ins().iadd_imm(sp, 8);
-        self.set(7, sp);
+        self.set(self.rsp_var as usize, sp);
         Ok(v)
+    }
+
+    /// Insert an inline CFI check for an indirect branch target.
+    /// Only active for x86_64 backend with a CFI bitmap.
+    fn cfi_check(&mut self, target: Value) {
+        if self.backend != Backend::X86_64 {
+            return;
+        }
+        let Some(bitmap) = self.cfi else {
+            return;
+        };
+        let Some(_cfi_fn) = self.cfi_check_fn else {
+            return;
+        };
+
+        // Call isr_cfi_check(bitmap_ptr, target) -> u32
+        let bitmap_ptr = self.c(bitmap.base());
+        // For the inline check, we use a simple bitmap lookup.
+        // offset = target - base
+        let offset = self.b.ins().isub(target, bitmap_ptr);
+        let len = self.c(bitmap.len_bytes() as u64 * 8);
+        let in_bounds = self.b.ins().icmp(IntCC::UnsignedLessThan, offset, len);
+        self.b.ins().trapz(in_bounds, TrapCode::STACK_OVERFLOW);
+
+        // byte_idx = offset / 8
+        let byte_idx = self.b.ins().ushr_imm(offset, 3);
+        // bit_idx = offset & 7
+        let bit_idx = self.b.ins().band_imm(offset, 7);
+
+        // Load the byte from the bitmap
+        let bitmap_bytes = self.c(bitmap.as_slice().as_ptr() as u64);
+        let byte_addr = self.b.ins().iadd(bitmap_bytes, byte_idx);
+        let byte = self.b.ins().load(types::I8, MemFlags::new(), byte_addr, 0);
+
+        // mask = 1 << bit_idx
+        let one = self.b.ins().iconst(types::I8, 1);
+        let bit_idx_i8 = self.b.ins().ireduce(types::I8, bit_idx);
+        let mask = self.b.ins().ishl(one, bit_idx_i8);
+        let masked = self.b.ins().band(byte, mask);
+        let is_valid = self.b.ins().icmp_imm(IntCC::NotEqual, masked, 0);
+        self.b.ins().trapz(is_valid, TrapCode::STACK_OVERFLOW);
     }
 }
 
-pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
+pub fn lower_block(
+    trace: &[Instruction],
+    backend: Backend,
+    div: &Diversification,
+    cfi: Option<&EntryBitmap>,
+) -> Result<Function, EngineError> {
     let mut sig = Signature::new(CallConv::SystemV);
-    sig.params.push(AbiParam::new(types::I64));
+    sig.params.push(AbiParam::new(types::I64)); // ctx
+    if backend == Backend::X86_64 {
+        // x86_64 native blocks receive the CFI bitmap pointer as arg 1.
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+    }
     let mut function = Function::with_name_signature(Default::default(), sig);
     let mut fb = FunctionBuilderContext::new();
     let mut b = FunctionBuilder::new(&mut function, &mut fb);
@@ -330,20 +443,93 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
     b.append_block_params_for_function_params(entry);
     b.switch_to_block(entry);
     b.seal_block(entry);
+
     let ctx = b.block_params(entry)[0];
+
+    // Compute which variable holds RSP after diversification.
+    let rsp_var = if backend == Backend::X86_64 {
+        // Find which variable index maps to guest register 7 (RSP).
+        let mut v = 7u32;
+        for guest in 0..16 {
+            if div.variable(guest) == 7 {
+                v = guest as u32;
+                break;
+            }
+        }
+        v
+    } else {
+        7 // RSP is always variable 7 for RV64
+    };
+
+    // Import CFI check function for x86_64.
+    let (cfi_check_fn, cfi_check_sig) = if backend == Backend::X86_64 && cfi.is_some() {
+        let mut cfi_sig = Signature::new(CallConv::SystemV);
+        cfi_sig.params.push(AbiParam::new(types::I64));
+        cfi_sig.params.push(AbiParam::new(types::I64));
+        cfi_sig.returns.push(AbiParam::new(types::I32));
+        let sig_ref = b.import_signature(cfi_sig);
+        let func_ref = b.import_function(ExtFuncData {
+            name: ExternalName::user(UserExternalNameRef::from_u32(0)),
+            signature: sig_ref,
+            colocated: false,
+        });
+        (Some(func_ref), Some(sig_ref))
+    } else {
+        (None, None)
+    };
+
+    // Declare variables 0..17.
     for j in 0..18 {
         let var = Variable::from_u32(j);
         b.declare_var(var, types::I64);
+    }
+
+    // Load context: guest register i from ctx[i*8] -> variable permute[i] (or i for RIP/RFLAGS)
+    for i in 0..16 {
+        let var_idx = div.variable(i);
+        let var = Variable::from_u32(var_idx);
         let v = b
             .ins()
-            .load(types::I64, MemFlags::new(), ctx, (j * 8) as i32);
+            .load(types::I64, MemFlags::new(), ctx, (i * 8) as i32);
         b.def_var(var, v);
     }
+    // RIP (16) and RFLAGS (17) are not diversified.
+    for i in 16..18 {
+        let var = Variable::from_u32(i);
+        let v = b
+            .ins()
+            .load(types::I64, MemFlags::new(), ctx, (i * 8) as i32);
+        b.def_var(var, v);
+    }
+
+    // Stack padding for diversification (x86_64 only): create a dummy stack
+    // slot so the function prologue reserves extra space. This shifts the
+    // offsets of spilled registers and local temporaries, changing gadgets.
+    if backend == Backend::X86_64 && div.stack_pad() > 0 {
+        let data = StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            div.stack_pad() as u32,
+            4, // 16-byte alignment
+        );
+        let slot = b.create_sized_stack_slot(data);
+        // Force the slot to be "used" so Cranelift doesn't eliminate it.
+        let addr = b.ins().stack_addr(types::I64, slot, 0);
+        let zero = b.ins().iconst(types::I64, 0);
+        b.ins().store(MemFlags::new(), zero, addr, 0);
+    }
+
     let mut l = Lower {
         b,
         stack_fault: None,
         rip: 0,
+        backend,
+        div,
+        cfi,
+        rsp_var,
+        cfi_check_fn,
+        cfi_check_sig,
     };
+
     for i in trace {
         use Mnemonic::*;
         l.rip = i.ip();
@@ -351,7 +537,7 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
         l.set(16, next);
         if i.mnemonic() == Nop {
             continue;
-        } // Architecturally ignores all address operands/prefixes.
+        }
         if i.has_lock_prefix() || i.has_rep_prefix() || i.has_repne_prefix() {
             return Err(fail(i, "atomic and string prefixes unsupported"));
         }
@@ -386,6 +572,10 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
             }
             Call => {
                 let target = l.read(i, 0)?;
+                // CFI check for indirect calls.
+                if !matches!(i.op0_kind(), OpKind::NearBranch64) {
+                    l.cfi_check(target);
+                }
                 l.push(next);
                 l.set(16, target);
             }
@@ -395,14 +585,18 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
                 }
                 let target = l.pop()?;
                 if i.op_count() != 0 {
-                    let sp = l.var(7);
+                    let sp = l.var(l.rsp_var as usize);
                     let sp = l.b.ins().iadd_imm(sp, i.immediate16() as i64);
-                    l.set(7, sp);
+                    l.set(l.rsp_var as usize, sp);
                 }
                 l.set(16, target);
             }
             Jmp => {
                 let target = l.read(i, 0)?;
+                // CFI check for indirect jumps.
+                if !matches!(i.op0_kind(), OpKind::NearBranch64) {
+                    l.cfi_check(target);
+                }
                 l.set(16, target);
             }
             Je | Jne | Jb | Jae | Jbe | Ja | Jl | Jge | Jle | Jg | Js | Jns | Jo | Jno | Jp
@@ -479,6 +673,7 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
                 let c = l.bool64(overflow);
                 let o = l.b.ins().ishl_imm(c, 11);
                 let f = l.b.ins().bor(c, o);
+                // RFLAGS is always variable 17
                 let old = l.var(17);
                 let old = l.b.ins().band_imm(old, !0x801);
                 let f = l.b.ins().bor(old, f);
@@ -507,9 +702,11 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
                         l.mask(v, w)
                     };
                     let c = l.bit(v, if i.mnemonic() == Rol { 0 } else { w - 1 });
+                    // RFLAGS is always variable 17
                     let old = l.var(17);
                     let old =
-                        l.b.ins()
+                        l.b
+                            .ins()
                             .band_imm(old, if count == 1 { !0x801 } else { !1 });
                     let mut f = l.b.ins().bor(old, c);
                     if count == 1 {
@@ -535,11 +732,25 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
             _ => return Err(fail(i, "instruction unsupported by process lowerer")),
         }
     }
-    for j in 0..18 {
-        let v = l.var(j);
-        l.b.ins().store(MemFlags::new(), v, ctx, (j * 8) as i32);
+
+    // Store context: variable permute[i] -> ctx[i*8]
+    for i in 0..16 {
+        let var_idx = div.variable(i);
+        let v = l.var(var_idx as usize);
+        l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
     }
-    l.b.ins().return_(&[]);
+    for i in 16..18 {
+        let v = l.var(i);
+        l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
+    }
+
+    if backend == Backend::X86_64 {
+        let zero = l.c(0);
+        l.b.ins().return_(&[zero]);
+    } else {
+        l.b.ins().return_(&[]);
+    }
+
     if let Some(fault) = l.stack_fault {
         l.b.switch_to_block(fault);
         l.b.seal_block(fault);
@@ -547,7 +758,13 @@ pub fn lower_block(trace: &[Instruction]) -> Result<Function, EngineError> {
         let rip = l.b.block_params(fault)[1];
         l.b.ins().store(MemFlags::new(), rsp, ctx, 7 * 8);
         l.b.ins().store(MemFlags::new(), rip, ctx, 16 * 8);
-        l.b.ins().return_(&[]);
+        if backend == Backend::X86_64 {
+            // Return sentinel for stack fault.
+            let two = l.c(2);
+            l.b.ins().return_(&[two]);
+        } else {
+            l.b.ins().return_(&[]);
+        }
     }
     l.b.finalize();
     Ok(function)

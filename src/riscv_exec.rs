@@ -4,6 +4,13 @@ use crate::{context::GuestContext, error::EngineError};
 pub struct RiscvCpu {
     pub regs: [u64; 32],
     pub pc: u64,
+    /// One bit per register: set when the register holds a value that came
+    /// straight from an immediate, a rip-relative address or the code image,
+    /// and was therefore not derived from guest data. Stores of code pointers
+    /// are only signed when this is set.
+    pub constant: u32,
+    /// Require an indirect branch target to be an authenticated pointer.
+    pub authenticate_calls: bool,
 }
 
 const STACK_BYTES: usize = 64 * 1024;
@@ -39,6 +46,30 @@ pub(crate) trait MemoryAccess {
         value: u64,
         pc: u64,
     ) -> Result<(), EngineError>;
+    /// Re-authenticate a loaded word. Returns the value the register sees and
+    /// whether that value was an authenticated code pointer. The trace-mode bus
+    /// has no heap and returns the word unchanged and unauthenticated.
+    fn authenticate_load(
+        &mut self,
+        _address: u64,
+        _size: usize,
+        raw: u64,
+        _pc: u64,
+    ) -> Result<(u64, bool), EngineError> {
+        Ok((raw, false))
+    }
+    /// Sign a stored word when it is a code pointer. `constant` is the storing
+    /// register's provenance; see `RiscvCpu::constant`.
+    fn authenticate_store(
+        &mut self,
+        _address: u64,
+        _size: usize,
+        value: u64,
+        _constant: bool,
+        _pc: u64,
+    ) -> Result<u64, EngineError> {
+        Ok(value)
+    }
 }
 
 impl Memory<'_> {
@@ -145,9 +176,17 @@ impl RiscvCpu {
             let imm_i = sext((word >> 20) as u64, 12);
             let mut next_pc = pc.wrapping_add(4);
             let mut result = None;
+            // Provenance of the value about to be written to rd.
+            let mut from_constant = false;
             match opcode {
-                0x37 => result = Some(sext((word & 0xffff_f000) as u64, 32)), // LUI
-                0x17 => result = Some(pc.wrapping_add(sext((word & 0xffff_f000) as u64, 32))), // AUIPC
+                0x37 => {
+                    result = Some(sext((word & 0xffff_f000) as u64, 32)); // LUI
+                    from_constant = true;
+                }
+                0x17 => {
+                    result = Some(pc.wrapping_add(sext((word & 0xffff_f000) as u64, 32))); // AUIPC
+                    from_constant = true;
+                }
                 0x6f => {
                     // JAL
                     let immediate = ((word >> 31) << 20)
@@ -155,10 +194,17 @@ impl RiscvCpu {
                         | (((word >> 20) & 1) << 11)
                         | (((word >> 21) & 0x3ff) << 1);
                     result = Some(next_pc);
+                    from_constant = true;
                     next_pc = pc.wrapping_add(sext(immediate as u64, 21));
                 }
                 0x67 if funct3 == 0 => {
-                    // JALR (read source before writing destination)
+                    // JALR: only an authenticated pointer may be branched to.
+                    if self.authenticate_calls && self.constant & (1 << rs1) == 0 {
+                        return Err(failure(
+                            pc,
+                            "indirect branch through an unauthenticated pointer",
+                        ));
+                    }
                     result = Some(next_pc);
                     next_pc = a.wrapping_add(imm_i) & !1;
                 }
@@ -191,8 +237,18 @@ impl RiscvCpu {
                         6 => (4, false),
                         _ => return Err(failure(pc, "illegal load encoding")),
                     };
+                    let address = a.wrapping_add(imm_i);
+                    // A load out of the code image is a literal-pool read: the
+                    // value is a constant of the program, not guest data.
+                    from_constant = address < memory.code().len() as u64;
                     // SAFETY: forwarded caller contract; offsets are normal wrapping RV64 arithmetic.
-                    let value = unsafe { memory.load(a.wrapping_add(imm_i), size, pc)? };
+                    let raw = unsafe { memory.load(address, size, pc)? };
+                    let (value, authenticated) =
+                        memory.authenticate_load(address, size, raw, pc)?;
+                    // Deliberately not granted constant provenance: a pointer
+                    // that merely verified was loaded from memory, and letting
+                    // it re-sign elsewhere is exactly pointer substitution.
+                    let _ = authenticated;
                     result = Some(if signed {
                         sext(value, (size * 8) as u32)
                     } else {
@@ -208,13 +264,28 @@ impl RiscvCpu {
                         _ => return Err(failure(pc, "illegal store encoding")),
                     };
                     let immediate = ((word >> 25) << 5) | ((word >> 7) & 31);
+                    let address = a.wrapping_add(sext(immediate as u64, 12));
+                    // Only a value that came from a constant may sign a pointer
+                    // into an authenticated slot; anything else is data.
+                    let value = memory.authenticate_store(
+                        address,
+                        size,
+                        b,
+                        self.constant & (1 << rs2) != 0,
+                        pc,
+                    )?;
                     // SAFETY: forwarded caller contract.
                     unsafe {
-                        memory.store(a.wrapping_add(sext(immediate as u64, 12)), size, b, pc)?;
+                        memory.store(address, size, value, pc)?;
                     }
                 }
                 0x13 => {
                     let shamt = (word >> 20) & 63;
+                    // lui/addi pairs build one constant across two writes, and
+                    // `addi rd,rs,0` is a move: provenance has to survive both,
+                    // or a compiler-materialized address would look like data.
+                    from_constant = self.constant & (1 << rs1) != 0
+                        && (rs1 == rd || (funct3 == 0 && imm_i == 0));
                     result = Some(match funct3 {
                         0 => a.wrapping_add(imm_i),
                         2 => u64::from((a as i64) < (imm_i as i64)),
@@ -278,6 +349,9 @@ impl RiscvCpu {
             if let Some(value) = result {
                 if rd != 0 {
                     self.regs[rd] = value;
+                    // Provenance follows the value, not the register: writing a
+                    // register with data clears its constant bit.
+                    self.constant = (self.constant & !(1 << rd)) | (u32::from(from_constant) << rd);
                 }
             }
             self.regs[0] = 0;

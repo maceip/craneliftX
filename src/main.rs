@@ -1,5 +1,5 @@
 use cranelift_isr::{
-    codegen::TARGET, ledger::RunLedger, pipeline::PreparedTrace, riscv_exec::RiscvExecutor,
+    codegen::TARGET_RV64, ledger::RunLedger, pipeline::PreparedTrace, riscv_exec::RiscvExecutor,
     GuestContext,
 };
 use serde_json::json;
@@ -46,7 +46,7 @@ fn demo(ledger: &mut RunLedger) -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(data[1], 123);
     assert_eq!(ctx.rax, (123u64 ^ 0x55) << 2);
     assert_eq!(ctx.rip, start_rip + X86_CODE.len() as u64 - 1);
-    println!("x86-64 -> CLIF -> {TARGET} -> embedded RV64I");
+    println!("x86-64 -> CLIF -> {TARGET_RV64} -> embedded RV64I");
     println!(
         "rax={}, memory[1]={}, exit RIP=trace+{} (RET boundary)",
         ctx.rax,
@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "ledger: {}",
         ledger.directory().join("events.jsonl").display()
     );
-    ledger.event("started", json!({"input":"built-in acceptance demo", "decoder":"iced-x86", "backend":TARGET, "host_arch":std::env::consts::ARCH}))?;
+    ledger.event("started", json!({"input":"built-in acceptance demo", "decoder":"iced-x86", "backend":TARGET_RV64, "host_arch":std::env::consts::ARCH}))?;
     let result = if std::env::args_os().len() > 1 {
         Err("the default command runs an embedded demo; use cargo run --bin isr-run -- <binary> to ingest a file".into())
     } else {
