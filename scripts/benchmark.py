@@ -1,35 +1,25 @@
 #!/usr/bin/env python3
-"""Benchmark ISR runtime overhead: Native vs RV64 interpreter.
+"""Benchmark the HTTP guest: bare native vs ISR host-native vs ISR + optional LAM.
 
-Runs a minimal HTTP server under three configurations and compares
-latency, throughput, and resource usage.
+Configurations (same freestanding Linux x86-64 guest, same request mix):
+  1. Native          — guest ELF executed directly (Linux x86-64 host)
+  2. ISR x86_64      — lifted + host-native JIT, default hardening
+                       (shadow tags, PAC, mid-instruction CFI, randomized heap)
+  3. ISR + LAM       — same as (2) with Intel LAM_U57 requested
+                       (hardware tag mask when the kernel allows it)
 
-NOTE: ISR x86_64 native backend is excluded because it lacks syscall
-interception — guest syscalls execute directly on the host CPU with
-Linux numbers, which fails on macOS/Rosetta. It works for pure compute
-but not for I/O workloads. This is a known limitation.
-
-Configurations:
-  1. Native (macOS x86-64 via Rosetta) — direct execution, no ISR
-  2. ISR RV64 — x86-64 lifted to RISC-V, interpreted
-
-Metrics collected:
-  - Total runtime for N requests
-  - Requests per second
-  - Average latency per request
-  - CPU time (user + sys)
-  - Peak RSS memory
-  - ISR-specific: compiled blocks, RV64 steps, x86 instructions executed
+Outputs benchmark_results.json and benchmark_results.svg.
 
 Usage:
-    python3 scripts/benchmark.py
-    python3 scripts/benchmark.py --requests 50 --output benchmark_results.svg
+    python3 scripts/benchmark.py [--requests 50] [--backend x86_64]
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import platform
+import shutil
 import statistics
 import subprocess
 import sys
@@ -43,283 +33,299 @@ ISR_PROCESS = ROOT / "target" / "release" / "isr-process"
 PORT = 29876
 
 
-def build_servers():
-    """Compile both native macOS and ISR Linux versions of the benchmark server."""
+def build_guest() -> Path:
     OUT.mkdir(parents=True, exist_ok=True)
-
-    # Native macOS x86-64 server
-    native_src = FIXTURES / "bench_server_native.c"
-    native_bin = OUT / "bench_server_native"
-    if not native_bin.exists():
-        subprocess.run(
-            [
-                "arch", "-x86_64", "cc", "-O2", "-target", "x86_64-apple-macos11",
-                f"-DREQUEST_COUNT={REQUEST_COUNT}", f"-DPORT={PORT}",
-                str(native_src), "-o", str(native_bin)
-            ],
-            check=True,
-        )
-        print(f"Built native server: {native_bin}")
-
-    # ISR Linux static server
-    isr_src = FIXTURES / "bench_server.rs"
-    isr_bin = OUT / "bench_server.elf"
-    if not isr_bin.exists():
-        rustc = subprocess.check_output(
+    src = FIXTURES / "bench_server.rs"
+    elf = OUT / "bench_server.elf"
+    rustc = (
+        subprocess.check_output(
             ["rustup", "which", "--toolchain", "stable", "rustc"], text=True
         ).strip()
-        subprocess.run(
-            [
-                rustc,
-                "--edition=2021",
-                "--target", "x86_64-unknown-linux-gnu",
-                "-C", "opt-level=2",
-                "-C", "panic=abort",
-                "-C", "relocation-model=static",
-                "-C", "linker=ld.lld",
-                "-C", "link-arg=-nostdlib",
-                "-C", "link-arg=--static",
-                "-C", "no-vectorize-loops",
-                "-C", "no-vectorize-slp",
-                str(isr_src),
-                "-o", str(isr_bin),
-            ],
-            check=True,
-        )
-        print(f"Built ISR server: {isr_bin}")
-
-    return native_bin, isr_bin
-
-
-def run_native_server(native_bin: Path) -> dict:
-    """Run the native server and measure."""
-    env = {k: v for k, v in os.environ.items() if k not in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")}
-    
-    # Start server
-    proc = subprocess.Popen([str(native_bin)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
-    time.sleep(0.3)  # Let server start listening
-
-    # Warmup
-    _ = subprocess.run(["curl", "-s", f"http://127.0.0.1:{PORT}/"], capture_output=True, env=env)
-
-    latencies = []
-    start = time.perf_counter()
-    for _ in range(REQUEST_COUNT):
-        req_start = time.perf_counter()
-        r = subprocess.run(
-            ["curl", "-s", "-o", "/dev/null", f"http://127.0.0.1:{PORT}/"],
-            capture_output=True,
-            env=env,
-        )
-        latencies.append((time.perf_counter() - req_start) * 1000)
-    total = time.perf_counter() - start
-
-    proc.terminate()
-    proc.wait()
-
-    return {
-        "config": "Native (macOS x86-64)",
-        "total_seconds": total,
-        "rps": REQUEST_COUNT / total,
-        "latency_ms": {
-            "mean": statistics.mean(latencies),
-            "p50": statistics.median(latencies),
-            "p99": sorted(latencies)[int(len(latencies) * 0.99)],
-            "max": max(latencies),
-        },
-        "compiled_blocks": 0,
-        "rv64_steps": 0,
-        "x86_instructions": 0,
-        "native_x86_instructions": 0,
-    }
-
-
-def run_isr_server(isr_bin: Path, backend: str) -> dict:
-    """Run the server under ISR and measure."""
-    env = {k: v for k, v in os.environ.items() if k not in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")}
-    ledger_dir = ROOT / ".isr-state" / f"bench-{backend}"
-    if ledger_dir.exists():
-        import shutil
-        shutil.rmtree(ledger_dir)
-
-    # Start ISR process
-    proc = subprocess.Popen(
-        [str(ISR_PROCESS), str(isr_bin), "--ledger-dir", str(ledger_dir),
-         "--max-seconds", "120", "--backend", backend],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        env=env,
+        if shutil.which("rustup")
+        else shutil.which("rustc")
     )
-    time.sleep(6)  # ISR needs time to compile blocks on first request
+    cmd = [
+        rustc,
+        "--edition=2021",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "-C",
+        "opt-level=2",
+        "-C",
+        "panic=abort",
+        "-C",
+        "relocation-model=static",
+        "-C",
+        f"linker={shutil.which('ld.lld') or 'rust-lld'}",
+        "-C",
+        "link-arg=-nostdlib",
+        "-C",
+        "link-arg=--static",
+        "-C",
+        "no-vectorize-loops",
+        "-C",
+        "no-vectorize-slp",
+        str(src),
+        "-o",
+        str(elf),
+    ]
+    subprocess.run(cmd, check=True, timeout=120)
+    return elf
 
-    latencies = []
+
+def curl_n(n: int) -> tuple[float, list[float]]:
+    lat = []
     start = time.perf_counter()
-    for _ in range(REQUEST_COUNT):
-        req_start = time.perf_counter()
-        r = subprocess.run(
+    for _ in range(n):
+        t0 = time.perf_counter()
+        subprocess.run(
             ["curl", "-s", "-o", "/dev/null", f"http://127.0.0.1:{PORT}/"],
             capture_output=True,
-            env=env,
         )
-        latencies.append((time.perf_counter() - req_start) * 1000)
+        lat.append((time.perf_counter() - t0) * 1000)
     total = time.perf_counter() - start
+    return total, lat
 
-    proc.terminate()
-    proc.wait()
 
-    # Extract metrics from ledger
-    metrics = {
-        "config": f"ISR {backend}",
+def stats(config: str, total: float, lat: list[float], extra: dict | None = None) -> dict:
+    row = {
+        "config": config,
         "total_seconds": total,
-        "rps": REQUEST_COUNT / total,
+        "rps": len(lat) / total if total > 0 else 0,
         "latency_ms": {
-            "mean": statistics.mean(latencies),
-            "p50": statistics.median(latencies),
-            "p99": sorted(latencies)[int(len(latencies) * 0.99)],
-            "max": max(latencies),
+            "mean": statistics.mean(lat),
+            "p50": statistics.median(lat),
+            "p99": sorted(lat)[max(0, int(len(lat) * 0.99) - 1)],
+            "max": max(lat),
         },
-        "compiled_blocks": 0,
-        "rv64_steps": 0,
-        "x86_instructions": 0,
-        "native_x86_instructions": 0,
     }
+    if extra:
+        row.update(extra)
+    return row
 
-    # Parse ledger events
-    events_file = None
-    for subdir in ledger_dir.iterdir():
-        if subdir.is_dir():
-            ef = subdir / "events.jsonl"
-            if ef.exists():
-                events_file = ef
-                break
 
-    if events_file:
-        for line in events_file.read_text().splitlines():
-            if not line.strip():
-                continue
-            try:
+
+def drain_port(timeout: float = 8.0) -> None:
+    """Wait until the guest port is free so the next config can bind."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = subprocess.run(["ss", "-ltn"], capture_output=True, text=True)
+        if f":{PORT}" not in r.stdout:
+            return
+        subprocess.run(["fuser", "-k", "-9", f"{PORT}/tcp"], capture_output=True)
+        time.sleep(0.25)
+    time.sleep(0.5)
+
+
+def wait_ready(proc: subprocess.Popen, timeout: float = 20.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"guest exited early: {proc.returncode}")
+        probe = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-m", "1", f"http://127.0.0.1:{PORT}/"],
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            return
+        time.sleep(0.15)
+    raise RuntimeError("guest did not become ready")
+
+
+def run_native(elf: Path, n: int) -> dict:
+    """Direct execution of the freestanding Linux ELF (Linux x86-64 only)."""
+    if platform.system() != "Linux" or platform.machine() not in ("x86_64", "amd64"):
+        return stats(
+            "Native (direct)",
+            0.0,
+            [0.0],
+            {"skipped": "requires a Linux x86-64 host to exec the guest ELF", "notes": "skipped"},
+        )
+    proc = subprocess.Popen([str(elf)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_ready(proc)
+        # one warmup
+        curl_n(1)
+        total, lat = curl_n(n)
+        return stats("Native (direct)", total, lat, {"hardening": "none"})
+    finally:
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        subprocess.run(["fuser", "-k", "-9", f"{PORT}/tcp"], capture_output=True)
+        drain_port()
+
+
+def run_isr(elf: Path, n: int, backend: str, label: str, extra_flags: list[str]) -> dict:
+    ledger = ROOT / ".isr-state" / f"bench-{backend}-{'-'.join(extra_flags) or 'default'}"
+    if ledger.exists():
+        shutil.rmtree(ledger)
+    cmd = [
+        str(ISR_PROCESS),
+        str(elf),
+        "--ledger-dir",
+        str(ledger),
+        "--max-seconds",
+        "180",
+        "--backend",
+        backend,
+        *extra_flags,
+    ]
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    stderr = open(ledger.parent / f"{label.replace(' ', '_').replace('(', '').replace(')', '')}.err", "w")
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr)
+    try:
+        wait_ready(proc, timeout=30)
+        curl_n(1)
+        total, lat = curl_n(n)
+        row = stats(label, total, lat, {"hardening": " ".join(extra_flags) or "default", "backend": backend})
+        # ledger counters
+        for path in sorted(ledger.glob("*/events.jsonl")):
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
                 e = json.loads(line)
-                if e.get("type") == "compilation_progress":
-                    r = e.get("counters", {})
-                    metrics["compiled_blocks"] = r.get("compiled_blocks", 0)
-                    metrics["rv64_steps"] = r.get("rv64_steps", 0)
-                    metrics["x86_instructions"] = r.get("x86_instructions_executed", 0)
-                    metrics["native_x86_instructions"] = r.get("native_x86_instructions_executed", 0)
-                if e.get("type") == "result":
-                    r = e.get("report", {})
-                    metrics["compiled_blocks"] = max(metrics["compiled_blocks"], r.get("compiled_blocks", 0))
-                    metrics["rv64_steps"] = max(metrics["rv64_steps"], r.get("rv64_steps", 0))
-                    metrics["x86_instructions"] = max(metrics["x86_instructions"], r.get("x86_instructions_executed", 0))
-                    metrics["native_x86_instructions"] = max(metrics["native_x86_instructions"], r.get("native_x86_instructions_executed", 0))
-            except json.JSONDecodeError:
-                continue
+                if e.get("type") == "result" and isinstance(e.get("report"), dict):
+                    r = e["report"]
+                    row["compiled_blocks"] = r.get("compiled_blocks", 0)
+                    row["native_x86_instructions"] = r.get("native_x86_instructions_executed", 0)
+                    row["x86_instructions"] = r.get("x86_instructions_executed", 0)
+                    row["rv64_steps"] = r.get("rv64_steps", 0)
+                if e.get("type") == "mitigations":
+                    row["lam"] = e.get("tags", {}).get("lam", "?")
+                    row["tag_scheme"] = e.get("tags", {}).get("scheme", "?")
+        return row
+    finally:
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        subprocess.run(["fuser", "-k", "-9", f"{PORT}/tcp"], capture_output=True)
+        drain_port()
+        stderr.close()
 
-    return metrics
 
-
-def generate_svg(results: list[dict], output: Path):
-    """Generate an SVG bar chart comparing the configurations."""
-    w, h = 900, 600
-    margin = {"top": 60, "right": 40, "bottom": 80, "left": 120}
+def generate_svg(results: list[dict], output: Path) -> None:
+    """Clear grouped bar chart: three configs × three metrics."""
+    results = [r for r in results if not r.get("skipped")]
+    if not results:
+        return
+    w, h = 960, 520
+    margin = {"top": 70, "right": 30, "bottom": 100, "left": 80}
     chart_w = w - margin["left"] - margin["right"]
     chart_h = h - margin["top"] - margin["bottom"]
-
-    # Colors
-    colors = ["#4CAF50", "#2196F3"]
-
-    # Metrics to plot
+    colors = ["#2e7d32", "#1565c0", "#ef6c00"]
     plots = [
-        ("total_seconds", "Total Runtime (seconds)", 1.0),
-        ("rps", "Requests / Second", 1.0),
-        ("latency_ms", "Avg Latency (ms)", 1.0),
+        ("rps", "Requests / second (higher is better)"),
+        ("total_seconds", "Total time for N requests (s, lower is better)"),
+        ("latency_ms", "Mean latency (ms, lower is better)"),
     ]
 
-    svg_parts = []
-    svg_parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">')
-    svg_parts.append(f'<rect width="{w}" height="{h}" fill="#1e1e1e"/>')
-    svg_parts.append(f'<text x="{w//2}" y="35" text-anchor="middle" fill="#ffffff" font-size="18" font-family="sans-serif">ISR Benchmark: Native vs RV64 Interpreter</text>')
+    def value(r, key):
+        v = r[key]
+        return v["mean"] if isinstance(v, dict) else v
 
-    n_configs = len(results)
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">',
+        f'<rect width="{w}" height="{h}" fill="#fafafa"/>',
+        f'<text x="{w/2}" y="28" text-anchor="middle" fill="#111" font-size="18" font-family="system-ui,sans-serif" font-weight="600">'
+        "HTTP guest: bare metal vs ISR vs ISR + optional LAM</text>",
+        f'<text x="{w/2}" y="50" text-anchor="middle" fill="#555" font-size="12" font-family="system-ui,sans-serif">'
+        f"{len(results)} configs · {results[0].get('requests', '')} requests · host {platform.system()} {platform.machine()}</text>",
+    ]
+
+    n = len(results)
     group_w = chart_w / len(plots)
-    bar_w = group_w * 0.6 / n_configs
-    gap = group_w * 0.1
-
-    for plot_idx, (key, label, scale) in enumerate(plots):
-        gx = margin["left"] + plot_idx * group_w + gap
-        max_val = max(r[key] if isinstance(r[key], (int, float)) else r[key]["mean"] for r in results) * 1.1
-
-        # Y-axis for this group
-        for i in range(6):
-            y = margin["top"] + chart_h - (i / 5) * chart_h
-            val = (i / 5) * max_val
-            svg_parts.append(f'<line x1="{gx-5}" y1="{y}" x2="{gx + group_w - gap*2}" y2="{y}" stroke="#444" stroke-width="0.5"/>')
-            svg_parts.append(f'<text x="{gx-10}" y="{y+4}" text-anchor="end" fill="#aaa" font-size="9">{val:.1f}</text>')
-
-        # Label
-        svg_parts.append(f'<text x="{gx + (group_w - gap*2)/2}" y="{h - 20}" text-anchor="middle" fill="#ccc" font-size="11">{label}</text>')
-
-        # Bars
-        for cfg_idx, r in enumerate(results):
-            val = r[key] if isinstance(r[key], (int, float)) else r[key]["mean"]
-            bh = (val / max_val) * chart_h if max_val > 0 else 0
-            bx = gx + cfg_idx * (bar_w + 4)
+    bar_w = min(56, group_w * 0.7 / n)
+    for pi, (key, label) in enumerate(plots):
+        gx = margin["left"] + pi * group_w + group_w * 0.15
+        vals = [value(r, key) for r in results]
+        max_val = max(vals) * 1.15 or 1.0
+        for i in range(5):
+            y = margin["top"] + chart_h - (i / 4) * chart_h
+            lab = (i / 4) * max_val
+            parts.append(
+                f'<line x1="{gx - 10}" y1="{y:.1f}" x2="{gx + group_w * 0.7:.1f}" y2="{y:.1f}" stroke="#ddd"/>'
+            )
+            parts.append(
+                f'<text x="{gx - 14}" y="{y + 4:.1f}" text-anchor="end" fill="#888" font-size="10" font-family="system-ui,sans-serif">{lab:.1f}</text>'
+            )
+        for ci, r in enumerate(results):
+            v = value(r, key)
+            bh = (v / max_val) * chart_h
+            bx = gx + ci * (bar_w + 10)
             by = margin["top"] + chart_h - bh
-            svg_parts.append(f'<rect x="{bx}" y="{by}" width="{bar_w}" height="{bh}" fill="{colors[cfg_idx]}" rx="2"/>')
-            svg_parts.append(f'<text x="{bx + bar_w/2}" y="{by - 5}" text-anchor="middle" fill="#fff" font-size="9">{val:.2f}</text>')
+            parts.append(
+                f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{bh:.1f}" fill="{colors[ci]}" rx="3"/>'
+            )
+            parts.append(
+                f'<text x="{bx + bar_w/2:.1f}" y="{by - 6:.1f}" text-anchor="middle" fill="#222" font-size="11" font-family="system-ui,sans-serif" font-weight="600">{v:.1f}</text>'
+            )
+        parts.append(
+            f'<text x="{gx + group_w * 0.35:.1f}" y="{h - 48}" text-anchor="middle" fill="#333" font-size="12" font-family="system-ui,sans-serif">{label}</text>'
+        )
 
-    # Legend
-    for cfg_idx, r in enumerate(results):
-        lx = margin["left"] + cfg_idx * 200
-        ly = h - 50
-        svg_parts.append(f'<rect x="{lx}" y="{ly}" width="12" height="12" fill="{colors[cfg_idx]}" rx="2"/>')
-        svg_parts.append(f'<text x="{lx + 18}" y="{ly + 10}" fill="#ccc" font-size="11">{r["config"]}</text>')
-
-    # Annotation about x86_64
-    svg_parts.append(f'<text x="{w//2}" y="{h - 8}" text-anchor="middle" fill="#ff9800" font-size="9">Note: ISR x86_64 backend excluded — lacks syscall interception for I/O workloads</text>')
-
-    svg_parts.append('</svg>')
-    output.write_text('\n'.join(svg_parts))
-    print(f"Chart saved to: {output}")
+    for ci, r in enumerate(results):
+        lx = margin["left"] + ci * 220
+        ly = h - 22
+        parts.append(f'<rect x="{lx}" y="{ly - 10}" width="14" height="14" fill="{colors[ci]}" rx="2"/>')
+        parts.append(
+            f'<text x="{lx + 22}" y="{ly + 2}" fill="#222" font-size="12" font-family="system-ui,sans-serif">{r["config"]}</text>'
+        )
+    parts.append("</svg>")
+    output.write_text("\n".join(parts))
 
 
-def main():
-    global REQUEST_COUNT
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--requests", type=int, default=100)
-    parser.add_argument("--output", type=Path, default=ROOT / "benchmark_results.svg")
-    args = parser.parse_args()
-    REQUEST_COUNT = args.requests
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--requests", type=int, default=50)
+    ap.add_argument("--backend", default="x86_64")
+    ap.add_argument("--json", type=Path, default=ROOT / "benchmark_results.json")
+    ap.add_argument("--svg", type=Path, default=ROOT / "benchmark_results.svg")
+    args = ap.parse_args()
 
-    print(f"Building servers (requests={REQUEST_COUNT})...")
-    native_bin, isr_bin = build_servers()
+    if not ISR_PROCESS.exists():
+        subprocess.run(
+            ["cargo", "build", "--locked", "--release", "--bin", "isr-process"],
+            cwd=ROOT,
+            check=True,
+        )
 
-    print(f"\n1/2 Running NATIVE server...")
-    native_result = run_native_server(native_bin)
-    print(f"   Total: {native_result['total_seconds']:.3f}s | RPS: {native_result['rps']:.1f} | Latency: {native_result['latency_ms']['mean']:.2f}ms")
+    elf = build_guest()
+    n = args.requests
+    results = []
+    print(f"host={platform.system()} {platform.machine()}  requests={n}  guest={elf}")
 
-    print(f"\n2/2 Running ISR RV64 server...")
-    isr_result = run_isr_server(isr_bin, "rv64")
-    print(f"   Total: {isr_result['total_seconds']:.3f}s | RPS: {isr_result['rps']:.1f} | Latency: {isr_result['latency_ms']['mean']:.2f}ms")
-    print(f"   Compiled blocks: {isr_result['compiled_blocks']} | RV64 steps: {isr_result['rv64_steps']:,} | X86 instrs: {isr_result['x86_instructions']:,}")
+    print("1/3 Native (direct) ...")
+    r = run_native(elf, n)
+    r["requests"] = n
+    results.append(r)
+    if r.get("skipped"):
+        print(f"   skipped: {r['skipped']}")
+    else:
+        print(f"   {r['rps']:.1f} rps, {r['latency_ms']['mean']:.2f} ms")
 
-    results = [native_result, isr_result]
+    print("2/3 ISR host-native, hardening on, LAM off ...")
+    r = run_isr(elf, n, args.backend, "ISR + hardening (LAM off)", ["--no-lam"])
+    r["requests"] = n
+    results.append(r)
+    print(f"   {r['rps']:.1f} rps, {r['latency_ms']['mean']:.2f} ms  scheme={r.get('tag_scheme')}")
 
-    # Print summary table
-    print("\n" + "=" * 70)
-    print(f"{'Config':<30} {'Total(s)':<10} {'RPS':<10} {'Latency(ms)':<12} {'Blocks':<8}")
-    print("=" * 70)
-    for r in results:
-        print(f"{r['config']:<30} {r['total_seconds']:<10.3f} {r['rps']:<10.1f} {r['latency_ms']['mean']:<12.2f} {r['compiled_blocks']:<8}")
+    print("3/3 ISR host-native, hardening on, LAM requested ...")
+    r = run_isr(elf, n, args.backend, "ISR + hardening + LAM", [])
+    r["requests"] = n
+    r["optional"] = "Intel LAM_U57 requested via arch_prctl/prctl"
+    results.append(r)
+    print(f"   {r['rps']:.1f} rps, {r['latency_ms']['mean']:.2f} ms  lam={r.get('lam')} scheme={r.get('tag_scheme')}")
 
-    overhead = isr_result["total_seconds"] / native_result["total_seconds"]
-    print(f"\nISR RV64 overhead: {overhead:.1f}x slower than native")
-
-    generate_svg(results, args.output)
-
-    # Save JSON
-    json_path = args.output.with_suffix(".json")
-    json_path.write_text(json.dumps(results, indent=2))
-    print(f"Data saved to: {json_path}")
+    args.json.write_text(json.dumps(results, indent=2) + "\n")
+    generate_svg(results, args.svg)
+    print(f"wrote {args.json}")
+    print(f"wrote {args.svg}")
+    return 0
 
 
 if __name__ == "__main__":

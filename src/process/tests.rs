@@ -377,7 +377,10 @@ fn kernel_keeps_guest_descriptors_private_and_rejects_unsupported_services() {
     assert_eq!(state[0], 0);
     invoke(&mut kernel, &mut state, &mut memory, 41, 2, 1, 0).unwrap();
     assert_eq!(state[0], 3);
-    assert!(invoke(&mut kernel, &mut state, &mut memory, 999, 0, 0, 0).is_err());
+    // Unknown syscall numbers return -ENOSYS rather than killing the guest.
+    invoke(&mut kernel, &mut state, &mut memory, 999, 0, 0, 0).unwrap();
+    assert_eq!(state[0], (-38i64) as u64);
+    // Writes into the private context window are still refused.
     assert!(invoke(&mut kernel, &mut state, &mut memory, 1, 1, CONTEXT_BASE, 1).is_err());
     assert_eq!(kernel.open_descriptors(), 2);
 }

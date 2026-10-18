@@ -453,15 +453,31 @@ impl Kernel {
                     Err(_) => -5,
                 }
             }
+            54 => {
+                // setsockopt — accept SO_REUSEADDR/SO_REUSEPORT on SOL_SOCKET
+                // and ignore the rest rather than failing the guest.
+                detail["name"] = json!("setsockopt");
+                // a=fd, b=SOL_SOCKET(1), c=optname, d=optval*, e=optlen (via r10 in asm)
+                // The bridge passes args as a,b,c,d,e from rdi,rsi,rdx,r10,r8.
+                match self.descriptors.get(&a) {
+                    Some(Descriptor::Socket | Descriptor::Bound(_) | Descriptor::Listening(_)) => {
+                        0
+                    }
+                    Some(_) => -9,
+                    None => -9,
+                }
+            }
             60 | 231 => {
                 detail["name"] = json!("exit");
                 exit = Some((a & 255) as i32);
                 0
             }
             _ => {
-                return Err(error(format!(
-                    "unsupported Linux x86-64 syscall {n}; no native fallback"
-                )))
+                // Linux returns -ENOSYS for unimplemented calls; do not tear
+                // down the guest over a benign unknown ABI number.
+                detail["name"] = json!("syscall");
+                detail["unsupported"] = json!(n);
+                -38
             }
         };
         state[0] = result as u64;

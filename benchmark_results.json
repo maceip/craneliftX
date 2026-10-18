@@ -1,32 +1,44 @@
 [
   {
-    "config": "Native (macOS x86-64)",
-    "total_seconds": 0.44526899995980784,
-    "rps": 112.29167088774032,
+    "config": "Native (direct)",
+    "total_seconds": 0.2664762750500813,
+    "rps": 187.63396475203297,
     "latency_ms": {
-      "mean": 8.899964097654447,
-      "p50": 8.565958007238805,
-      "p99": 12.047207972500473,
-      "max": 12.047207972500473
+      "mean": 5.328313284553587,
+      "p50": 5.243509483989328,
+      "p99": 6.286900024861097,
+      "max": 6.538055022247136
     },
-    "compiled_blocks": 0,
-    "rv64_steps": 0,
-    "x86_instructions": 0,
-    "native_x86_instructions": 0
+    "hardening": "none",
+    "requests": 50
   },
   {
-    "config": "ISR rv64",
-    "total_seconds": 2.199145457998384,
-    "rps": 22.7361040708553,
+    "config": "ISR + hardening (LAM off)",
+    "total_seconds": 0.483814136008732,
+    "rps": 103.34547149134474,
     "latency_ms": {
-      "mean": 43.97921671741642,
-      "p50": 31.454604002647102,
-      "p99": 341.3520000176504,
-      "max": 341.3520000176504
+      "mean": 9.675038650166243,
+      "p50": 9.666143509093672,
+      "p99": 10.85840503219515,
+      "max": 12.096344958990812
     },
-    "compiled_blocks": 14,
-    "rv64_steps": 1329,
-    "x86_instructions": 66,
-    "native_x86_instructions": 0
+    "hardening": "--no-lam",
+    "backend": "x86_64",
+    "requests": 50
+  },
+  {
+    "config": "ISR + hardening + LAM",
+    "total_seconds": 0.4763966220198199,
+    "rps": 104.95456451393521,
+    "latency_ms": {
+      "mean": 9.526375306304544,
+      "p50": 9.461670008022338,
+      "p99": 11.068497085943818,
+      "max": 12.014799984171987
+    },
+    "hardening": "default",
+    "backend": "x86_64",
+    "requests": 50,
+    "optional": "Intel LAM_U57 requested via arch_prctl/prctl"
   }
 ]

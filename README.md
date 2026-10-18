@@ -1,194 +1,206 @@
-# Ski
+# Skillet
+**Heap exploit mitigation for x86-64 Linux services — measured, not promised.**
 
-An in-process x86-64 → RISC-V ISR engine, with a live demonstration at
-[ski.public.computer](https://ski.public.computer/).
+You ship a static x86-64 binary. We lift it, recompile it behind checked
+memory, and stop the three primitives every modern heap exploit is built on:
+**linear overflow, use-after-free, and function-pointer substitution**.
+No source required. No kernel module required. Optional hardware assist when
+your CPU and kernel provide it.
 
-The active project is the Rust crate at this repository's root:
+---
 
-```text
-live x86 RIP → iced-x86 (≤32 instructions) → security audit → CLIF
-            → riscv64gc-unknown-none-elf bytes → embedded RV64I → GuestContext
+## 1. Benchmark — what it costs to not get owned
+
+Same freestanding Linux x86-64 HTTP guest (`bench_server.elf`), 50 sequential
+requests, **Linux x86_64 host** (`secure.build`), host-native JIT backend.
+
+| Configuration | Throughput | Mean latency | p99 latency | Overhead vs bare |
+|---|---:|---:|---:|---:|
+| **Native (direct)** — no tooling | **187.6 req/s** | **5.33 ms** | 6.29 ms | 1.0× |
+| **Skillet + hardening** — shadow tags, PAC, CFI, randomized heap (LAM off) | 103.3 req/s | 9.68 ms | 10.86 ms | **1.82×** |
+| **Skillet + hardening + LAM** — same, with Intel LAM_U57 requested | 105.0 req/s | 9.53 ms | 11.07 ms | **1.79×** |
+
+![Benchmark: native vs Skillet vs Skillet+LAM](benchmark_results.svg)
+
+Raw numbers: [`benchmark_results.json`](benchmark_results.json).  
+Reproduce: `python3 scripts/benchmark.py --requests 50` on a Linux x86-64 host.
+
+**How to read this.** Full heap tagging + pointer auth + mid-instruction CFI
+costs about **1.8×** on a syscall-heavy toy server — not 10–100× like a
+cross-ISA interpreter. LAM is *requested* by default; on kernels that refuse
+it (see §3) the two hardening rows are the same code path, which is why their
+numbers are within noise.
+
+---
+
+## 2. Test bed — real exploit shapes, real catches
+
+This is the product. Eight freestanding x86-64 guests. Each one performs a
+genuine exploitation primitive through the runtime allocator. Every guest is
+run **twice**:
+
+- **Hardened** — mitigations armed. Must be rejected with the *specific* fault.
+- **Control** — matching mitigation disarmed. The primitive must *succeed*
+  (neighbor corrupted, UAF observed, substituted handler runs).
+
+A crash alone is not evidence. Both directions must hold.
+
+| Guest (exploit primitive) | Hardened fault | Control result | Efficacy |
+|---|---|---|---|
+| `heap_overflow` — linear overflow into neighbor | `TagMismatch` | exit 3 — neighbor corrupted | **caught** |
+| `use_after_free` — write after free | `UseAfterFree` | exit 0 — write landed | **caught** |
+| `pointer_substitution` — swap function pointers | `PointerAuth` | exit 20 — substituted handler ran | **caught** |
+| `cve_2026_42533` — fixed-buffer capture overflow (Nginx map-shaped) | `TagMismatch` | exit 3 | **caught** |
+| `cve_2026_42530` — lifecycle UAF (HTTP/3 QPACK-shaped) | `UseAfterFree` | exit 4 — dangling read | **caught** |
+| `cve_2026_14432` — GC cache UAF (V8-shaped) | `UseAfterFree` | exit 4 — dangling read | **caught** |
+| `cve_2026_53362` — slab overflow into adjacent object (IPv6 frag-shaped) | `TagMismatch` | exit 3 — neighbor corrupted | **caught** |
+| `heap_grooming` — adjacency under attack layout | *(measured)* | ordered 16/16 · randomized **0/16** | **defeated** |
+
+CVE-named guests replicate the *vulnerable pattern* of public heap bugs
+(unchecked fixed-buffer copy, dangling cached pointer, same-class slab
+neighbor overflow). They are generic primitives in the same shape as those
+bugs — not reduced copies of the original products.
+
+Reproduce: `python3 scripts/verify_heap_mitigations.py --backend x86_64`  
+Network regression (real TCP guest, 2.7M native instructions) included.
+
+---
+
+## 3. Optional capabilities (on when they help, honest when they don’t)
+
+### Intel Linear Address Masking (LAM) — `hardening.lam = true` (default)
+
+LAM lets the CPU ignore pointer tag bits 56/57–62 during data address
+translation. We **request LAM_U57** at startup via `arch_prctl` / `prctl`.
+No custom kernel module.
+
+| | |
+|---|---|
+| What it does | Hardware-masked tag bits 57:62 (6-bit tags); PAC stays in 48:55 |
+| What it does *not* do | Skip the shadow-tag **check**, tag RIP/branches, or replace PAC/CFI |
+| Default | Try it; fall back to software 8-bit tags (56:63) if the kernel says no |
+| Observed on Ubuntu 6.8 + Intel | CPUID LAM **present**, kernel returns `EINVAL` → software tags (ledger says so) |
+| Opt out | `--no-lam` or `hardening.lam = false` |
+
+When a kernel accepts LAM_U57, the heap automatically switches schemes. The
+run receipt records `tags.lam` / `tags.scheme` so you can see which path you got.
+
+**Lab note.** On `secure.build` (Intel, Ubuntu 6.8): CPUID reports LAM; every
+`arch_prctl`/`prctl` enable path returns `EINVAL`, so the engine falls back to
+software tags and logs why. Debian 12 was booted in QEMU/KVM on the same host
+to validate the “Linux kernel on Debian” deployment path — that guest kernel
+(6.1) is likewise too old for LAM. A newer guest kernel (with tagged-address
+prctl) would flip `tags.lam` to `lam-u57` with no code change.
+
+### RV64 interpreted backend — `--backend rv64` (optional)
+
+The original cross-ISA path: x86-64 guest → CLIF → RISC-V, interpreted.
+
+| | |
+|---|---|
+| Use it when | You want the same ProcessBus mitigations with a slower, fully interpreted substrate |
+| Cost | Several× slower than host-native (earlier HTTP run: ~5× vs bare) |
+| Security | Same shadow tags, PAC, quarantine, CFI as native |
+| Default | **No** — host-native `x86_64` is the production default |
+
+Native is not “unsafe RV64.” Native loads/stores call the same checked
+`ProcessBus` helpers the interpreter uses. Syscalls never hit the host kernel
+as guest syscalls; the runtime serves them at block boundaries.
+
+---
+
+## 4. What you actually get
+
+```
+static x86-64 ELF
+        │
+        ▼
+   decode + policy          (privileged ops, stack, targets)
+        │
+        ▼
+   lift → Cranelift → host-native JIT (W^X pages)
+        │
+        ├─ every load/store → ProcessBus → shadow tags + PAC
+        ├─ malloc/free      → randomized tagged heap + quarantine
+        ├─ indirect target  → mid-instruction CFI
+        └─ syscall          → runtime bridge (never host kernel)
 ```
 
-For a complete server within the supported static Linux profile, `isr-process`
-loads an x86-64 ELF, translates reached basic blocks to RV64, and resumes calls,
-branches and syscalls while retaining guest memory and TCP connections.
-`make verify-network` builds a real freestanding Rust server and verifies its
-responses through RV64, including recompilation on the same open connection.
-See [the process runtime and network acceptance guide](docs/PROCESS_RUNTIME.md)
-for the supported profile, evidence, and remaining limits.
+| Mitigation | Overflow | UAF | Ptr substitution | Grooming |
+|---|:---:|:---:|:---:|:---:|
+| Shadow granule tags | ✔ | ✔ (quarantine) | | |
+| Pointer authentication | | | ✔ | |
+| Randomized slab placement | | | | ✔ |
+| Mid-instruction CFI | | | ✔ (ROP into insn body) | |
+| LAM_U57 (optional) | tag path only | tag path only | | |
 
-The [operation groups and live event API](docs/PIPELINE_GROUPS.md) map the code
-to thirteen stable log groups. `isr-process --events-bind 127.0.0.1:0` streams
-committed events during translation with sequence-based replay. `make verify-live`
-exercises this with a 16 MiB input and a stalled subscriber.
+**Not claimed:** control-flow integrity against a full CFG, dynamic-binary
+support, threads, or “unexploitable.” This is a **memory-corruption primitive
+killer** for static Linux x86-64 services — the layer under a ROP chain that
+makes the ROP chain not start.
 
-`isr-run` remains the single-trace inspection runner: linked x86-64
-ELF/Mach-O/PE → selected symbol/address/entry → bounded iced-x86 decode → audit
-→ CLIF → checked RV64 execution. It accepts register-only traces and leaves
-control-flow boundaries unexecuted.
+---
 
-```sh
-cargo run --locked --bin isr-run -- ./program --symbol my_function --set rdi=35
+## 5. Run it
+
+```bash
+# guest must be a static Linux x86-64 ELF
+cargo build --release --bin isr-server --bin isr-process
+
+# one-shot
+./target/release/isr-process ./guest.elf --backend x86_64
+
+# supervisor (systemd/Docker ready)
+./target/release/isr-server --config deploy/isr-server.toml
 ```
 
-Every CLI run writes a timestamped, sequenced ledger under
-`.isr-state/pipeline/<run-id>/events.jsonl` (override with `ISR_LEDGER_DIR`).
-It records input hashes and addresses, decoded assembly, separate decoded/lifted
-counts, stage durations, register results, failures, and artifact hashes/paths.
-See [the pipeline and ledger guide](docs/PIPELINE.md) for exact commands,
-format, review findings, and the Rust executable acceptance fixture.
+| Knob | Default | Meaning |
+|---|---|---|
+| `backend` | `x86_64` | Host-native JIT (use `rv64` for the interpreter) |
+| `hardening.tags` | on | 16-byte shadow granules, quarantine on free |
+| `hardening.pac` | on | SipHash PAC on code pointers in memory |
+| `hardening.random_placement` | on | CSPRNG slot draw (kills reliable grooming) |
+| `hardening.cfi` | on | Reject transfer into a known instruction body |
+| `hardening.lam` | on | Request Intel LAM_U57; software tags if refused |
 
-```sh
-cargo run --locked          # arithmetic + pointer writes, then SYSCALL rejection
-make check                 # format, Clippy, tests; warnings are errors
-```
+Evidence and ledgers land in `.isr-state/`. A/B any knob with `--no-tags`,
+`--no-pac`, `--no-random-placement`, `--no-cfi`, `--no-lam`.
 
-Both paths require a 64-bit host and stable Rust. The following live-pointer
-API details describe the original trace engine; the process runtime uses
-isolated guest mappings and an extended flags context instead.
+---
 
-The trace engine requires a 64-bit host and stable Rust. It does not execute the emitted
-RISC-V bytes natively. Its interpreter fetches from a flat `Vec<u8>` at PC zero,
-sets `a0` to the host context pointer, and provides a separate 64 KiB aligned
-stack for Cranelift's ABI frame/spills. Host x86 code, guest data, and interpreter
-stack addresses are separate from offsets into the generated code array.
+## 6. Why this exists
 
-## Modules
+ROP/JOP is not a memory-corruption bug. It is what you do *after* you have
+overwritten a pointer. Heap tags, PAC, and placement randomization remove the
+overwrite and the fake pointer. Compile-time diversification (fresh register
+map + stack pad per block) means the gadget set you scraped from the original
+binary is not the gadget set in lifted code.
 
-| Module | Responsibility |
-| --- | --- |
-| `src/context.rs` | Exact `#[repr(C, align(16))]` context, 16 GPRs followed by RIP |
-| `src/harvest.rs` | Bounded byte decoder and unsafe live-pointer harvester |
-| `src/ingest.rs` | Bounded file reader and x86-64 text selection at file virtual addresses |
-| `src/ledger.rs` | Durable JSONL events, SHA-256 artifact receipts, and register serialization |
-| `src/audit.rs` | Privilege, stack-pivot, absolute-address, and live RSP adjustment checks |
-| `src/lower.rs` | One I64 context argument, SSA register state, direct loads/stores |
-| `src/codegen.rs` | Fixed RISC-V target and rejection of unresolved external relocations |
-| `src/riscv_exec.rs` | RV64I interpreter, including word operations and ABI prologue/epilogue |
-| `src/lib.rs` | Linear pipeline; fallible and panic-on-error entry points |
-| `src/main.rs` | Executable end-to-end acceptance demo |
-| `src/pipeline.rs` | Typed preparation events and immutable reusable traces; per-context stack rechecks |
-| `src/bin/isr-demo.rs` | JSONL demo worker with native/reference checks and real TCP workloads |
-| `src/bin/isr-run.rs` | File ingestion and checked single-trace execution with a durable ledger |
-| `src/process/` | Static ELF mappings, scalar block lowering, control-flow continuation and TCP syscall bridge |
-| `src/bin/isr-process.rs` | Isolated process execution through RV64 with durable per-run evidence |
+If you run untrusted or historically vulnerable C/C++ on x86-64 Linux and you
+cannot patch on day zero, this is the layer that buys you time — at about
+**1.8×** on a toy HTTP loop, with a test bed that fails the build if a single
+primitive slips through.
 
-The original trace API supports MOV register/register, MOV register/immediate,
-ADD, SUB, XOR, AND, OR with register/immediate sources, SHL/SHR with immediate
-counts, and integer MOV memory loads/stores. Integer operands may be 8, 16, 32,
-or 64 bits, including AH/BH/CH/DH. Partial writes, 32-bit zero extension, signed
-immediates, wrapping arithmetic, and x86 shift masks are preserved.
-Memory operands support a 64-bit base plus displacement. Audited absolute and
-RIP-relative MOV operands are also supported. Scaled indexes, 32-bit address
-bases, segment overrides, LOCK/REP, SIMD, flag consumers, and other instruction
-families return an error rather than being silently skipped.
+---
 
-## Calling the engine
+## 7. Repo name candidates
 
-```rust,no_run
-use cranelift_isr::{try_randomize_and_execute, GuestContext};
+Current name is a placeholder. Ten that match what this actually does:
 
-let code: [u8; 5] = [0x48, 0x83, 0xc0, 7, 0xc3]; // add rax,7; ret
-let mut ctx = GuestContext {
-    rax: 35,
-    rip: code.as_ptr() as u64,
-    ..GuestContext::default()
-};
-// No stack adjustments or data accesses in this fixture.
-unsafe { try_randomize_and_execute(&mut ctx, 0x1000, 0x2000)?; }
-assert_eq!(ctx.rax, 42);
-assert_eq!(ctx.rip, code.as_ptr() as u64 + 4); // the unexecuted RET
-# Ok::<(), cranelift_isr::EngineError>(())
-```
+1. **`slab-veto`** — the allocator says no to your primitive  
+2. **`granule-or-gtfo`** — 16-byte truth or nothing  
+3. **`use-after-never`** — the UAF that isn’t  
+4. **`tag-youre-dead`** — tagged pointers, dead exploits  
+5. **`quarantine-hq`** — freed memory doesn’t talk to you  
+6. **`overflow-eater`** — linear overflows get absorbed  
+7. **`chunklock`** — locks down the chunk, not just the door  
+8. **`pointer-smith`** — forges pointers, then refuses them  
+9. **`rop-dojo`** — where gadget chains come to practice losing  
+10. **`skillet`** — (working name) hot pan, no shellcode  
 
-`randomize_and_execute` has the requested panic-on-error behavior;
-`try_randomize_and_execute` reports the failed stage as `EngineError`.
-Use `try_randomize_and_execute_with_image(..., Some(image_start..image_end))`
-when absolute/RIP-relative data accesses should be allowed. The ordinary driver
-rejects them. Image bounds are independent of stack bounds and use an exclusive
-end; the entire memory operand must fit. Immediate RSP adjustments check the
-initial and every resulting RSP against the supplied stack range (its upper end
-is a valid empty-stack pointer).
+---
 
-## Original trace API contract
+## License
 
-- **Dependencies:** iced-x86, Cranelift codegen/frontend, and target-lexicon remain
-  the engine. File ingestion uses `object`; structured ledgers use `serde`,
-  `serde_json`, and `sha2`. `Cargo.lock` fixes the resolved versions. iced-x86 needs
-  `std` enabled, plus `intel` for the ledger's assembly text. Its
-  [feature documentation](https://docs.rs/crate/iced-x86/1.21.0/source/README.md)
-  requires either `std` or `no_std`. Transitive dependencies are those required
-  by these crates. Cranelift 0.115 uses target-lexicon 0.12 internally, so the
-  target string is reparsed across the 0.13/0.12 type boundary.
-- **Control-flow exits:** JMP/Jcc/CALL/RET end harvesting immediately and remain
-  in the trace for audit. They are not executed. `next_rip`/`ctx.rip` points AT
-  that boundary; otherwise it points after the last executed instruction.
-  This avoids incorrectly skipping a call, return, or taken branch. SYSCALL,
-  SYSENTER, and interrupts remain visible to the audit and are rejected.
-- **RFLAGS:** the specified context has no flags. This engine returns exact GPR
-  and memory results for the supported trace, but cannot supply flags for native
-  resumption at a Jcc or any later flag consumer. It does not install hooks or
-  resume native execution.
-- **Fixed-width RISC-V:** the triple remains exactly `riscv64gc-unknown-none-elf`.
-  Compressed and optional bit-manipulation emission is disabled; uncompressed
-  RV64I is a valid subset of GC. Generated ABI stack accesses and literal-pool
-  loads are handled. Unknown instructions, malformed fetches, and step-budget
-  exhaustion return errors.
-- **Rust safety:** APIs accepting live code/data addresses are `unsafe`. The
-  caller must keep readable instruction memory alive through the boundary or
-  32 complete instructions, and provide valid/exclusive host memory for every
-  guest load/store. Harvesting reads incrementally, never a speculative 480-byte
-  slice. The byte-slice harvester is safe and reports truncated instructions.
-  The audit is a static policy filter, not a sandbox for arbitrary host pointers.
-  Runtime errors can leave earlier data stores applied.
-- **Randomization scope:** this implements the specified cross-ISA execution
-  pipeline. There is no key, entropy source, randomized opcode encoding, or
-  cryptographic security claim in this implementation.
-
-## Evidence and checks
-
-`tests/pipeline.rs` covers the complete supported matrix, memory widths and
-unaligned offsets, partial registers, retained exit RIP, the 32-instruction cap,
-stack aliases/adjustments, image bounds, unsupported forms, and a SYSCALL after
-a pending store (neither memory nor context changes). A SYSCALL after an
-unsupported IMUL also proves the audit wins before lowering.
-
-`tests/native_x86.rs` lifts pointers to two actual assembly functions and compares
-RAX and the entire data buffer against direct x86 execution over 512 vectors each.
-It also checks preservation of the other 15 GPRs and the exit RIP. Cases include
-overflow, signed immediates, partial-register writes, memory operations, and
-masked shifts. These tests run on x86-64 Unix; other hosts
-run the portable suite. On Apple Silicon with Rosetta and the Rust x86 target:
-
-```sh
-rustup target add --toolchain stable x86_64-apple-darwin
-RUSTC="$(rustup which --toolchain stable rustc)" \
-  rustup run stable cargo test --locked --target x86_64-apple-darwin --all-targets
-```
-
-CI exercises the root crate on Linux x86-64 and macOS ARM64. These are executable
-tests, not formal verification or proof for arbitrary x86 binaries.
-
-## Live pipeline UI
-
-Ski displays all 13 operation groups from the process runtime and consumes
-its original ledger events over SSE while execution continues. Open a supported
-static x86-64 Linux ELF or run the freestanding Rust TCP server through Cranelift
-RV64 and the interpreter. Inspect decoded instructions, generated artifacts,
-timestamps, counters, failures, and groups that were not exercised.
-
-See [the pipeline UI guide](docs/PIPELINE_UI.md) for setup, streaming/replay
-semantics, and the real browser verification. The older curated three-tier API
-is documented separately in [the legacy demo guide](docs/WEB_DEMO.md).
-
-## Previous work
-
-The old LLVM/remill/anvill/Pulley source directories are preserved but are not
-part of this crate, its dependency graph, Makefile, or CI. Former root plans,
-Makefile, release workflow, and obsolete web analysis components are in [`archived/pre-isr`](archived/pre-isr).
-
-The RV64 process path includes a [lightweight instruction filter](docs/INSTRUCTION_FILTER.md)
-for shellcode-oriented screening, with live address-linked findings in the
-`audit` group. The dashboard distinguishes static passes, runtime checks, and
-rejections; this is not a general shellcode or taint classifier.
+MIT OR Apache-2.0. Contributions welcome; a PR that adds a fixture which the
+hardened run fails to catch will be treated as a bug against us, not a feature.

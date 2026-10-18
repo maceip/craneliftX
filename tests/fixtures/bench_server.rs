@@ -45,6 +45,18 @@ global_asm!(
     "test rax, rax",
     "js fail",
 
+    // setsockopt(sock, SOL_SOCKET=1, SO_REUSEADDR=2, &one, 4)
+    "sub rsp, 16",
+    "mov dword ptr [rsp], 1",
+    "mov rax, 54",
+    "mov rdi, rbx",
+    "mov rsi, 1",
+    "mov rdx, 2",
+    "mov r10, rsp",
+    "mov r8, 4",
+    "syscall",
+    "add rsp, 16",
+
     // bind(sock, &addr, 16) — addr on stack
     "sub rsp, 16",
     "mov dword ptr [rsp], 0x0002",       // AF_INET
