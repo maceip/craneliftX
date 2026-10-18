@@ -26,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "--help" => {
-                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend x86_64|rv64] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no host-kernel fallback.\n--backend selects the compilation target (x86_64=host-native with checked loads/stores, tags, PAC, CFI, W^X; rv64=interpreted).\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection; each is for A/B against the same binary.");
+                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend x86_64|rv64] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi] [--no-lam]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no host-kernel fallback.\n--backend selects the compilation target (x86_64=host-native with checked loads/stores, tags, PAC, CFI, W^X; rv64=interpreted).\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection, --no-lam forces the software tag scheme; each is for A/B against the same binary.");
                 return Ok(());
             }
             "--events-bind" => {
@@ -51,6 +51,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--no-pac" => options.hardening.pac = false,
             "--no-random-placement" => options.hardening.random_placement = false,
             "--no-cfi" => options.hardening.cfi = false,
+            "--no-lam" => options.hardening.lam = false,
             "--backend" => {
                 let b = args.next().ok_or("missing backend name")?;
                 options.backend = match b.as_str() {

@@ -116,6 +116,7 @@ docker run -d \
 | `hardening` | `pac` | true | Pointer authentication codes |
 | `hardening` | `random_placement` | true | CSPRNG heap slot selection |
 | `hardening` | `cfi` | true | Reject mid-instruction transfer targets |
+| `hardening` | `lam` | true | Try Intel LAM_U57 (hardware tag mask) when available |
 | `server` | `admin_bind` | `0.0.0.0:8080` | Health/metrics HTTP endpoint |
 | `restart` | `policy` | `always` | `always` / `on-failure` / `never` |
 | `restart` | `backoff_seconds` | 5 | Delay between restarts |

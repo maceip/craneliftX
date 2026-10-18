@@ -39,6 +39,10 @@ pub struct Hardening {
     pub random_placement: bool,
     /// Reject transfer to an address that falls inside a known instruction.
     pub cfi: bool,
+    /// Try to enable Intel LAM_U57 (hardware masks pointer tag bits 62:57).
+    /// Optional; on by default when the CPU and kernel allow it. Failure is
+    /// not fatal — the software tag scheme is used instead.
+    pub lam: bool,
 }
 impl Default for Hardening {
     fn default() -> Self {
@@ -47,6 +51,7 @@ impl Default for Hardening {
             pac: true,
             random_placement: true,
             cfi: true,
+            lam: true,
         }
     }
 }

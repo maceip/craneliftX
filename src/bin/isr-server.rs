@@ -84,6 +84,9 @@ struct HardeningConfig {
     random_placement: bool,
     #[serde(default = "default_true")]
     cfi: bool,
+    /// Try Intel LAM_U57 when the CPU and kernel allow it (default on).
+    #[serde(default = "default_true")]
+    lam: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
@@ -253,6 +256,7 @@ fn run_guest(config: &Config, _shutdown: Arc<AtomicBool>) -> Result<(), Box<dyn 
             pac: config.hardening.pac,
             random_placement: config.hardening.random_placement,
             cfi: config.hardening.cfi,
+            lam: config.hardening.lam,
         },
         backend,
     };

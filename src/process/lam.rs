@@ -1,25 +1,27 @@
-//! Intel Linear Address Masking: probe, select a tag placement, and report.
+//! Intel Linear Address Masking (LAM): probe, enable, select a tag placement.
 //!
-//! What LAM actually buys, and where it does not
-//! ---------------------------------------------
-//! LAM makes the *hardware MMU* ignore a configurable set of upper address bits
-//! on data accesses, so tagged pointers can be dereferenced by native
-//! instructions without masking. That benefit only exists when the guest's own
-//! machine code is executing on a real x86-64 core.
+//! What LAM buys
+//! -------------
+//! LAM makes the *hardware MMU* ignore bits 62:57 on data accesses, so a tagged
+//! pointer can be dereferenced by native instructions without a software mask.
+//! The tag still has to be checked against the shadow map before the access is
+//! considered safe -- LAM only removes the address-forming `and`, not the
+//! security check.
 //!
-//! In this engine it is not. Reached x86-64 is lifted to RV64 and executed by
-//! the software interpreter in `riscv_exec`; the host core never translates a
-//! guest virtual address, and there is no native fallback (`native_fallback:
-//! false` in the run receipt). The interpreter already has to form its own host
-//! address for every access, so masking a tag costs one `and` on a value it is
-//! already computing. Enabling LAM here would change no code path and remove no
-//! instruction.
+//! Where it helps in this engine
+//! -----------------------------
+//! The host-native backend (`Backend::X86_64`) issues host loads and stores
+//! through checked helpers. Those helpers still form a host address for the
+//! `GuestMemory` byte slice, so they strip the tag in software. LAM is still
+//! the right *scheme* whenever the CPU will accept tagged pointers (it is what
+//! the hardware understands), and it is what a future raw-memory fast path
+//! would rely on. The interpreter never executes guest addresses on the core,
+//! so LAM is a no-op there -- the probe records that honestly.
 //!
-//! LAM becomes relevant the moment a native execution path exists -- the
-//! "unlifted native x86-64 block" case. This module is the seam for that: it
-//! probes the platform, selects a tag bit-field that the hardware will mask,
-//! and records what happened in the ledger, so turning on native execution
-//! later is a configuration change rather than a redesign.
+//! No custom kernel module is required. The interface is `arch_prctl` /
+//! `prctl(PR_SET_TAGGED_ADDR_CTRL)` on Linux x86-64 with a LAM-capable core
+//! (Sapphire Rapids and later, or any core with CPUID LAM). This module is the
+//! optional "kernel capability" path: on by default, one flag to disable.
 //!
 //! Why LAM_U57 and not LAM_U48
 //! ---------------------------
@@ -79,13 +81,12 @@ impl TagScheme {
     }
 }
 
-// ActiveU57 is only constructed by the Linux x86-64 probe path.
-#[allow(dead_code)]
+/// Outcome of the optional LAM capability probe.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LamStatus {
     /// Hardware masking is active; tags use `TagScheme::LAM_U57`.
     ActiveU57,
-    /// No hardware masking. The interpreter masks; tags use 56:63.
+    /// No hardware masking. Software masks; tags use 56:63.
     Software(&'static str),
 }
 impl LamStatus {
@@ -103,50 +104,112 @@ impl LamStatus {
     }
     pub fn detail(&self) -> String {
         match self {
-            Self::ActiveU57 => "hardware masks bits 62:57 on data accesses".to_string(),
+            Self::ActiveU57 => {
+                "hardware masks bits 62:57 on data accesses; shadow tags still checked".to_string()
+            }
             Self::Software(reason) => {
-                format!("no hardware masking: {reason}; interpreter masks on every access")
+                format!("no hardware masking: {reason}; software masks before every access")
             }
         }
     }
+    pub fn hardware(&self) -> bool {
+        matches!(self, Self::ActiveU57)
+    }
 }
 
-/// Try to enable LAM_U57 for this process. Only meaningful on Linux x86-64 with
-/// a LAM-capable core and kernel; everywhere else this reports Software with a
-/// reason rather than pretending.
-pub fn probe() -> LamStatus {
+/// Enable LAM_U57 when the configuration asks for it and the platform allows.
+/// `enabled` is the Hardening switch (default on). Failure is never fatal: the
+/// engine falls back to the software tag scheme.
+pub fn enable(enabled: bool) -> LamStatus {
+    if !enabled {
+        return LamStatus::Software("LAM disabled by configuration");
+    }
     probe_platform()
+}
+
+/// Try to enable LAM_U57 for this process.
+pub fn probe() -> LamStatus {
+    enable(true)
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn probe_platform() -> LamStatus {
-    const ARCH_SET_TAGGED_ADDR_CTRL: i64 = 0x4001;
-    const ARCH_TAGGED_ADDR_ENABLE: i64 = 1 << 0;
-    const ARCH_LAM_U57_BIT: i64 = 1 << 1;
-    // SAFETY: arch_prctl with a request code and a plain integer argument has
-    // no memory-safety contract; it either succeeds or returns a negative errno.
+    // Prefer CPUID so the ledger can tell "CPU lacks LAM" from "kernel refused".
+    if !cpuid_has_lam() {
+        return LamStatus::Software("CPUID reports no LAM on this core");
+    }
+    if try_arch_prctl().is_ok() {
+        return LamStatus::ActiveU57;
+    }
+    if try_prctl().is_ok() {
+        return LamStatus::ActiveU57;
+    }
+    LamStatus::Software("CPU has LAM but arch_prctl/prctl rejected LAM_U57 (kernel too old or LAM disabled)")
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn probe_platform() -> LamStatus {
+    LamStatus::Software("LAM is Intel x86-64 Linux only; this host cannot use it")
+}
+
+/// CPUID.(EAX=07H, ECX=0):EDX bit 26 — Linear Address Masking.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn cpuid_has_lam() -> bool {
+    // SAFETY: CPUID with subleaf 0 is a pure query with no memory contract.
+    let result = unsafe { core::arch::x86_64::__cpuid_count(7, 0) };
+    // EDX bit 26 = LAM
+    (result.edx & (1 << 26)) != 0
+}
+
+/// `arch_prctl(ARCH_SET_TAGGED_ADDR_CTRL, ENABLE|LAM_U57)` — the LAM-era interface.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn try_arch_prctl() -> Result<(), i64> {
+    // Two request codes appear in kernel trees (RFC vs uapi). Try both.
+    for request in [0x4001i64, 0x5001i64] {
+        let result: i64;
+        // SAFETY: arch_prctl takes a request code and an integer; no memory.
+        unsafe {
+            core::arch::asm!(
+                "syscall",
+                inlateout("rax") 158i64 => result, // SYS_arch_prctl
+                in("rdi") request,
+                in("rsi") (1i64 << 0) | (1i64 << 1), // ENABLE | LAM_U57
+                lateout("rcx") _,
+                lateout("r11") _,
+                options(nostack),
+            );
+        }
+        if result == 0 {
+            return Ok(());
+        }
+    }
+    Err(-1)
+}
+
+/// `prctl(PR_SET_TAGGED_ADDR_CTRL, …)` fallback used by some kernels.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn try_prctl() -> Result<(), i64> {
+    const PR_SET_TAGGED_ADDR_CTRL: i64 = 55;
+    // PR_TAGGED_ADDR_ENABLE | ADDR_MASK_LAM_U57 (kernel-specific second bit).
+    let arg = (1u64 << 0) | (1u64 << 1);
     let result: i64;
+    // SAFETY: prctl with an integer option; no memory contract.
     unsafe {
         core::arch::asm!(
             "syscall",
-            inlateout("rax") 158i64 => result, // SYS_arch_prctl
-            in("rdi") ARCH_SET_TAGGED_ADDR_CTRL,
-            in("rsi") ARCH_TAGGED_ADDR_ENABLE | ARCH_LAM_U57_BIT,
+            inlateout("rax") 157i64 => result, // SYS_prctl
+            in("rdi") PR_SET_TAGGED_ADDR_CTRL,
+            in("rsi") arg,
             lateout("rcx") _,
             lateout("r11") _,
             options(nostack),
         );
     }
     if result == 0 {
-        LamStatus::ActiveU57
+        Ok(())
     } else {
-        LamStatus::Software("arch_prctl(ARCH_SET_TAGGED_ADDR_CTRL) rejected LAM_U57")
+        Err(result)
     }
-}
-
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn probe_platform() -> LamStatus {
-    LamStatus::Software("LAM is Intel x86-64 Linux only; this host cannot use it")
 }
 
 #[cfg(test)]
@@ -190,5 +253,19 @@ mod tests {
         let status = probe();
         assert_eq!(status.scheme(), status.scheme());
         assert!(!status.detail().is_empty());
+    }
+
+    #[test]
+    fn disabled_probe_never_claims_hardware() {
+        let status = enable(false);
+        assert!(!status.hardware());
+        assert_eq!(status.scheme(), TagScheme::SOFTWARE);
+    }
+
+    #[test]
+    fn lam_scheme_never_issues_shadow_sentinels() {
+        // Shadow sentinels are 0xfd..=0xff. LAM_U57 only has 6 tag bits (0..63),
+        // so it cannot collide with them by construction.
+        assert!(TagScheme::LAM_U57.tag_limit() <= 0xfc);
     }
 }

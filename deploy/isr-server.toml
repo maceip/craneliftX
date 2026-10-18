@@ -31,7 +31,7 @@ recompile_every_syscalls = 0
 allow_non_loopback = false
 
 [hardening]
-# Sub-granule heap shadow tagging (16-byte granules, 8-bit tags).
+# Sub-granule heap shadow tagging (16-byte granules, 8-bit software or 6-bit LAM tags).
 tags = true
 
 # Context-bound pointer authentication on code pointers.
@@ -42,6 +42,11 @@ random_placement = true
 
 # Reject transfers into the middle of a known guest instruction.
 cfi = true
+
+# Try Intel LAM_U57 via arch_prctl/prctl (optional kernel capability).
+# Enabled by default when the CPU and kernel allow it; falls back to the
+# software tag scheme. No custom kernel module is required.
+lam = true
 
 [server]
 # Address for the admin HTTP endpoint (health, metrics).

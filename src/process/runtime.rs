@@ -65,7 +65,9 @@ impl Runtime {
                 // The heap is an ordinary writable guest mapping. Its metadata
                 // is not: Heap keeps every free list, size and tag in Rust.
                 memory.map(HEAP_BASE, HEAP_SIZE, true, false)?;
-                let lam = lam::probe();
+                // Optional LAM kernel capability: enabled by default when the
+                // CPU and kernel allow it; software tags otherwise.
+                let lam = lam::enable(options.hardening.lam);
                 let mut rng = Csprng::new().map_err(memory::error)?;
                 let mut secret = [0u8; 16];
                 rng.fill(&mut secret);
