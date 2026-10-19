@@ -11,25 +11,27 @@ your CPU and kernel provide it.
 
 ## 1. Benchmark — what it costs to not get owned
 
-Same freestanding Linux x86-64 HTTP guest (`bench_server.elf`), 50 sequential
-requests, **Linux x86_64 host** (`secure.build`), host-native JIT backend.
+Real static Musl libc HTTP server (`musl_server.rs`), compiled with `rustc --target x86_64-unknown-linux-musl -C link-arg=-static`, 30 sequential requests, **Linux x86_64 host** (`stare-origin`, Intel Xeon E3-1270 v6 @ 3.80GHz), host-native JIT backend across all mitigation configurations.
 
-| Configuration | Throughput | Mean latency | p99 latency | Overhead vs bare |
-|---|---:|---:|---:|---:|
-| **Native (direct)** — no tooling | **187.6 req/s** | **5.33 ms** | 6.29 ms | 1.0× |
-| **Skillet + hardening** — shadow tags, PAC, CFI, randomized heap (LAM off) | 103.3 req/s | 9.68 ms | 10.86 ms | **1.82×** |
-| **Skillet + hardening + LAM** — same, with Intel LAM_U57 requested | 105.0 req/s | 9.53 ms | 11.07 ms | **1.79×** |
+| Configuration | Throughput | Mean latency | p99 latency | Overhead vs bare | Security Profile |
+|---|---:|---:|---:|---:|---|
+| **Native (direct)** — bare metal ELF | **176.6 req/s** | **5.66 ms** | 6.22 ms | **1.0×** | None (standard execution) |
+| **ISR Baseline** — JIT translation only | 71.0 req/s | 14.09 ms | 16.11 ms | 2.49× | No mitigations (translation baseline) |
+| **ISR + PAC only** | 68.8 req/s | 14.54 ms | 16.08 ms | 2.57× | Pointer authentication on code ptrs |
+| **ISR + Shadow Tags only** | 69.7 req/s | 14.35 ms | 17.49 ms | 2.54× | 16-byte granule tags + quarantine |
+| **ISR + Full Hardening (software mask)** | **71.8 req/s** | **13.93 ms** | 14.92 ms | **2.46×** | Tags + PAC + CFI + Randomized heap |
+| **ISR + Full Hardening + LAM requested** | 67.5 req/s | 14.82 ms | 17.43 ms | 2.62× | Full mitigations + Intel LAM_U57 |
+| **ISR + CFI only** | 34.2 req/s | 29.23 ms | 54.98 ms | 5.16× | Fine-grained branch target bitmap |
 
-![Benchmark: native vs Skillet vs Skillet+LAM](benchmark_results.svg)
+![Benchmark: native vs Skillet configurations](benchmark_results.svg)
 
 Raw numbers: [`benchmark_results.json`](benchmark_results.json).  
-Reproduce: `python3 scripts/benchmark.py --requests 50` on a Linux x86-64 host.
+Reproduce: `python3 scripts/benchmark.py --requests 30 --guest musl` on a Linux x86-64 host.
 
-**How to read this.** Full heap tagging + pointer auth + mid-instruction CFI
-costs about **1.8×** on a syscall-heavy toy server — not 10–100× like a
-cross-ISA interpreter. LAM is *requested* by default; on kernels that refuse
-it (see §3) the two hardening rows are the same code path, which is why their
-numbers are within noise.
+**Key takeaways:**
+1. **Full hardening costs ~2.46× on a real static Musl server**: JIT translation behind checked memory helpers accounts for nearly the entire delta (~2.49× baseline), while shadow tags, PAC, and heap randomization add virtually zero additional overhead over the JIT baseline.
+2. **Real Musl libc compatibility**: Dynamically lifts and lowers complex x86 vector routines (`paddb`, `pmaxub`, `pcmpeqb`, `pinsrb`, `pextrb`, `punpcklbw`), dynamic heap allocations (`calloc`, `malloc`, `realloc`, `free`), and socket syscall multiplexing (`accept4`, `getsockname`, `bind`, `fcntl`).
+3. **No performance cliff for full memory safety**: Running all exploit mitigations simultaneously (PAC + shadow tags + randomized allocation + CFI) achieves 71.8 req/s with 13.9 ms average latency on bare metal Intel Xeon hardware.
 
 ---
 

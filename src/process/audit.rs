@@ -129,16 +129,28 @@ pub(super) fn inspect(
                         continue;
                     }
                     if i.segment_prefix() != Register::None {
-                        addresses.finding(
-                            i,
-                            true,
-                            "Segment-relative data addressing is outside this process profile.",
-                        );
-                        continue;
+                        if matches!(
+                            i.segment_prefix(),
+                            Register::FS | Register::CS | Register::DS | Register::SS | Register::ES
+                        ) {
+                            addresses.finding(
+                                i,
+                                false,
+                                "Guarded segment-relative or zero-based default segment addressing.",
+                            );
+                        } else {
+                            addresses.finding(
+                                i,
+                                true,
+                                "Segment-relative data addressing is outside this process profile.",
+                            );
+                            continue;
+                        }
                     }
-                    let absolute = i.is_ip_rel_memory_operand()
+                    let absolute = (i.is_ip_rel_memory_operand()
                         || (i.memory_base() == Register::None
-                            && i.memory_index() == Register::None);
+                            && i.memory_index() == Register::None))
+                        && i.segment_prefix() != Register::FS;
                     if absolute {
                         let address = if i.is_ip_rel_memory_operand() {
                             i.ip_rel_memory_address()
@@ -216,7 +228,7 @@ pub(super) fn inspect(
     )
 }
 
-pub(super) fn check_stack(state: &[u64; 18], block_id: u64, ledger: &mut RunLedger) -> Result<()> {
+pub(super) fn check_stack(state: &[u64; 19], block_id: u64, ledger: &mut RunLedger) -> Result<()> {
     if (STACK_BOTTOM..=STACK_TOP).contains(&state[7]) {
         return Ok(());
     }

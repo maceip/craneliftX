@@ -127,7 +127,7 @@ impl BlockCache {
     pub fn invalidate(
         &mut self,
         open_descriptors: usize,
-        state: &[u64; 18],
+        state: &[u64; 19],
         ledger: &mut RunLedger,
     ) -> Result<()> {
         ledger.event("cache_invalidation",json!({"reason":"requested recompilation interval","blocks":self.entries.len(),

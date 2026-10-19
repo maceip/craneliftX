@@ -2,19 +2,19 @@ use super::heap::Heap;
 use super::pac::Pac;
 use crate::{riscv_exec::MemoryAccess, EngineError};
 use object::{
-    read::elf::ProgramHeader, Architecture, BinaryFormat, Object, ObjectKind, ObjectSegment,
-    SegmentFlags,
+    read::elf::{FileHeader, ProgramHeader},
+    Architecture, BinaryFormat, Object, ObjectKind, ObjectSegment, SegmentFlags,
 };
 use serde_json::{json, Value};
 
-pub const ADDRESS_LIMIT: u64 = 128 * 1024 * 1024;
+pub const ADDRESS_LIMIT: u64 = 256 * 1024 * 1024;
 pub const GUEST_BIAS: u64 = 0x1_0000_0000;
 pub const CONTEXT_BASE: u64 = 0x2_0000_0000;
 pub const RV_STACK_BASE: u64 = 0x3_0000_0000;
 pub const STACK_TOP: u64 = 0x0700_0000;
 pub const STACK_BOTTOM: u64 = STACK_TOP - 1024 * 1024;
 pub const MMAP_BASE: u64 = 0x0800_0000;
-const MAX_MAPPED: u64 = 64 * 1024 * 1024;
+const MAX_MAPPED: u64 = 128 * 1024 * 1024;
 
 pub(super) fn error(message: impl ToString) -> EngineError {
     EngineError::Process(message.to_string())
@@ -29,6 +29,9 @@ pub(super) struct Region {
 #[derive(Default)]
 pub(super) struct GuestMemory {
     pub regions: Vec<Region>,
+    pub phdr: u64,
+    pub phent: u64,
+    pub phnum: u64,
 }
 impl GuestMemory {
     pub fn load_elf(bytes: &[u8]) -> Result<(Self, u64, Value), EngineError> {
@@ -60,7 +63,27 @@ impl GuestMemory {
                 "dynamic linking and runtime relocations are not supported",
             ));
         }
+        let elf_header = elf.elf_header();
+        let endian = elf.endian();
+        let phoff = elf_header.e_phoff(endian);
+        let phent = elf_header.e_phentsize(endian) as u64;
+        let phnum = elf_header.e_phnum(endian) as u64;
+
         let mut memory = Self::default();
+        memory.phent = phent;
+        memory.phnum = phnum;
+        for p in elf.elf_program_headers() {
+            if p.p_type(endian) == object::elf::PT_PHDR {
+                memory.phdr = p.p_vaddr(endian);
+                break;
+            }
+        }
+        if memory.phdr == 0 {
+            if let Some(first) = file.segments().next() {
+                memory.phdr = first.address() + phoff;
+            }
+        }
+
         let mut mappings = Vec::new();
         for segment in file.segments() {
             if segment.size() == 0 {
@@ -257,7 +280,7 @@ impl GuestMemory {
 pub(super) struct ProcessBus<'a> {
     pub code: &'a [u8],
     pub memory: &'a mut GuestMemory,
-    pub state: &'a mut [u64; 18],
+    pub state: &'a mut [u64; 19],
     pub stack: &'a mut [u8],
     /// Sub-granule shadow tags. Every load and store is checked against it.
     pub heap: &'a mut Heap,
@@ -355,7 +378,7 @@ impl MemoryAccess for ProcessBus<'_> {
             bytes[..size].copy_from_slice(&self.code[address as usize..end as usize]);
         } else if address >= GUEST_BIAS && end <= GUEST_BIAS + ADDRESS_LIMIT {
             bytes[..size].copy_from_slice(self.memory.read(address - GUEST_BIAS, size)?);
-        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + 144 {
+        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + 152 {
             for (i, b) in bytes[..size].iter_mut().enumerate() {
                 let at = (address - CONTEXT_BASE) as usize + i;
                 *b = (self.state[at / 8] >> (at % 8 * 8)) as u8;
@@ -385,7 +408,7 @@ impl MemoryAccess for ProcessBus<'_> {
         let bytes = value.to_le_bytes();
         if address >= GUEST_BIAS && end <= GUEST_BIAS + ADDRESS_LIMIT {
             self.memory.write(address - GUEST_BIAS, &bytes[..size])?;
-        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + 144 {
+        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + 152 {
             for (i, b) in bytes[..size].iter().enumerate() {
                 let at = (address - CONTEXT_BASE) as usize + i;
                 let shift = at % 8 * 8;

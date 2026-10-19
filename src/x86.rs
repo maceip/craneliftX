@@ -1,4 +1,4 @@
-use iced_x86::{Instruction, MemorySize, Mnemonic, OpKind, Register};
+use iced_x86::{Instruction, Mnemonic, OpKind, Register};
 
 // Decoder-only iced-x86 deliberately omits the instr_info register tables.
 // Each row is in GuestContext order: low byte, word, dword, qword.
@@ -55,11 +55,11 @@ pub(crate) fn immediate(insn: &Instruction, operand: u32) -> Option<u64> {
 }
 
 pub(crate) fn memory_width(insn: &Instruction) -> Option<u64> {
-    match insn.memory_size() {
-        MemorySize::UInt8 => Some(1),
-        MemorySize::UInt16 => Some(2),
-        MemorySize::UInt32 => Some(4),
-        MemorySize::UInt64 => Some(8),
+    match insn.memory_size().size() {
+        1 => Some(1),
+        2 => Some(2),
+        4 => Some(4),
+        8 => Some(8),
         _ => None,
     }
 }

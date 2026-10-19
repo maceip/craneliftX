@@ -24,11 +24,12 @@
 use super::runtime::Runtime;
 use std::ffi::c_void;
 
-pub const NATIVE_COOKIE_OFFSET: i32 = 144;
-pub const NATIVE_LOAD_FN_OFFSET: i32 = 152;
-pub const NATIVE_STORE_FN_OFFSET: i32 = 160;
-pub const NATIVE_FAULT_PC_OFFSET: i32 = 168;
-pub const NATIVE_FAULT_KIND_OFFSET: i32 = 176;
+pub const NATIVE_FS_BASE_OFFSET: i32 = 144;
+pub const NATIVE_COOKIE_OFFSET: i32 = 152;
+pub const NATIVE_LOAD_FN_OFFSET: i32 = 160;
+pub const NATIVE_STORE_FN_OFFSET: i32 = 168;
+pub const NATIVE_FAULT_PC_OFFSET: i32 = 176;
+pub const NATIVE_FAULT_KIND_OFFSET: i32 = 184;
 
 /// Fault kinds reported through [`NativeGuest::fault_kind`].
 pub const FAULT_NONE: u64 = 0;
@@ -41,7 +42,7 @@ pub type NativeStoreFn = unsafe extern "C" fn(*mut c_void, u64, u64, u64, u64, u
 /// Context block passed to every native-compiled guest block.
 #[repr(C)]
 pub struct NativeGuest {
-    pub regs: [u64; 18],
+    pub regs: [u64; 19],
     pub cookie: *mut c_void,
     pub load_fn: NativeLoadFn,
     pub store_fn: NativeStoreFn,
@@ -52,7 +53,7 @@ pub struct NativeGuest {
 impl NativeGuest {
     pub fn new(runtime: *mut Runtime) -> Self {
         Self {
-            regs: [0; 18],
+            regs: [0; 19],
             cookie: runtime as *mut c_void,
             load_fn: native_load,
             store_fn: native_store,

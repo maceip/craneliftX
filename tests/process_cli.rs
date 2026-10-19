@@ -24,6 +24,8 @@ impl Fixture {
         fs::write(&input, bytes).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_isr-process"))
             .arg(input)
+            .arg("--backend")
+            .arg("rv64")
             .arg("--ledger-dir")
             .arg(&self.0)
             .args(args)
@@ -261,7 +263,7 @@ fn process_failures_close_their_stage_and_never_fall_back() {
             &[0xb8, 0xe7, 3, 0, 0, 0x0f, 0x05][..],
             false,
             &[][..],
-            "syscall_failed",
+            "decode",
         ),
         (
             &[0x31, 0xff, 0xb8, 60, 0, 0, 0, 0x0f, 0x05][..],

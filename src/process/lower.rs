@@ -62,6 +62,28 @@ fn ty(width: u16) -> Type {
     }
 }
 
+fn xmm_index(reg: Register) -> Option<usize> {
+    match reg {
+        Register::XMM0 => Some(0),
+        Register::XMM1 => Some(1),
+        Register::XMM2 => Some(2),
+        Register::XMM3 => Some(3),
+        Register::XMM4 => Some(4),
+        Register::XMM5 => Some(5),
+        Register::XMM6 => Some(6),
+        Register::XMM7 => Some(7),
+        Register::XMM8 => Some(8),
+        Register::XMM9 => Some(9),
+        Register::XMM10 => Some(10),
+        Register::XMM11 => Some(11),
+        Register::XMM12 => Some(12),
+        Register::XMM13 => Some(13),
+        Register::XMM14 => Some(14),
+        Register::XMM15 => Some(15),
+        _ => None,
+    }
+}
+
 struct Lower<'a> {
     b: FunctionBuilder<'a>,
     stack_fault: Option<Block>,
@@ -173,29 +195,230 @@ impl Lower<'_> {
         Ok(())
     }
 
+    fn get_xmm(&mut self, idx: usize) -> (Value, Value) {
+        (self.var(19 + idx), self.var(35 + idx))
+    }
+    fn set_xmm(&mut self, idx: usize, lo: Value, hi: Value) {
+        self.b.def_var(Variable::from_u32((19 + idx) as u32), lo);
+        self.b.def_var(Variable::from_u32((35 + idx) as u32), hi);
+    }
+
+    fn read_xmm(&mut self, i: &Instruction, op: u32) -> Result<(Value, Value), EngineError> {
+        if i.op_kind(op) == OpKind::Register {
+            let idx = xmm_index(i.op_register(op)).ok_or_else(|| fail(i, "expected XMM register"))?;
+            Ok(self.get_xmm(idx))
+        } else if i.op_kind(op) == OpKind::Memory {
+            let p = self.address(i)?;
+            let lo = self.load(p, 64)?;
+            let p8 = self.b.ins().iadd_imm(p, 8);
+            let hi = self.load(p8, 64)?;
+            Ok((lo, hi))
+        } else {
+            Err(fail(i, "unsupported XMM operand"))
+        }
+    }
+
+    fn pcmpeqb_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        let c_ff = self.c(0xff);
+        let c_0 = self.c(0);
+        for byte_idx in 0..8 {
+            let shift = (byte_idx * 8) as i64;
+            let ba = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let ba = self.b.ins().band_imm(ba, 0xff);
+            let bb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let bb = self.b.ins().band_imm(bb, 0xff);
+            let eq = self.b.ins().icmp(IntCC::Equal, ba, bb);
+            let mask = self.b.ins().select(eq, c_ff, c_0);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pcmpeqd_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        let c_ffff = self.c(0xffffffff);
+        let c_0 = self.c(0);
+        for dword_idx in 0..2 {
+            let shift = (dword_idx * 32) as i64;
+            let da = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let da = self.b.ins().band_imm(da, 0xffffffff);
+            let db = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let db = self.b.ins().band_imm(db, 0xffffffff);
+            let eq = self.b.ins().icmp(IntCC::Equal, da, db);
+            let mask = self.b.ins().select(eq, c_ffff, c_0);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn paddb_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for byte_idx in 0..8 {
+            let shift = (byte_idx * 8) as i64;
+            let ba = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let ba = self.b.ins().band_imm(ba, 0xff);
+            let bb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let bb = self.b.ins().band_imm(bb, 0xff);
+            let sum = self.b.ins().iadd(ba, bb);
+            let sum = self.b.ins().band_imm(sum, 0xff);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(sum, shift) } else { sum };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn paddw_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for idx in 0..4 {
+            let shift = (idx * 16) as i64;
+            let wa = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let wa = self.b.ins().band_imm(wa, 0xffff);
+            let wb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let wb = self.b.ins().band_imm(wb, 0xffff);
+            let sum = self.b.ins().iadd(wa, wb);
+            let sum = self.b.ins().band_imm(sum, 0xffff);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(sum, shift) } else { sum };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn paddd_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for idx in 0..2 {
+            let shift = (idx * 32) as i64;
+            let da = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let da = self.b.ins().band_imm(da, 0xffffffff);
+            let db = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let db = self.b.ins().band_imm(db, 0xffffffff);
+            let sum = self.b.ins().iadd(da, db);
+            let sum = self.b.ins().band_imm(sum, 0xffffffff);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(sum, shift) } else { sum };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn psubb_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for byte_idx in 0..8 {
+            let shift = (byte_idx * 8) as i64;
+            let ba = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let ba = self.b.ins().band_imm(ba, 0xff);
+            let bb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let bb = self.b.ins().band_imm(bb, 0xff);
+            let diff = self.b.ins().isub(ba, bb);
+            let diff = self.b.ins().band_imm(diff, 0xff);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(diff, shift) } else { diff };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn psubw_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for idx in 0..4 {
+            let shift = (idx * 16) as i64;
+            let wa = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let wa = self.b.ins().band_imm(wa, 0xffff);
+            let wb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let wb = self.b.ins().band_imm(wb, 0xffff);
+            let diff = self.b.ins().isub(wa, wb);
+            let diff = self.b.ins().band_imm(diff, 0xffff);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(diff, shift) } else { diff };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn psubd_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for idx in 0..2 {
+            let shift = (idx * 32) as i64;
+            let da = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let da = self.b.ins().band_imm(da, 0xffffffff);
+            let db = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let db = self.b.ins().band_imm(db, 0xffffffff);
+            let diff = self.b.ins().isub(da, db);
+            let diff = self.b.ins().band_imm(diff, 0xffffffff);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(diff, shift) } else { diff };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pmaxub_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for byte_idx in 0..8 {
+            let shift = (byte_idx * 8) as i64;
+            let ba = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let ba = self.b.ins().band_imm(ba, 0xff);
+            let bb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let bb = self.b.ins().band_imm(bb, 0xff);
+            let cmp = self.b.ins().icmp(IntCC::UnsignedGreaterThan, ba, bb);
+            let m = self.b.ins().select(cmp, ba, bb);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(m, shift) } else { m };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pminub_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        for byte_idx in 0..8 {
+            let shift = (byte_idx * 8) as i64;
+            let ba = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let ba = self.b.ins().band_imm(ba, 0xff);
+            let bb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let bb = self.b.ins().band_imm(bb, 0xff);
+            let cmp = self.b.ins().icmp(IntCC::UnsignedLessThan, ba, bb);
+            let m = self.b.ins().select(cmp, ba, bb);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(m, shift) } else { m };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+
     fn address(&mut self, i: &Instruction) -> Result<Value, EngineError> {
-        if i.segment_prefix() != Register::None {
+        let seg = i.segment_prefix();
+        if seg != Register::None
+            && seg != Register::FS
+            && seg != Register::CS
+            && seg != Register::DS
+            && seg != Register::SS
+            && seg != Register::ES
+        {
             return Err(fail(i, "segment addressing unsupported"));
         }
-        if i.is_ip_rel_memory_operand() {
-            return Ok(self.c(i.ip_rel_memory_address()));
-        }
-        let mut v = self.c(i.memory_displacement64());
-        for (r, scale) in [
-            (i.memory_base(), 1),
-            (i.memory_index(), i.memory_index_scale()),
-        ] {
-            if r != Register::None {
-                let index = self.reg(r, i)?;
-                let index = self.b.ins().imul_imm(index, i64::from(scale));
-                v = self.b.ins().iadd(v, index);
+        let mut v = if i.is_ip_rel_memory_operand() {
+            self.c(i.ip_rel_memory_address())
+        } else {
+            let mut v = self.c(i.memory_displacement64());
+            for (r, scale) in [
+                (i.memory_base(), 1),
+                (i.memory_index(), i.memory_index_scale()),
+            ] {
+                if r != Register::None {
+                    let index = self.reg(r, i)?;
+                    let index = self.b.ins().imul_imm(index, i64::from(scale));
+                    v = self.b.ins().iadd(v, index);
+                }
             }
-        }
-        // Address-size override wraps at 32 bits before mapping.
-        if register_view(i.memory_base()).is_some_and(|(_, w, _)| w == 32)
-            || register_view(i.memory_index()).is_some_and(|(_, w, _)| w == 32)
-        {
-            v = self.mask(v, 32);
+            // Address-size override wraps at 32 bits before mapping.
+            if register_view(i.memory_base()).is_some_and(|(_, w, _)| w == 32)
+                || register_view(i.memory_index()).is_some_and(|(_, w, _)| w == 32)
+            {
+                v = self.mask(v, 32);
+            }
+            v
+        };
+        if seg == Register::FS {
+            let fs_base = self.var(18);
+            v = self.b.ins().iadd(v, fs_base);
         }
         Ok(v)
     }
@@ -393,17 +616,34 @@ impl Lower<'_> {
     }
     fn flags(&mut self, a: Value, b: Value, result: Value, w: u16, mnemonic: Mnemonic) {
         use Mnemonic::*;
-        let sub = matches!(mnemonic, Sub | Cmp | Dec | Neg);
+        let sub = matches!(mnemonic, Sub | Cmp | Dec | Neg | Sbb);
         let logical = matches!(mnemonic, Test | And | Or | Xor);
         let preserve_carry = matches!(mnemonic, Inc | Dec);
         let mut f = self.status(result, w);
         if !logical {
             let c = if sub {
-                self.b.ins().icmp(IntCC::UnsignedLessThan, a, b)
+                if mnemonic == Sbb {
+                    let ult = self.b.ins().icmp(IntCC::UnsignedLessThan, a, b);
+                    let ule = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, a, b);
+                    let old_cf = self.flag(0);
+                    let old_cf_bool = self.b.ins().icmp_imm(IntCC::NotEqual, old_cf, 0);
+                    let borrow = self.b.ins().select(old_cf_bool, ule, ult);
+                    self.bool64(borrow)
+                } else {
+                    let c = self.b.ins().icmp(IntCC::UnsignedLessThan, a, b);
+                    self.bool64(c)
+                }
+            } else if mnemonic == Adc {
+                let ult = self.b.ins().icmp(IntCC::UnsignedLessThan, result, a);
+                let ule = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, result, a);
+                let old_cf = self.flag(0);
+                let old_cf_bool = self.b.ins().icmp_imm(IntCC::NotEqual, old_cf, 0);
+                let carry = self.b.ins().select(old_cf_bool, ule, ult);
+                self.bool64(carry)
             } else {
-                self.b.ins().icmp(IntCC::UnsignedLessThan, result, a)
+                let c = self.b.ins().icmp(IntCC::UnsignedLessThan, result, a);
+                self.bool64(c)
             };
-            let c = self.bool64(c);
             let ar = self.b.ins().bxor(a, result);
             let ab = self.b.ins().bxor(a, b);
             let overflow = if sub {
@@ -591,13 +831,13 @@ pub fn lower_block(
         (None, None)
     };
 
-    // Declare variables 0..17.
-    for j in 0..18 {
+    // Declare variables 0..50 (0..15 GPR, 16 RIP, 17 RFLAGS, 18 FS_BASE, 19..34 XMM lo, 35..50 XMM hi).
+    for j in 0..51 {
         let var = Variable::from_u32(j);
         b.declare_var(var, types::I64);
     }
 
-    // Load context: guest register i from ctx[i*8] -> variable permute[i] (or i for RIP/RFLAGS)
+    // Load context: guest register i from ctx[i*8] -> variable permute[i] (or i for RIP/RFLAGS/FS_BASE)
     for i in 0..16 {
         let var_idx = div.variable(i);
         let var = Variable::from_u32(var_idx);
@@ -606,13 +846,17 @@ pub fn lower_block(
             .load(types::I64, MemFlags::new(), ctx, (i * 8) as i32);
         b.def_var(var, v);
     }
-    // RIP (16) and RFLAGS (17) are not diversified.
-    for i in 16..18 {
+    // RIP (16), RFLAGS (17), and FS_BASE (18) are not diversified.
+    for i in 16..19 {
         let var = Variable::from_u32(i);
         let v = b
             .ins()
             .load(types::I64, MemFlags::new(), ctx, (i * 8) as i32);
         b.def_var(var, v);
+    }
+    let zero = b.ins().iconst(types::I64, 0);
+    for i in 19..51 {
+        b.def_var(Variable::from_u32(i), zero);
     }
 
     // Stack padding for diversification (x86_64 only): create a dummy stack
@@ -652,11 +896,16 @@ pub fn lower_block(
         l.rip = i.ip();
         let next = l.c(i.next_ip());
         l.set(16, next);
-        if i.mnemonic() == Nop {
+        if matches!(i.mnemonic(), Nop | Endbr64 | Endbr32) {
             continue;
         }
-        if i.has_lock_prefix() || i.has_rep_prefix() || i.has_repne_prefix() {
-            return Err(fail(i, "atomic and string prefixes unsupported"));
+        if i.has_rep_prefix() || i.has_repne_prefix() {
+            if !matches!(
+                i.mnemonic(),
+                Stosb | Stosw | Stosd | Stosq | Movsb | Movsw | Movsd | Movsq | Ret
+            ) {
+                return Err(fail(i, "atomic and string prefixes unsupported"));
+            }
         }
         match i.mnemonic() {
             Mov | Movzx | Movsx | Movsxd => {
@@ -768,6 +1017,90 @@ pub fn lower_block(
                 let v = l.b.ins().bnot(a);
                 l.write(i, 0, v)?;
             }
+            Adc | Sbb => {
+                let w = l.width(i, 0)?;
+                let a = l.read(i, 0)?;
+                let b = l.read(i, 1)?;
+                let b = l.mask(b, w);
+                let cf = l.flag(0);
+                let v = if i.mnemonic() == Sbb {
+                    let sub = l.b.ins().isub(a, b);
+                    l.b.ins().isub(sub, cf)
+                } else {
+                    let add = l.b.ins().iadd(a, b);
+                    l.b.ins().iadd(add, cf)
+                };
+                let v = l.mask(v, w);
+                l.flags(a, b, v, w, i.mnemonic());
+                l.write(i, 0, v)?;
+            }
+            Bswap => {
+                let w = l.width(i, 0)?;
+                let a = l.read(i, 0)?;
+                let v = if w == 32 {
+                    let a32 = l.b.ins().ireduce(types::I32, a);
+                    let rev = l.b.ins().bswap(a32);
+                    l.b.ins().uextend(types::I64, rev)
+                } else if w == 64 {
+                    l.b.ins().bswap(a)
+                } else {
+                    return Err(fail(i, "unsupported bswap width"));
+                };
+                l.write(i, 0, v)?;
+            }
+            Bt | Bts => {
+                let w = l.width(i, 0)?;
+                let a = l.read(i, 0)?;
+                let bit_idx_raw = l.read(i, 1)?;
+                let mask = (w - 1) as i64;
+                let bit_idx = l.b.ins().band_imm(bit_idx_raw, mask);
+                let shifted = l.b.ins().ushr(a, bit_idx);
+                let cf = l.b.ins().band_imm(shifted, 1);
+                let old = l.var(17);
+                let old = l.b.ins().band_imm(old, !1);
+                let new_flags = l.b.ins().bor(old, cf);
+                l.set(17, new_flags);
+                if i.mnemonic() == Bts {
+                    let one = l.c(1);
+                    let mask_bit = l.b.ins().ishl(one, bit_idx);
+                    let v = l.b.ins().bor(a, mask_bit);
+                    let v = l.mask(v, w);
+                    l.write(i, 0, v)?;
+                }
+            }
+            Bsf | Bsr | Tzcnt => {
+                let w = l.width(i, 0)?;
+                let a = l.read(i, 0)?;
+                let is_zero = l.b.ins().icmp_imm(IntCC::Equal, a, 0);
+                let v = match i.mnemonic() {
+                    Bsf => {
+                        let tz = l.b.ins().ctz(a);
+                        l.mask(tz, w)
+                    }
+                    Tzcnt => {
+                        let tz = l.b.ins().ctz(a);
+                        let w_val = l.c(w as u64);
+                        l.b.ins().select(is_zero, w_val, tz)
+                    }
+                    Bsr => {
+                        let clz = l.b.ins().clz(a);
+                        let limit = l.c((64 - 1) as u64);
+                        let top = l.b.ins().isub(limit, clz);
+                        l.mask(top, w)
+                    }
+                    _ => unreachable!(),
+                };
+                let z = l.bool64(is_zero);
+                let old = l.var(17);
+                let old = l.b.ins().band_imm(old, !0x41);
+                let z_shift = l.b.ins().ishl_imm(z, 6);
+                let mut new_flags = l.b.ins().bor(old, z_shift);
+                if i.mnemonic() == Tzcnt {
+                    new_flags = l.b.ins().bor(new_flags, z);
+                }
+                l.set(17, new_flags);
+                l.write(i, 0, v)?;
+            }
             Imul => {
                 if i.op_count() < 2 {
                     return Err(fail(i, "one-operand multiply unsupported"));
@@ -796,6 +1129,83 @@ pub fn lower_block(
                 let f = l.b.ins().bor(old, f);
                 l.set(17, f);
                 l.write(i, 0, truncated)?;
+            }
+            Mul => {
+                let w = l.width(i, 0)?;
+                let b = l.read(i, 0)?;
+                let rax_var = l.div.variable(0) as usize;
+                let rdx_var = l.div.variable(3) as usize;
+                let rax_val = l.var(rax_var);
+                let a = l.mask(rax_val, w);
+                let b = l.mask(b, w);
+                if w == 64 {
+                    let lo = l.b.ins().imul(a, b);
+                    let hi = l.b.ins().umulhi(a, b);
+                    l.set(rax_var, lo);
+                    l.set(rdx_var, hi);
+                    let overflow = l.b.ins().icmp_imm(IntCC::NotEqual, hi, 0);
+                    let c = l.bool64(overflow);
+                    let o = l.b.ins().ishl_imm(c, 11);
+                    let f = l.b.ins().bor(c, o);
+                    let old = l.var(17);
+                    let old = l.b.ins().band_imm(old, !0x801);
+                    let f = l.b.ins().bor(old, f);
+                    l.set(17, f);
+                } else if w == 32 {
+                    let prod = l.b.ins().imul(a, b);
+                    let lo = l.mask(prod, 32);
+                    let hi = l.b.ins().ushr_imm(prod, 32);
+                    let hi = l.mask(hi, 32);
+                    l.set(rax_var, lo);
+                    l.set(rdx_var, hi);
+                    let overflow = l.b.ins().icmp_imm(IntCC::NotEqual, hi, 0);
+                    let c = l.bool64(overflow);
+                    let o = l.b.ins().ishl_imm(c, 11);
+                    let f = l.b.ins().bor(c, o);
+                    let old = l.var(17);
+                    let old = l.b.ins().band_imm(old, !0x801);
+                    let f = l.b.ins().bor(old, f);
+                    l.set(17, f);
+                } else if w == 16 {
+                    let prod = l.b.ins().imul(a, b);
+                    let lo = l.mask(prod, 16);
+                    let hi = l.b.ins().ushr_imm(prod, 16);
+                    let hi = l.mask(hi, 16);
+                    let old_rax = l.var(rax_var);
+                    let old_rdx = l.var(rdx_var);
+                    let kept_rax = l.b.ins().band_imm(old_rax, !0xffff);
+                    let kept_rdx = l.b.ins().band_imm(old_rdx, !0xffff);
+                    let new_rax = l.b.ins().bor(kept_rax, lo);
+                    let new_rdx = l.b.ins().bor(kept_rdx, hi);
+                    l.set(rax_var, new_rax);
+                    l.set(rdx_var, new_rdx);
+                    let overflow = l.b.ins().icmp_imm(IntCC::NotEqual, hi, 0);
+                    let c = l.bool64(overflow);
+                    let o = l.b.ins().ishl_imm(c, 11);
+                    let f = l.b.ins().bor(c, o);
+                    let old = l.var(17);
+                    let old = l.b.ins().band_imm(old, !0x801);
+                    let f = l.b.ins().bor(old, f);
+                    l.set(17, f);
+                } else if w == 8 {
+                    let prod = l.b.ins().imul(a, b);
+                    let lo = l.mask(prod, 16);
+                    let old_rax = l.var(rax_var);
+                    let kept_rax = l.b.ins().band_imm(old_rax, !0xffff);
+                    let new_rax = l.b.ins().bor(kept_rax, lo);
+                    l.set(rax_var, new_rax);
+                    let hi = l.b.ins().ushr_imm(prod, 8);
+                    let overflow = l.b.ins().icmp_imm(IntCC::NotEqual, hi, 0);
+                    let c = l.bool64(overflow);
+                    let o = l.b.ins().ishl_imm(c, 11);
+                    let f = l.b.ins().bor(c, o);
+                    let old = l.var(17);
+                    let old = l.b.ins().band_imm(old, !0x801);
+                    let f = l.b.ins().bor(old, f);
+                    l.set(17, f);
+                } else {
+                    return Err(fail(i, "unsupported operand width for mul"));
+                }
             }
             Rol | Ror => {
                 let w = l.width(i, 0)?;
@@ -841,6 +1251,77 @@ pub fn lower_block(
                     l.write(i, 0, v)?;
                 }
             }
+            Shl | Shr | Sar => {
+                let w = l.width(i, 0)?;
+                let a = l.read(i, 0)?;
+                let count_raw = l.read(i, 1)?;
+                let mask = if w == 64 { 63 } else { 31 };
+                let count = l.b.ins().band_imm(count_raw, mask);
+                let is_zero = l.b.ins().icmp_imm(IntCC::Equal, count, 0);
+
+                let res = match i.mnemonic() {
+                    Shl => l.b.ins().ishl(a, count),
+                    Shr => l.b.ins().ushr(a, count),
+                    Sar => {
+                        let signed = l.sign(a, w);
+                        l.b.ins().sshr(signed, count)
+                    }
+                    _ => unreachable!(),
+                };
+                let res = l.mask(res, w);
+
+                let shift_one = l.b.ins().iadd_imm(count, -1);
+                let cf = match i.mnemonic() {
+                    Shl => {
+                        let w_minus_one = l.c((w - 1) as u64);
+                        let shift = l.b.ins().isub(w_minus_one, shift_one);
+                        let bit = l.b.ins().ushr(a, shift);
+                        l.b.ins().band_imm(bit, 1)
+                    }
+                    Shr => {
+                        let bit = l.b.ins().ushr(a, shift_one);
+                        l.b.ins().band_imm(bit, 1)
+                    }
+                    Sar => {
+                        let signed = l.sign(a, w);
+                        let bit = l.b.ins().sshr(signed, shift_one);
+                        l.b.ins().band_imm(bit, 1)
+                    }
+                    _ => unreachable!(),
+                };
+
+                let status = l.status(res, w);
+                let old_flags = l.var(17);
+                let new_flags = l.b.ins().band_imm(old_flags, !0x8c5);
+                let new_flags = l.b.ins().bor(new_flags, cf);
+                let new_flags = l.b.ins().bor(new_flags, status);
+
+                let final_res = l.b.ins().select(is_zero, a, res);
+                let final_flags = l.b.ins().select(is_zero, old_flags, new_flags);
+                l.set(17, final_flags);
+                l.write(i, 0, final_res)?;
+            }
+            Cld | Pause => {
+                if i.mnemonic() == Cld {
+                    let old = l.var(17);
+                    let cleared = l.b.ins().band_imm(old, !(1 << 10));
+                    l.set(17, cleared);
+                }
+            }
+            Cdqe => {
+                let rax_var = l.div.variable(0) as usize;
+                let rax = l.var(rax_var);
+                let eax = l.mask(rax, 32);
+                let extended = l.sign(eax, 32);
+                l.set(rax_var, extended);
+            }
+            Cqo => {
+                let rax_var = l.div.variable(0) as usize;
+                let rdx_var = l.div.variable(3) as usize;
+                let rax = l.var(rax_var);
+                let sign = l.b.ins().sshr_imm(rax, 63);
+                l.set(rdx_var, sign);
+            }
             Syscall => {
                 // Guest RCX gets the return address and R11 gets RFLAGS, as on
                 // Linux x86-64. Use the diversified variable indices.
@@ -849,6 +1330,792 @@ pub fn lower_block(
                 let f = l.var(17);
                 let r11 = l.div.variable(11) as usize;
                 l.set(r11, f);
+            }
+            Stosb | Stosw | Stosd | Stosq => {
+                let w: u16 = match i.mnemonic() {
+                    Stosb => 8,
+                    Stosw => 16,
+                    Stosd => 32,
+                    Stosq => 64,
+                    _ => unreachable!(),
+                };
+                let step = (w / 8) as i64;
+                let rdi_var = l.div.variable(5) as usize;
+                let rax_var = l.div.variable(0) as usize;
+                let rax_val = l.var(rax_var);
+                let val = l.mask(rax_val, w);
+
+                if i.has_rep_prefix() {
+                    let rcx_var = l.div.variable(2) as usize;
+                    let header = l.b.create_block();
+                    let body = l.b.create_block();
+                    let exit = l.b.create_block();
+
+                    l.b.ins().jump(header, &[]);
+                    l.b.switch_to_block(header);
+                    let count = l.var(rcx_var);
+                    let zero = l.c(0);
+                    let is_zero = l.b.ins().icmp(IntCC::Equal, count, zero);
+                    l.b.ins().brif(is_zero, exit, &[], body, &[]);
+
+                    l.b.switch_to_block(body);
+                    l.b.seal_block(body);
+                    let rdi = l.var(rdi_var);
+                    l.store(rdi, w, val, false);
+                    let new_rdi = l.b.ins().iadd_imm(rdi, step);
+                    l.set(rdi_var, new_rdi);
+                    let new_count = l.b.ins().iadd_imm(count, -1);
+                    l.set(rcx_var, new_count);
+                    l.b.ins().jump(header, &[]);
+
+                    l.b.seal_block(header);
+                    l.b.switch_to_block(exit);
+                    l.b.seal_block(exit);
+                } else {
+                    let rdi = l.var(rdi_var);
+                    l.store(rdi, w, val, false);
+                    let new_rdi = l.b.ins().iadd_imm(rdi, step);
+                    l.set(rdi_var, new_rdi);
+                }
+            }
+            Movsb | Movsw | Movsd | Movsq => {
+                let w: u16 = match i.mnemonic() {
+                    Movsb => 8,
+                    Movsw => 16,
+                    Movsd => 32,
+                    Movsq => 64,
+                    _ => unreachable!(),
+                };
+                let step = (w / 8) as i64;
+                let rdi_var = l.div.variable(5) as usize;
+                let rsi_var = l.div.variable(4) as usize;
+
+                if i.has_rep_prefix() {
+                    let rcx_var = l.div.variable(2) as usize;
+                    let header = l.b.create_block();
+                    let body = l.b.create_block();
+                    let exit = l.b.create_block();
+
+                    l.b.ins().jump(header, &[]);
+                    l.b.switch_to_block(header);
+                    let count = l.var(rcx_var);
+                    let zero = l.c(0);
+                    let is_zero = l.b.ins().icmp(IntCC::Equal, count, zero);
+                    l.b.ins().brif(is_zero, exit, &[], body, &[]);
+
+                    l.b.switch_to_block(body);
+                    l.b.seal_block(body);
+                    let rsi = l.var(rsi_var);
+                    let val = l.load(rsi, w)?;
+                    let rdi = l.var(rdi_var);
+                    l.store(rdi, w, val, false);
+                    let new_rsi = l.b.ins().iadd_imm(rsi, step);
+                    l.set(rsi_var, new_rsi);
+                    let new_rdi = l.b.ins().iadd_imm(rdi, step);
+                    l.set(rdi_var, new_rdi);
+                    let new_count = l.b.ins().iadd_imm(count, -1);
+                    l.set(rcx_var, new_count);
+                    l.b.ins().jump(header, &[]);
+
+                    l.b.seal_block(header);
+                    l.b.switch_to_block(exit);
+                    l.b.seal_block(exit);
+                } else {
+                    let rsi = l.var(rsi_var);
+                    let val = l.load(rsi, w)?;
+                    let rdi = l.var(rdi_var);
+                    l.store(rdi, w, val, false);
+                    let new_rsi = l.b.ins().iadd_imm(rsi, step);
+                    l.set(rsi_var, new_rsi);
+                    let new_rdi = l.b.ins().iadd_imm(rdi, step);
+                    l.set(rdi_var, new_rdi);
+                }
+            }
+            Cmpxchg => {
+                let w = l.width(i, 0)?;
+                let dst = l.read(i, 0)?;
+                let src = l.read(i, 1)?;
+                let rax_var = l.div.variable(0) as usize;
+                let rax_val = l.var(rax_var);
+                let rax = l.mask(rax_val, w);
+                let eq = l.b.ins().icmp(IntCC::Equal, rax, dst);
+                let diff = l.b.ins().isub(rax, dst);
+                l.flags(rax, dst, diff, w, Cmp);
+                let then_block = l.b.create_block();
+                let else_block = l.b.create_block();
+                let merge_block = l.b.create_block();
+                l.b.ins().brif(eq, then_block, &[], else_block, &[]);
+
+                l.b.switch_to_block(then_block);
+                l.b.seal_block(then_block);
+                l.write(i, 0, src)?;
+                l.b.ins().jump(merge_block, &[]);
+
+                l.b.switch_to_block(else_block);
+                l.b.seal_block(else_block);
+                let old_rax = l.var(rax_var);
+                let new_rax = if w == 64 {
+                    dst
+                } else {
+                    let masked = l.mask(dst, w);
+                    if w == 32 {
+                        masked
+                    } else {
+                        let kept = l.b.ins().band_imm(old_rax, !((1i64 << w) - 1));
+                        l.b.ins().bor(kept, masked)
+                    }
+                };
+                l.set(rax_var, new_rax);
+                l.b.ins().jump(merge_block, &[]);
+
+                l.b.switch_to_block(merge_block);
+                l.b.seal_block(merge_block);
+            }
+            Xadd => {
+                let w = l.width(i, 0)?;
+                let dst = l.read(i, 0)?;
+                let src = l.read(i, 1)?;
+                let sum = l.b.ins().iadd(dst, src);
+                l.flags(dst, src, sum, w, Add);
+                l.write(i, 1, dst)?;
+                l.write(i, 0, sum)?;
+            }
+            Xchg => {
+                let v0 = l.read(i, 0)?;
+                let v1 = l.read(i, 1)?;
+                l.write(i, 0, v1)?;
+                l.write(i, 1, v0)?;
+            }
+            Pxor | Xorps => {
+                let op0 = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                if i.op1_kind() == OpKind::Register {
+                    let op1 = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    if op0 == op1 {
+                        let zero = l.c(0);
+                        l.set_xmm(op0, zero, zero);
+                    } else {
+                        let (lo0, hi0) = l.get_xmm(op0);
+                        let (lo1, hi1) = l.get_xmm(op1);
+                        let new_lo = l.b.ins().bxor(lo0, lo1);
+                        let new_hi = l.b.ins().bxor(hi0, hi1);
+                        l.set_xmm(op0, new_lo, new_hi);
+                    }
+                } else if i.op1_kind() == OpKind::Memory {
+                    let p = l.address(i)?;
+                    let mem_lo = l.load(p, 64)?;
+                    let p8 = l.b.ins().iadd_imm(p, 8);
+                    let mem_hi = l.load(p8, 64)?;
+                    let (lo0, hi0) = l.get_xmm(op0);
+                    let new_lo = l.b.ins().bxor(lo0, mem_lo);
+                    let new_hi = l.b.ins().bxor(hi0, mem_hi);
+                    l.set_xmm(op0, new_lo, new_hi);
+                } else {
+                    return Err(fail(i, "unsupported pxor operand"));
+                }
+            }
+            Movaps | Movups | Movdqa | Movdqu => {
+                if i.op0_kind() == OpKind::Register && i.op1_kind() == OpKind::Register {
+                    let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let (lo, hi) = l.get_xmm(src);
+                    l.set_xmm(dst, lo, hi);
+                } else if i.op0_kind() == OpKind::Register && i.op1_kind() == OpKind::Memory {
+                    let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let p = l.address(i)?;
+                    let lo = l.load(p, 64)?;
+                    let p8 = l.b.ins().iadd_imm(p, 8);
+                    let hi = l.load(p8, 64)?;
+                    l.set_xmm(dst, lo, hi);
+                } else if i.op0_kind() == OpKind::Memory && i.op1_kind() == OpKind::Register {
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let (lo, hi) = l.get_xmm(src);
+                    let p = l.address(i)?;
+                    l.store(p, 64, lo, false);
+                    let p8 = l.b.ins().iadd_imm(p, 8);
+                    l.store(p8, 64, hi, false);
+                } else {
+                    return Err(fail(i, "unsupported movaps/movups operand combination"));
+                }
+            }
+            Movd | Movq => {
+                let w = if i.mnemonic() == Movd { 32 } else { 64 };
+                if i.op0_kind() == OpKind::Register && xmm_index(i.op0_register()).is_some() {
+                    let dst = xmm_index(i.op0_register()).unwrap();
+                    let zero = l.c(0);
+                    let val = if i.op1_kind() == OpKind::Register {
+                        let v = l.reg(i.op1_register(), i)?;
+                        l.mask(v, w)
+                    } else if i.op1_kind() == OpKind::Memory {
+                        let p = l.address(i)?;
+                        l.load(p, w)?
+                    } else {
+                        return Err(fail(i, "unsupported operand for movd/movq to xmm"));
+                    };
+                    l.set_xmm(dst, val, zero);
+                } else if i.op1_kind() == OpKind::Register && xmm_index(i.op1_register()).is_some() {
+                    let src = xmm_index(i.op1_register()).unwrap();
+                    let (lo, _) = l.get_xmm(src);
+                    let val = l.mask(lo, w);
+                    if i.op0_kind() == OpKind::Register {
+                        l.put_reg(i.op0_register(), val, i)?;
+                    } else if i.op0_kind() == OpKind::Memory {
+                        let p = l.address(i)?;
+                        l.store(p, w, val, false);
+                    } else {
+                        return Err(fail(i, "unsupported operand for movd/movq from xmm"));
+                    }
+                } else {
+                    let v = l.read(i, 1)?;
+                    l.write(i, 0, v)?;
+                }
+            }
+            Pcmpeqb | Pcmpeqd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, dst_hi) = l.get_xmm(dst);
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                if i.mnemonic() == Pcmpeqb {
+                    let res_lo = l.pcmpeqb_u64(dst_lo, src_lo);
+                    let res_hi = l.pcmpeqb_u64(dst_hi, src_hi);
+                    l.set_xmm(dst, res_lo, res_hi);
+                } else {
+                    let res_lo = l.pcmpeqd_u64(dst_lo, src_lo);
+                    let res_hi = l.pcmpeqd_u64(dst_hi, src_hi);
+                    l.set_xmm(dst, res_lo, res_hi);
+                }
+            }
+            Pmovmskb => {
+                let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo, hi) = l.get_xmm(src);
+                let mut mask = l.c(0);
+                for k in 0..8 {
+                    let bit = l.b.ins().ushr_imm(lo, (k * 8 + 7) as i64);
+                    let bit = l.b.ins().band_imm(bit, 1);
+                    let shifted = l.b.ins().ishl_imm(bit, k as i64);
+                    mask = l.b.ins().bor(mask, shifted);
+                }
+                for k in 0..8 {
+                    let bit = l.b.ins().ushr_imm(hi, (k * 8 + 7) as i64);
+                    let bit = l.b.ins().band_imm(bit, 1);
+                    let shifted = l.b.ins().ishl_imm(bit, (8 + k) as i64);
+                    mask = l.b.ins().bor(mask, shifted);
+                }
+                l.put_reg(i.op0_register(), mask, i)?;
+            }
+            Movmskps => {
+                let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo, hi) = l.get_xmm(src);
+                let bit0 = l.b.ins().ushr_imm(lo, 31);
+                let b0 = l.b.ins().band_imm(bit0, 1);
+                let bit1 = l.b.ins().ushr_imm(lo, 63);
+                let b1_raw = l.b.ins().band_imm(bit1, 1);
+                let b1 = l.b.ins().ishl_imm(b1_raw, 1);
+                let bit2 = l.b.ins().ushr_imm(hi, 31);
+                let b2_raw = l.b.ins().band_imm(bit2, 1);
+                let b2 = l.b.ins().ishl_imm(b2_raw, 2);
+                let bit3 = l.b.ins().ushr_imm(hi, 63);
+                let b3_raw = l.b.ins().band_imm(bit3, 1);
+                let b3 = l.b.ins().ishl_imm(b3_raw, 3);
+                let mut m = l.b.ins().bor(b0, b1);
+                m = l.b.ins().bor(m, b2);
+                m = l.b.ins().bor(m, b3);
+                l.put_reg(i.op0_register(), m, i)?;
+            }
+            Pand | Pandn | Por => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo0, hi0) = l.get_xmm(dst);
+                let (lo1, hi1) = l.read_xmm(i, 1)?;
+                let (new_lo, new_hi) = match i.mnemonic() {
+                    Pand => (l.b.ins().band(lo0, lo1), l.b.ins().band(hi0, hi1)),
+                    Pandn => {
+                        let not0 = l.b.ins().bnot(lo0);
+                        let not1 = l.b.ins().bnot(hi0);
+                        (l.b.ins().band(not0, lo1), l.b.ins().band(not1, hi1))
+                    }
+                    Por => (l.b.ins().bor(lo0, lo1), l.b.ins().bor(hi0, hi1)),
+                    _ => unreachable!(),
+                };
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Paddb | Paddw | Paddd | Paddq | Psubb | Psubw | Psubd | Psubq | Pmaxub | Pminub => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, dst_hi) = l.get_xmm(dst);
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                let (res_lo, res_hi) = match i.mnemonic() {
+                    Paddb => (l.paddb_u64(dst_lo, src_lo), l.paddb_u64(dst_hi, src_hi)),
+                    Paddw => (l.paddw_u64(dst_lo, src_lo), l.paddw_u64(dst_hi, src_hi)),
+                    Paddd => (l.paddd_u64(dst_lo, src_lo), l.paddd_u64(dst_hi, src_hi)),
+                    Paddq => (l.b.ins().iadd(dst_lo, src_lo), l.b.ins().iadd(dst_hi, src_hi)),
+                    Psubb => (l.psubb_u64(dst_lo, src_lo), l.psubb_u64(dst_hi, src_hi)),
+                    Psubw => (l.psubw_u64(dst_lo, src_lo), l.psubw_u64(dst_hi, src_hi)),
+                    Psubd => (l.psubd_u64(dst_lo, src_lo), l.psubd_u64(dst_hi, src_hi)),
+                    Psubq => (l.b.ins().isub(dst_lo, src_lo), l.b.ins().isub(dst_hi, src_hi)),
+                    Pmaxub => (l.pmaxub_u64(dst_lo, src_lo), l.pmaxub_u64(dst_hi, src_hi)),
+                    Pminub => (l.pminub_u64(dst_lo, src_lo), l.pminub_u64(dst_hi, src_hi)),
+                    _ => unreachable!(),
+                };
+                l.set_xmm(dst, res_lo, res_hi);
+            }
+            Pshufd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                let imm = i.immediate8() as u64;
+                let d0 = l.b.ins().band_imm(src_lo, 0xffffffff);
+                let d1 = l.b.ins().ushr_imm(src_lo, 32);
+                let d2 = l.b.ins().band_imm(src_hi, 0xffffffff);
+                let d3 = l.b.ins().ushr_imm(src_hi, 32);
+                let dwords = [d0, d1, d2, d3];
+                let sel0 = (imm & 3) as usize;
+                let sel1 = ((imm >> 2) & 3) as usize;
+                let sel2 = ((imm >> 4) & 3) as usize;
+                let sel3 = ((imm >> 6) & 3) as usize;
+                let shift_hi1 = l.b.ins().ishl_imm(dwords[sel1], 32);
+                let new_lo = l.b.ins().bor(dwords[sel0], shift_hi1);
+                let shift_hi3 = l.b.ins().ishl_imm(dwords[sel3], 32);
+                let new_hi = l.b.ins().bor(dwords[sel2], shift_hi3);
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Punpcklbw => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, _) = l.get_xmm(dst);
+                let (src_lo, _) = l.read_xmm(i, 1)?;
+                let mut new_lo = l.c(0);
+                for k in 0..4 {
+                    let d = l.b.ins().ushr_imm(dst_lo, (k * 8) as i64);
+                    let d = l.b.ins().band_imm(d, 0xff);
+                    let s = l.b.ins().ushr_imm(src_lo, (k * 8) as i64);
+                    let s = l.b.ins().band_imm(s, 0xff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 16) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 16 + 8) as i64);
+                    new_lo = l.b.ins().bor(new_lo, d_shift);
+                    new_lo = l.b.ins().bor(new_lo, s_shift);
+                }
+                let mut new_hi = l.c(0);
+                for k in 0..4 {
+                    let d = l.b.ins().ushr_imm(dst_lo, ((4 + k) * 8) as i64);
+                    let d = l.b.ins().band_imm(d, 0xff);
+                    let s = l.b.ins().ushr_imm(src_lo, ((4 + k) * 8) as i64);
+                    let s = l.b.ins().band_imm(s, 0xff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 16) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 16 + 8) as i64);
+                    new_hi = l.b.ins().bor(new_hi, d_shift);
+                    new_hi = l.b.ins().bor(new_hi, s_shift);
+                }
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Punpckhbw => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (_, dst_hi) = l.get_xmm(dst);
+                let (_, src_hi) = l.read_xmm(i, 1)?;
+                let mut new_lo = l.c(0);
+                for k in 0..4 {
+                    let d = l.b.ins().ushr_imm(dst_hi, (k * 8) as i64);
+                    let d = l.b.ins().band_imm(d, 0xff);
+                    let s = l.b.ins().ushr_imm(src_hi, (k * 8) as i64);
+                    let s = l.b.ins().band_imm(s, 0xff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 16) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 16 + 8) as i64);
+                    new_lo = l.b.ins().bor(new_lo, d_shift);
+                    new_lo = l.b.ins().bor(new_lo, s_shift);
+                }
+                let mut new_hi = l.c(0);
+                for k in 0..4 {
+                    let d = l.b.ins().ushr_imm(dst_hi, ((4 + k) * 8) as i64);
+                    let d = l.b.ins().band_imm(d, 0xff);
+                    let s = l.b.ins().ushr_imm(src_hi, ((4 + k) * 8) as i64);
+                    let s = l.b.ins().band_imm(s, 0xff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 16) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 16 + 8) as i64);
+                    new_hi = l.b.ins().bor(new_hi, d_shift);
+                    new_hi = l.b.ins().bor(new_hi, s_shift);
+                }
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Punpcklwd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, _) = l.get_xmm(dst);
+                let (src_lo, _) = l.read_xmm(i, 1)?;
+                let mut new_lo = l.c(0);
+                for k in 0..2 {
+                    let d = l.b.ins().ushr_imm(dst_lo, (k * 16) as i64);
+                    let d = l.b.ins().band_imm(d, 0xffff);
+                    let s = l.b.ins().ushr_imm(src_lo, (k * 16) as i64);
+                    let s = l.b.ins().band_imm(s, 0xffff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 32) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 32 + 16) as i64);
+                    new_lo = l.b.ins().bor(new_lo, d_shift);
+                    new_lo = l.b.ins().bor(new_lo, s_shift);
+                }
+                let mut new_hi = l.c(0);
+                for k in 0..2 {
+                    let d = l.b.ins().ushr_imm(dst_lo, ((2 + k) * 16) as i64);
+                    let d = l.b.ins().band_imm(d, 0xffff);
+                    let s = l.b.ins().ushr_imm(src_lo, ((2 + k) * 16) as i64);
+                    let s = l.b.ins().band_imm(s, 0xffff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 32) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 32 + 16) as i64);
+                    new_hi = l.b.ins().bor(new_hi, d_shift);
+                    new_hi = l.b.ins().bor(new_hi, s_shift);
+                }
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Punpckhwd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (_, dst_hi) = l.get_xmm(dst);
+                let (_, src_hi) = l.read_xmm(i, 1)?;
+                let mut new_lo = l.c(0);
+                for k in 0..2 {
+                    let d = l.b.ins().ushr_imm(dst_hi, (k * 16) as i64);
+                    let d = l.b.ins().band_imm(d, 0xffff);
+                    let s = l.b.ins().ushr_imm(src_hi, (k * 16) as i64);
+                    let s = l.b.ins().band_imm(s, 0xffff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 32) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 32 + 16) as i64);
+                    new_lo = l.b.ins().bor(new_lo, d_shift);
+                    new_lo = l.b.ins().bor(new_lo, s_shift);
+                }
+                let mut new_hi = l.c(0);
+                for k in 0..2 {
+                    let d = l.b.ins().ushr_imm(dst_hi, ((2 + k) * 16) as i64);
+                    let d = l.b.ins().band_imm(d, 0xffff);
+                    let s = l.b.ins().ushr_imm(src_hi, ((2 + k) * 16) as i64);
+                    let s = l.b.ins().band_imm(s, 0xffff);
+                    let d_shift = l.b.ins().ishl_imm(d, (k * 32) as i64);
+                    let s_shift = l.b.ins().ishl_imm(s, (k * 32 + 16) as i64);
+                    new_hi = l.b.ins().bor(new_hi, d_shift);
+                    new_hi = l.b.ins().bor(new_hi, s_shift);
+                }
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Punpckldq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, _) = l.get_xmm(dst);
+                let (src_lo, _) = l.read_xmm(i, 1)?;
+                let d0 = l.b.ins().band_imm(dst_lo, 0xffffffff);
+                let s0 = l.b.ins().band_imm(src_lo, 0xffffffff);
+                let s0_shift = l.b.ins().ishl_imm(s0, 32);
+                let new_lo = l.b.ins().bor(d0, s0_shift);
+
+                let d1 = l.b.ins().ushr_imm(dst_lo, 32);
+                let s1 = l.b.ins().ushr_imm(src_lo, 32);
+                let s1_shift = l.b.ins().ishl_imm(s1, 32);
+                let new_hi = l.b.ins().bor(d1, s1_shift);
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Punpckhdq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (_, dst_hi) = l.get_xmm(dst);
+                let (_, src_hi) = l.read_xmm(i, 1)?;
+                let d2 = l.b.ins().band_imm(dst_hi, 0xffffffff);
+                let s2 = l.b.ins().band_imm(src_hi, 0xffffffff);
+                let s2_shift = l.b.ins().ishl_imm(s2, 32);
+                let new_lo = l.b.ins().bor(d2, s2_shift);
+
+                let d3 = l.b.ins().ushr_imm(dst_hi, 32);
+                let s3 = l.b.ins().ushr_imm(src_hi, 32);
+                let s3_shift = l.b.ins().ishl_imm(s3, 32);
+                let new_hi = l.b.ins().bor(d3, s3_shift);
+                l.set_xmm(dst, new_lo, new_hi);
+            }
+            Pshuflw => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                let imm = i.immediate8() as usize;
+                let w0 = l.b.ins().band_imm(src_lo, 0xffff);
+                let w1_raw = l.b.ins().ushr_imm(src_lo, 16);
+                let w1 = l.b.ins().band_imm(w1_raw, 0xffff);
+                let w2_raw = l.b.ins().ushr_imm(src_lo, 32);
+                let w2 = l.b.ins().band_imm(w2_raw, 0xffff);
+                let w3 = l.b.ins().ushr_imm(src_lo, 48);
+                let words = [w0, w1, w2, w3];
+                let s0 = imm & 3;
+                let s1 = (imm >> 2) & 3;
+                let s2 = (imm >> 4) & 3;
+                let s3 = (imm >> 6) & 3;
+                let o0 = words[s0];
+                let o1 = l.b.ins().ishl_imm(words[s1], 16);
+                let o2 = l.b.ins().ishl_imm(words[s2], 32);
+                let o3 = l.b.ins().ishl_imm(words[s3], 48);
+                let mut new_lo = l.b.ins().bor(o0, o1);
+                new_lo = l.b.ins().bor(new_lo, o2);
+                new_lo = l.b.ins().bor(new_lo, o3);
+                l.set_xmm(dst, new_lo, src_hi);
+            }
+            Pshufhw => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                let imm = i.immediate8() as usize;
+                let w0 = l.b.ins().band_imm(src_hi, 0xffff);
+                let w1_raw = l.b.ins().ushr_imm(src_hi, 16);
+                let w1 = l.b.ins().band_imm(w1_raw, 0xffff);
+                let w2_raw = l.b.ins().ushr_imm(src_hi, 32);
+                let w2 = l.b.ins().band_imm(w2_raw, 0xffff);
+                let w3 = l.b.ins().ushr_imm(src_hi, 48);
+                let words = [w0, w1, w2, w3];
+                let s0 = imm & 3;
+                let s1 = (imm >> 2) & 3;
+                let s2 = (imm >> 4) & 3;
+                let s3 = (imm >> 6) & 3;
+                let o0 = words[s0];
+                let o1 = l.b.ins().ishl_imm(words[s1], 16);
+                let o2 = l.b.ins().ishl_imm(words[s2], 32);
+                let o3 = l.b.ins().ishl_imm(words[s3], 48);
+                let mut new_hi = l.b.ins().bor(o0, o1);
+                new_hi = l.b.ins().bor(new_hi, o2);
+                new_hi = l.b.ins().bor(new_hi, o3);
+                l.set_xmm(dst, src_lo, new_hi);
+            }
+            Punpcklqdq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo0, _) = l.get_xmm(dst);
+                let (lo1, _) = l.read_xmm(i, 1)?;
+                l.set_xmm(dst, lo0, lo1);
+            }
+            Punpckhqdq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (_, hi0) = l.get_xmm(dst);
+                let (_, hi1) = l.read_xmm(i, 1)?;
+                l.set_xmm(dst, hi0, hi1);
+            }
+            Movlhps => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo0, _) = l.get_xmm(dst);
+                let (lo1, _) = l.read_xmm(i, 1)?;
+                l.set_xmm(dst, lo0, lo1);
+            }
+            Movhps => {
+                if i.op0_kind() == OpKind::Register {
+                    let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let (lo, _) = l.get_xmm(dst);
+                    let p = l.address(i)?;
+                    let hi = l.load(p, 64)?;
+                    l.set_xmm(dst, lo, hi);
+                } else if i.op0_kind() == OpKind::Memory {
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let (_, hi) = l.get_xmm(src);
+                    let p = l.address(i)?;
+                    l.store(p, 64, hi, false);
+                }
+            }
+            Pinsrw | Pinsrb | Pinsrd | Pinsrq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo, hi) = l.get_xmm(dst);
+                match i.mnemonic() {
+                    Pinsrw => {
+                        let imm = (i.immediate8() & 7) as u32;
+                        let val = if i.op1_kind() == OpKind::Register {
+                            let r = l.reg(i.op1_register(), i)?;
+                            l.b.ins().band_imm(r, 0xffff)
+                        } else {
+                            let p = l.address(i)?;
+                            l.load(p, 16)?
+                        };
+                        if imm < 4 {
+                            let shift = (imm * 16) as i64;
+                            let mask = !(0xffffu64 << (imm * 16)) as i64;
+                            let cleared = l.b.ins().band_imm(lo, mask);
+                            let inserted = l.b.ins().ishl_imm(val, shift);
+                            let new_lo = l.b.ins().bor(cleared, inserted);
+                            l.set_xmm(dst, new_lo, hi);
+                        } else {
+                            let shift = ((imm - 4) * 16) as i64;
+                            let mask = !(0xffffu64 << ((imm - 4) * 16)) as i64;
+                            let cleared = l.b.ins().band_imm(hi, mask);
+                            let inserted = l.b.ins().ishl_imm(val, shift);
+                            let new_hi = l.b.ins().bor(cleared, inserted);
+                            l.set_xmm(dst, lo, new_hi);
+                        }
+                    }
+                    Pinsrb => {
+                        let imm = (i.immediate8() & 15) as u32;
+                        let val = if i.op1_kind() == OpKind::Register {
+                            let r = l.reg(i.op1_register(), i)?;
+                            l.b.ins().band_imm(r, 0xff)
+                        } else {
+                            let p = l.address(i)?;
+                            l.load(p, 8)?
+                        };
+                        if imm < 8 {
+                            let shift = (imm * 8) as i64;
+                            let mask = !(0xffu64 << (imm * 8)) as i64;
+                            let cleared = l.b.ins().band_imm(lo, mask);
+                            let inserted = l.b.ins().ishl_imm(val, shift);
+                            let new_lo = l.b.ins().bor(cleared, inserted);
+                            l.set_xmm(dst, new_lo, hi);
+                        } else {
+                            let shift = ((imm - 8) * 8) as i64;
+                            let mask = !(0xffu64 << ((imm - 8) * 8)) as i64;
+                            let cleared = l.b.ins().band_imm(hi, mask);
+                            let inserted = l.b.ins().ishl_imm(val, shift);
+                            let new_hi = l.b.ins().bor(cleared, inserted);
+                            l.set_xmm(dst, lo, new_hi);
+                        }
+                    }
+                    Pinsrd => {
+                        let imm = (i.immediate8() & 3) as u32;
+                        let val = if i.op1_kind() == OpKind::Register {
+                            let r = l.reg(i.op1_register(), i)?;
+                            l.b.ins().band_imm(r, 0xffffffff)
+                        } else {
+                            let p = l.address(i)?;
+                            l.load(p, 32)?
+                        };
+                        match imm {
+                            0 => {
+                                let cleared = l.b.ins().band_imm(lo, !(0xffffffffu64) as i64);
+                                let new_lo = l.b.ins().bor(cleared, val);
+                                l.set_xmm(dst, new_lo, hi);
+                            }
+                            1 => {
+                                let cleared = l.b.ins().band_imm(lo, 0xffffffff);
+                                let shifted = l.b.ins().ishl_imm(val, 32);
+                                let new_lo = l.b.ins().bor(cleared, shifted);
+                                l.set_xmm(dst, new_lo, hi);
+                            }
+                            2 => {
+                                let cleared = l.b.ins().band_imm(hi, !(0xffffffffu64) as i64);
+                                let new_hi = l.b.ins().bor(cleared, val);
+                                l.set_xmm(dst, lo, new_hi);
+                            }
+                            _ => {
+                                let cleared = l.b.ins().band_imm(hi, 0xffffffff);
+                                let shifted = l.b.ins().ishl_imm(val, 32);
+                                let new_hi = l.b.ins().bor(cleared, shifted);
+                                l.set_xmm(dst, lo, new_hi);
+                            }
+                        }
+                    }
+                    Pinsrq => {
+                        let imm = (i.immediate8() & 1) as u32;
+                        let val = if i.op1_kind() == OpKind::Register {
+                            l.reg(i.op1_register(), i)?
+                        } else {
+                            let p = l.address(i)?;
+                            l.load(p, 64)?
+                        };
+                        if imm == 0 {
+                            l.set_xmm(dst, val, hi);
+                        } else {
+                            l.set_xmm(dst, lo, val);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Pextrw | Pextrb | Pextrd | Pextrq => {
+                let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo, hi) = l.get_xmm(src);
+                match i.mnemonic() {
+                    Pextrw => {
+                        let imm = (i.immediate8() & 7) as u32;
+                        let word = if imm < 4 {
+                            l.b.ins().ushr_imm(lo, (imm * 16) as i64)
+                        } else {
+                            l.b.ins().ushr_imm(hi, ((imm - 4) * 16) as i64)
+                        };
+                        let word = l.b.ins().band_imm(word, 0xffff);
+                        if i.op0_kind() == OpKind::Register {
+                            l.put_reg(i.op0_register(), word, i)?;
+                        } else {
+                            let p = l.address(i)?;
+                            l.store(p, 16, word, false);
+                        }
+                    }
+                    Pextrb => {
+                        let imm = (i.immediate8() & 15) as u32;
+                        let byte = if imm < 8 {
+                            l.b.ins().ushr_imm(lo, (imm * 8) as i64)
+                        } else {
+                            l.b.ins().ushr_imm(hi, ((imm - 8) * 8) as i64)
+                        };
+                        let byte = l.b.ins().band_imm(byte, 0xff);
+                        if i.op0_kind() == OpKind::Register {
+                            l.put_reg(i.op0_register(), byte, i)?;
+                        } else {
+                            let p = l.address(i)?;
+                            l.store(p, 8, byte, false);
+                        }
+                    }
+                    Pextrd => {
+                        let imm = (i.immediate8() & 3) as u32;
+                        let dword = match imm {
+                            0 => lo,
+                            1 => l.b.ins().ushr_imm(lo, 32),
+                            2 => hi,
+                            _ => l.b.ins().ushr_imm(hi, 32),
+                        };
+                        let dword = l.b.ins().band_imm(dword, 0xffffffff);
+                        if i.op0_kind() == OpKind::Register {
+                            l.put_reg(i.op0_register(), dword, i)?;
+                        } else {
+                            let p = l.address(i)?;
+                            l.store(p, 32, dword, false);
+                        }
+                    }
+                    Pextrq => {
+                        let imm = (i.immediate8() & 1) as u32;
+                        let qword = if imm == 0 { lo } else { hi };
+                        if i.op0_kind() == OpKind::Register {
+                            l.put_reg(i.op0_register(), qword, i)?;
+                        } else {
+                            let p = l.address(i)?;
+                            l.store(p, 64, qword, false);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Ptest => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, dst_hi) = l.get_xmm(dst);
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                let and_lo = l.b.ins().band(dst_lo, src_lo);
+                let and_hi = l.b.ins().band(dst_hi, src_hi);
+                let and_any = l.b.ins().bor(and_lo, and_hi);
+                let zf = l.b.ins().icmp_imm(IntCC::Equal, and_any, 0);
+
+                let not_dst_lo = l.b.ins().bnot(dst_lo);
+                let not_dst_hi = l.b.ins().bnot(dst_hi);
+                let not_and_lo = l.b.ins().band(not_dst_lo, src_lo);
+                let not_and_hi = l.b.ins().band(not_dst_hi, src_hi);
+                let not_and_any = l.b.ins().bor(not_and_lo, not_and_hi);
+                let cf = l.b.ins().icmp_imm(IntCC::Equal, not_and_any, 0);
+
+                let c_40 = l.c(0x40);
+                let c_01 = l.c(0x01);
+                let c_0 = l.c(0);
+                let zf_val = l.b.ins().select(zf, c_40, c_0);
+                let cf_val = l.b.ins().select(cf, c_01, c_0);
+                let flags = l.b.ins().bor(zf_val, cf_val);
+                l.set(17, flags);
+            }
+            Shrd => {
+                let w = l.width(i, 0)?;
+                let dst = l.read(i, 0)?;
+                let src = l.read(i, 1)?;
+                let count = l.read(i, 2)?;
+                let mask = (w - 1) as i64;
+                let count_masked = l.b.ins().band_imm(count, mask);
+                let is_zero = l.b.ins().icmp_imm(IntCC::Equal, count_masked, 0);
+
+                let shifted_dst = l.b.ins().ushr(dst, count_masked);
+                let shift_src = l.b.ins().irsub_imm(count_masked, w as i64);
+                let safe_shift = l.b.ins().band_imm(shift_src, mask);
+                let shifted_src = l.b.ins().ishl(src, safe_shift);
+                let res = l.b.ins().bor(shifted_dst, shifted_src);
+                let res = l.mask(res, w);
+                let final_res = l.b.ins().select(is_zero, dst, res);
+
+                let cf_shift = l.b.ins().iadd_imm(count_masked, -1);
+                let safe_cf_shift = l.b.ins().band_imm(cf_shift, mask);
+                let cf_bit = l.b.ins().ushr(dst, safe_cf_shift);
+                let cf = l.b.ins().band_imm(cf_bit, 1);
+                let status = l.status(res, w);
+                let new_flags = l.b.ins().bor(status, cf);
+                let old_flags = l.var(17);
+                let final_flags = l.b.ins().select(is_zero, old_flags, new_flags);
+                l.set(17, final_flags);
+
+                l.write(i, 0, final_res)?;
             }
             _ => return Err(fail(i, "instruction unsupported by process lowerer")),
         }
@@ -860,7 +2127,7 @@ pub fn lower_block(
         let v = l.var(var_idx as usize);
         l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
     }
-    for i in 16..18 {
+    for i in 16..19 {
         let v = l.var(i);
         l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
     }
@@ -896,7 +2163,7 @@ pub fn lower_block(
             let v = l.var(var_idx as usize);
             l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
         }
-        for i in 16..18 {
+        for i in 16..19 {
             let v = l.var(i);
             l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
         }

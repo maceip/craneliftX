@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 pub(super) struct Runtime {
     pub memory: GuestMemory,
-    pub state: [u64; 18],
+    pub state: [u64; 19],
     pub kernel: Kernel,
     pub heap: Heap,
     pub pac: Pac,
@@ -56,21 +56,58 @@ impl Runtime {
             "initialize",
             json!({}),
             |_| {
-                let mut state = [0u64; 18];
-                state[7] = STACK_TOP - 48;
+                let mut rng = Csprng::new().map_err(memory::error)?;
+                let mut secret = [0u8; 16];
+                rng.fill(&mut secret);
+                let mut rand_bytes = [0u8; 16];
+                rng.fill(&mut rand_bytes);
+
+                let at_random_addr = STACK_TOP - 64;
+                let argv0_addr = STACK_TOP - 32;
+
+                let mut memory = memory;
+                memory.write(argv0_addr, b"guest\0")?;
+                memory.write(at_random_addr, &rand_bytes)?;
+
+                let stack_words = [
+                    1u64,               // argc
+                    argv0_addr,         // argv[0]
+                    0u64,               // argv[1] (NULL)
+                    0u64,               // envp[0] (NULL)
+                    // auxv
+                    3, memory.phdr,     // AT_PHDR
+                    4, memory.phent,    // AT_PHENT
+                    5, memory.phnum,    // AT_PHNUM
+                    6, 4096,            // AT_PAGESZ
+                    7, 0,               // AT_BASE
+                    8, 0,               // AT_FLAGS
+                    9, entry,           // AT_ENTRY
+                    11, 1000,           // AT_UID
+                    12, 1000,           // AT_EUID
+                    13, 1000,           // AT_GID
+                    14, 1000,           // AT_EGID
+                    17, 100,            // AT_CLKTCK
+                    23, 0,              // AT_SECURE
+                    25, at_random_addr, // AT_RANDOM
+                    0, 0,               // AT_NULL
+                ];
+                let sp = (STACK_TOP - 128 - (stack_words.len() * 8) as u64) & !15;
+                for (i, word) in stack_words.iter().enumerate() {
+                    memory.write(sp + (i * 8) as u64, &word.to_le_bytes())?;
+                }
+
+                let mut state = [0u64; 19];
+                state[7] = sp;
                 state[16] = entry;
                 state[17] = 2;
+                state[18] = 0;
                 let deadline = Instant::now() + Duration::from_secs(options.max_seconds);
-                let mut memory = memory;
                 // The heap is an ordinary writable guest mapping. Its metadata
                 // is not: Heap keeps every free list, size and tag in Rust.
                 memory.map(HEAP_BASE, HEAP_SIZE, true, false)?;
                 // Optional LAM kernel capability: enabled by default when the
                 // CPU and kernel allow it; software tags otherwise.
                 let lam = lam::enable(options.hardening.lam);
-                let mut rng = Csprng::new().map_err(memory::error)?;
-                let mut secret = [0u8; 16];
-                rng.fill(&mut secret);
                 // Signing binds to the address a pointer is stored at, so the
                 // PAC map is seeded from the image's own writable data.
                 let code: Vec<std::ops::Range<u64>> = memory
@@ -327,13 +364,12 @@ impl Runtime {
         ledger: &mut RunLedger,
     ) -> Result<()> {
         let rip = self.state[16];
-        let size = self.state[5];
-        let second = self.state[4];
-        let pointer = self.state[5];
+        let arg0 = self.state[5]; // rdi
+        let arg1 = self.state[4]; // rsi
         let result: u64 = match function {
-            AllocFn::Malloc => self.heap.allocate(size)?,
+            AllocFn::Malloc => self.heap.allocate(arg0)?,
             AllocFn::Calloc => {
-                let total = size.saturating_mul(second);
+                let total = arg0.saturating_mul(arg1);
                 let address = self.heap.allocate(total)?;
                 let bytes = self.heap.scheme().strip(address);
                 if total != 0 {
@@ -344,6 +380,8 @@ impl Runtime {
                 address
             }
             AllocFn::Realloc => {
+                let pointer = arg0;
+                let size = arg1;
                 let old = self.heap.scheme().strip(pointer);
                 let address = self.heap.allocate(size)?;
                 let copy = self
@@ -359,6 +397,7 @@ impl Runtime {
                 address
             }
             AllocFn::Free => {
+                let pointer = arg0;
                 if pointer != 0 {
                     self.heap.release(pointer, rip)?;
                 }
@@ -378,7 +417,7 @@ impl Runtime {
         ledger.event(
             "allocator_call",
             json!({"rip":format!("0x{rip:x}"),"function":function.name(),
-            "size":size,"result":format!("0x{result:x}"),"counters":report}),
+            "size":arg0,"result":format!("0x{result:x}"),"counters":report}),
         )?;
         Ok(())
     }

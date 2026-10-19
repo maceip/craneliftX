@@ -82,7 +82,7 @@ impl Kernel {
     }
     pub fn call(
         &mut self,
-        state: &mut [u64; 18],
+        state: &mut [u64; 19],
         memory: &mut GuestMemory,
         heap: &mut Heap,
     ) -> Result<Outcome, EngineError> {
@@ -145,9 +145,10 @@ impl Kernel {
                 }
             }
             41 => {
-                // socket
+                // socket: domain, type, protocol. Accept SOCK_STREAM with CLOEXEC/NONBLOCK flags.
                 detail["name"] = json!("socket");
-                if a != 2 || b != 1 || c != 0 {
+                let sock_type = b & 0xf;
+                if a != 2 || sock_type != 1 || (c != 0 && c != 6) {
                     -97
                 } else {
                     self.insert(Descriptor::Socket)? as i64
@@ -161,15 +162,17 @@ impl Kernel {
                 } else if c != 16 {
                     -22
                 } else {
-                    let raw = memory.read(b, 16)?;
-                    let ip = Ipv4Addr::new(raw[4], raw[5], raw[6], raw[7]);
+                    let raw = memory.read(scheme.strip(b), 16)?;
+                    let mut ip = Ipv4Addr::new(raw[4], raw[5], raw[6], raw[7]);
                     if u16::from_le_bytes([raw[0], raw[1]]) != 2 {
                         -97
-                    } else if !ip.is_loopback() {
+                    } else if !ip.is_loopback() && !ip.is_unspecified() {
                         -13
-                    }
-                    // First runtime profile: loopback TCP only.
-                    else {
+                    } else {
+                        // First runtime profile: loopback TCP only. Map 0.0.0.0 to 127.0.0.1.
+                        if ip.is_unspecified() {
+                            ip = Ipv4Addr::new(127, 0, 0, 1);
+                        }
                         let address = SocketAddrV4::new(ip, u16::from_be_bytes([raw[2], raw[3]]));
                         match TcpListener::bind(address) {
                             Ok(listener) => {
@@ -202,8 +205,10 @@ impl Kernel {
                 detail["name"] = json!("getsockname");
                 match self.descriptors.get(&a) {
                     Some(Descriptor::Bound(l) | Descriptor::Listening(l)) => {
+                        let c_addr = scheme.strip(c);
+                        let b_addr = scheme.strip(b);
                         let size =
-                            u32::from_le_bytes(memory.read(c, 4)?.try_into().unwrap()) as usize;
+                            u32::from_le_bytes(memory.read(c_addr, 4)?.try_into().unwrap()) as usize;
                         let address = l.local_addr().map_err(error)?;
                         let std::net::SocketAddr::V4(address) = address else {
                             return Err(error("IPv6 unsupported"));
@@ -212,21 +217,18 @@ impl Kernel {
                         raw[..2].copy_from_slice(&2u16.to_le_bytes());
                         raw[2..4].copy_from_slice(&address.port().to_be_bytes());
                         raw[4..8].copy_from_slice(&address.ip().octets());
-                        memory.writable(b, size.min(16))?;
-                        memory.writable(c, 4)?;
-                        memory.write(b, &raw[..size.min(16)])?;
-                        memory.write(c, &16u32.to_le_bytes())?;
+                        memory.writable(b_addr, size.min(16))?;
+                        memory.writable(c_addr, 4)?;
+                        memory.write(b_addr, &raw[..size.min(16)])?;
+                        memory.write(c_addr, &16u32.to_le_bytes())?;
                         detail["address"] = json!(address.to_string());
                         0
                     }
                     _ => -9,
                 }
             }
-            43 => {
-                detail["name"] = json!("accept");
-                if b != 0 || c != 0 {
-                    return Err(error("accept address output not yet supported; use NULL"));
-                }
+            43 | 288 => {
+                detail["name"] = json!(if n == 43 { "accept" } else { "accept4" });
                 if let Some(Descriptor::Listening(l)) = self.descriptors.get(&a) {
                     let accepted = loop {
                         if Instant::now() >= self.deadline {
@@ -247,6 +249,22 @@ impl Kernel {
                             detail["peer"] = json!(peer.to_string());
                             detail["local"] =
                                 json!(stream.local_addr().map_err(error)?.to_string());
+                            if b != 0 && c != 0 {
+                                let c_addr = scheme.strip(c);
+                                let b_addr = scheme.strip(b);
+                                if let Ok(c_bytes) = memory.read(c_addr, 4) {
+                                    let size = u32::from_le_bytes(c_bytes.try_into().unwrap()) as usize;
+                                    if let std::net::SocketAddr::V4(peer_v4) = peer {
+                                        let mut raw = [0u8; 16];
+                                        raw[..2].copy_from_slice(&2u16.to_le_bytes());
+                                        raw[2..4].copy_from_slice(&peer_v4.port().to_be_bytes());
+                                        raw[4..8].copy_from_slice(&peer_v4.ip().octets());
+                                        let copy_len = size.min(16);
+                                        let _ = memory.write(b_addr, &raw[..copy_len]);
+                                        let _ = memory.write(c_addr, &(16u32.min(size as u32)).to_le_bytes());
+                                    }
+                                }
+                            }
                             self.accepted += 1;
                             detail["connection_id"] = json!(self.accepted);
                             self.insert(Descriptor::Stream(stream))? as i64
@@ -257,16 +275,24 @@ impl Kernel {
                     -9
                 }
             }
-            0 | 1 => {
-                detail["name"] = json!(if n == 0 { "read" } else { "write" });
+            0 | 1 | 44 | 45 => {
+                let is_read = n == 0 || n == 45;
+                detail["name"] = json!(match n {
+                    0 => "read",
+                    1 => "write",
+                    44 => "sendto",
+                    45 => "recvfrom",
+                    _ => unreachable!(),
+                });
                 detail["fd"] = json!(a);
                 if c > 1024 * 1024 {
                     return Err(error("syscall transfer exceeds 1 MiB limit"));
                 }
+                let buf_addr = scheme.strip(b);
                 if c == 0 {
                     0
-                } else if n == 0 {
-                    memory.writable(b, c as usize)?;
+                } else if is_read {
+                    memory.writable(buf_addr, c as usize)?;
                     if let Some(Descriptor::Stream(stream)) = self.descriptors.get_mut(&a) {
                         stream
                             .set_read_timeout(Some(
@@ -278,7 +304,7 @@ impl Kernel {
                         let mut buffer = vec![0u8; c as usize];
                         match stream.read(&mut buffer) {
                             Ok(len) => {
-                                memory.write(b, &buffer[..len])?;
+                                memory.write(buf_addr, &buffer[..len])?;
                                 self.read_bytes += len as u64;
                                 len as i64
                             }
@@ -288,7 +314,7 @@ impl Kernel {
                         -9
                     }
                 } else {
-                    let bytes = memory.read(b, c as usize)?;
+                    let bytes = memory.read(buf_addr, c as usize)?;
                     if a == 1 {
                         io::stdout().write_all(bytes).map_err(error)?;
                         io::stdout().flush().map_err(error)?;
@@ -316,6 +342,21 @@ impl Kernel {
                     }
                 }
             }
+            72 => {
+                detail["name"] = json!("fcntl");
+                // a = fd, b = cmd, c = arg
+                if !self.descriptors.contains_key(&a) && a != 0 && a != 1 && a != 2 {
+                    -9
+                } else {
+                    match b {
+                        1 => 0, // F_GETFD
+                        2 => 0, // F_SETFD
+                        3 => 2, // F_GETFL (O_RDWR)
+                        4 => 0, // F_SETFL
+                        _ => 0,
+                    }
+                }
+            }
             3 => {
                 detail["name"] = json!("close");
                 if self.descriptors.remove(&a).is_some() {
@@ -331,18 +372,13 @@ impl Kernel {
                 let len = b;
                 let prot = c as i32;
                 let flags = d as i32;
-                let fd = e;
+                let _fd = e;
                 let _offset = f;
                 if len == 0 || len > 64 * 1024 * 1024 {
                     -22
-                } else if fd != u64::MAX && fd > 1024 {
-                    -9
-                } else if fd != u64::MAX {
+                } else if flags & 0x20 == 0 {
                     // File-backed mmap not yet supported.
                     -38
-                } else if flags & 0x20 == 0 {
-                    // MAP_ANONYMOUS required.
-                    -22
                 } else {
                     let aligned_len = ((len + 4095) / 4096) * 4096;
                     let fixed = flags & 0x10 != 0;
@@ -466,6 +502,144 @@ impl Kernel {
                     Some(_) => -9,
                     None => -9,
                 }
+            }
+            14 => {
+                detail["name"] = json!("rt_sigprocmask");
+                0
+            }
+            16 => {
+                detail["name"] = json!("ioctl");
+                -25 // ENOTTY
+            }
+            20 => {
+                detail["name"] = json!("writev");
+                detail["fd"] = json!(a);
+                let fd = a;
+                let iov_ptr = b;
+                let iovcnt = c as usize;
+                if iovcnt > 1024 {
+                    -22
+                } else {
+                    let mut total_written: i64 = 0;
+                    let mut err = None;
+                    for i in 0..iovcnt {
+                        let entry_addr = iov_ptr + (i as u64) * 16;
+                        let raw_iov = memory.read(entry_addr, 16)?;
+                        let base = u64::from_le_bytes(raw_iov[..8].try_into().unwrap());
+                        let len = u64::from_le_bytes(raw_iov[8..16].try_into().unwrap()) as usize;
+                        if len == 0 {
+                            continue;
+                        }
+                        let bytes = memory.read(scheme.strip(base), len)?;
+                        if fd == 1 {
+                            io::stdout().write_all(bytes).map_err(error)?;
+                            io::stdout().flush().map_err(error)?;
+                        } else if fd == 2 {
+                            io::stderr().write_all(bytes).map_err(error)?;
+                            io::stderr().flush().map_err(error)?;
+                        } else if let Some(Descriptor::Stream(stream)) = self.descriptors.get_mut(&fd) {
+                            stream.write_all(bytes).map_err(error)?;
+                        } else {
+                            err = Some(-9i64);
+                            break;
+                        }
+                        total_written += len as i64;
+                    }
+                    err.unwrap_or(total_written)
+                }
+            }
+            7 => {
+                detail["name"] = json!("poll");
+                let mut ready = 0i64;
+                for idx in 0..b {
+                    let ptr = a + idx * 8;
+                    let Ok(fd_bytes) = memory.read(ptr, 4) else { break; };
+                    let fd = i32::from_le_bytes(fd_bytes.try_into().unwrap());
+                    let Ok(ev_bytes) = memory.read(ptr + 4, 2) else { break; };
+                    let events = i16::from_le_bytes(ev_bytes.try_into().unwrap());
+                    let mut revents = 0i16;
+                    if fd == 1 || fd == 2 {
+                        revents = events & 4; // POLLOUT = 4
+                    } else if fd == 0 {
+                        revents = 0;
+                    } else if self.descriptors.contains_key(&(fd as u64)) {
+                        revents = events & 4;
+                    }
+                    let _ = memory.write(ptr + 6, &revents.to_le_bytes());
+                    if revents != 0 {
+                        ready += 1;
+                    }
+                }
+                ready
+            }
+            13 => {
+                detail["name"] = json!("rt_sigaction");
+                0
+            }
+            131 => {
+                detail["name"] = json!("sigaltstack");
+                if b != 0 {
+                    let mut old = [0u8; 24];
+                    old[8..12].copy_from_slice(&2i32.to_le_bytes()); // SS_DISABLE = 2
+                    let _ = memory.write(b, &old);
+                }
+                0
+            }
+            200 | 234 => {
+                detail["name"] = json!("tkill");
+                let sig = b as i32;
+                if sig != 0 {
+                    exit = Some(128 + sig);
+                }
+                0
+            }
+            158 => {
+                detail["name"] = json!("arch_prctl");
+                match a {
+                    0x1002 => {
+                        state[18] = raw_b;
+                        0
+                    }
+                    0x1003 => {
+                        memory.write(b, &state[18].to_le_bytes())?;
+                        0
+                    }
+                    _ => -22,
+                }
+            }
+            218 => {
+                detail["name"] = json!("set_tid_address");
+                1000
+            }
+            202 => {
+                detail["name"] = json!("futex");
+                let op = (b as i32) & !128;
+                if op == 0 {
+                    // FUTEX_WAIT
+                    if let Ok(cur_bytes) = memory.read(a, 4) {
+                        let cur_val = u32::from_le_bytes(cur_bytes.try_into().unwrap());
+                        if cur_val != c as u32 {
+                            -11 // -EAGAIN
+                        } else {
+                            0
+                        }
+                    } else {
+                        -14 // -EFAULT
+                    }
+                } else {
+                    // FUTEX_WAKE: 0 waiters woken in single-threaded mode
+                    0
+                }
+            }
+            302 => {
+                detail["name"] = json!("prlimit64");
+                if d != 0 {
+                    let mut rlim = [0u8; 16];
+                    rlim[..8].copy_from_slice(&(8 * 1024 * 1024u64).to_le_bytes());
+                    rlim[8..16].copy_from_slice(&(8 * 1024 * 1024u64).to_le_bytes());
+                    let _ = memory.write(d, &rlim);
+                }
+                0
             }
             60 | 231 => {
                 detail["name"] = json!("exit");

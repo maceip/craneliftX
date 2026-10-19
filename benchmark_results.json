@@ -1,44 +1,99 @@
 [
   {
     "config": "Native (direct)",
-    "total_seconds": 0.2664762750500813,
-    "rps": 187.63396475203297,
+    "total_seconds": 0.16982843808364123,
+    "rps": 176.6488600997724,
     "latency_ms": {
-      "mean": 5.328313284553587,
-      "p50": 5.243509483989328,
-      "p99": 6.286900024861097,
-      "max": 6.538055022247136
+      "mean": 5.659608985297382,
+      "p50": 5.586171522736549,
+      "p99": 6.222164025530219,
+      "max": 6.401470978744328
     },
     "hardening": "none",
-    "requests": 50
+    "requests": 30
   },
   {
-    "config": "ISR + hardening (LAM off)",
-    "total_seconds": 0.483814136008732,
-    "rps": 103.34547149134474,
+    "config": "ISR Baseline (no mitigations)",
+    "total_seconds": 0.4226074090693146,
+    "rps": 70.98787043527555,
     "latency_ms": {
-      "mean": 9.675038650166243,
-      "p50": 9.666143509093672,
-      "p99": 10.85840503219515,
-      "max": 12.096344958990812
+      "mean": 14.085632395775368,
+      "p50": 14.021809038240463,
+      "p99": 16.11019903793931,
+      "max": 16.633693012408912
+    },
+    "hardening": "--no-tags --no-pac --no-cfi --no-random-placement --no-lam",
+    "backend": "x86_64",
+    "requests": 30
+  },
+  {
+    "config": "ISR + PAC only",
+    "total_seconds": 0.43620947608724236,
+    "rps": 68.77429685640293,
+    "latency_ms": {
+      "mean": 14.538711829421421,
+      "p50": 14.61003243457526,
+      "p99": 16.081367037259042,
+      "max": 16.50688098743558
+    },
+    "hardening": "--no-tags --no-cfi --no-random-placement --no-lam",
+    "backend": "x86_64",
+    "requests": 30
+  },
+  {
+    "config": "ISR + CFI only",
+    "total_seconds": 0.8768202339997515,
+    "rps": 34.2145388948774,
+    "latency_ms": {
+      "mean": 29.22524065943435,
+      "p50": 25.502234988380224,
+      "p99": 54.98486803844571,
+      "max": 61.645137961022556
+    },
+    "hardening": "--no-tags --no-pac --no-random-placement --no-lam",
+    "backend": "x86_64",
+    "requests": 30
+  },
+  {
+    "config": "ISR + Shadow Tags only",
+    "total_seconds": 0.43059191096108407,
+    "rps": 69.6715364044805,
+    "latency_ms": {
+      "mean": 14.351294628189256,
+      "p50": 13.842648942954838,
+      "p99": 17.49278197530657,
+      "max": 20.9103919332847
+    },
+    "hardening": "--no-pac --no-cfi --no-random-placement --no-lam",
+    "backend": "x86_64",
+    "requests": 30
+  },
+  {
+    "config": "ISR + Full Hardening (software mask)",
+    "total_seconds": 0.4179144339868799,
+    "rps": 71.78502956646342,
+    "latency_ms": {
+      "mean": 13.929192504535118,
+      "p50": 13.804955990053713,
+      "p99": 14.918489032424986,
+      "max": 15.392360044643283
     },
     "hardening": "--no-lam",
     "backend": "x86_64",
-    "requests": 50
+    "requests": 30
   },
   {
-    "config": "ISR + hardening + LAM",
-    "total_seconds": 0.4763966220198199,
-    "rps": 104.95456451393521,
+    "config": "ISR + Full Hardening + LAM requested",
+    "total_seconds": 0.44474714901298285,
+    "rps": 67.45405803404994,
     "latency_ms": {
-      "mean": 9.526375306304544,
-      "p50": 9.461670008022338,
-      "p99": 11.068497085943818,
-      "max": 12.014799984171987
+      "mean": 14.823313426071158,
+      "p50": 14.517093019094318,
+      "p99": 17.42633990943432,
+      "max": 17.823711968958378
     },
     "hardening": "default",
     "backend": "x86_64",
-    "requests": 50,
-    "optional": "Intel LAM_U57 requested via arch_prctl/prctl"
+    "requests": 30
   }
 ]

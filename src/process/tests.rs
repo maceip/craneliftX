@@ -18,14 +18,14 @@ use std::{
 
 fn execute(
     code: &[u8],
-    state: &mut [u64; 18],
+    state: &mut [u64; 19],
     memory: &mut GuestMemory,
 ) -> std::result::Result<u64, EngineError> {
     execute_hardened(code, state, memory, false)
 }
 fn execute_hardened(
     code: &[u8],
-    state: &mut [u64; 18],
+    state: &mut [u64; 19],
     memory: &mut GuestMemory,
     tags: bool,
 ) -> std::result::Result<u64, EngineError> {
@@ -85,7 +85,7 @@ fn arithmetic_flags_match_integer_reference_at_all_operand_widths() {
                 0xa5a5a5a5a5a5a5a5 & mask,
             ] {
                 for b in [0, 1, sign - 1, sign, mask] {
-                    let mut state = [0u64; 18];
+                    let mut state = [0u64; 19];
                     state[0] = a;
                     state[2] = b;
                     state[17] = 0x202;
@@ -149,7 +149,7 @@ fn calls_stack_loop_branch_and_indirect_return_execute_in_rv64() {
     memory
         .write(STACK_TOP - 16, &0x40000u64.to_le_bytes())
         .unwrap();
-    let mut state = [0u64; 18];
+    let mut state = [0u64; 19];
     state[7] = STACK_TOP - 16;
     state[16] = 0x20000;
     state[17] = 2;
@@ -186,7 +186,7 @@ fn guest_access_cannot_escape_to_private_context_stack_or_code() {
             u64::MAX,
             ADDRESS_LIMIT,
         ] {
-            let mut state = [0u64; 18];
+            let mut state = [0u64; 19];
             state[5] = address;
             assert!(
                 execute(&code, &mut state, &mut GuestMemory::default()).is_err(),
@@ -214,7 +214,7 @@ fn signed_multiply_flags_and_partial_registers_are_preserved() {
         (i64::MAX, 2),
         (i64::MIN, -1),
     ] {
-        let mut state = [0u64; 18];
+        let mut state = [0u64; 19];
         state[0] = a as u64;
         state[2] = b as u64;
         state[17] = 0x202;
@@ -225,7 +225,7 @@ fn signed_multiply_flags_and_partial_registers_are_preserved() {
         assert_eq!(state[17] & 0x801, if overflow { 0x801 } else { 0 });
     }
     let code = compile(&[0x88, 0xcc, 0x66, 0xb8, 0x12, 0x34], 0x20000); // mov ah,cl; mov ax,3412h
-    let mut state = [0u64; 18];
+    let mut state = [0u64; 19];
     state[0] = u64::MAX;
     state[2] = 0x77;
     execute(&code, &mut state, &mut GuestMemory::default()).unwrap();
@@ -260,7 +260,7 @@ fn every_integer_condition_uses_preserved_flags() {
                 14 => z || s != o,
                 _ => !z && s == o,
             };
-            let mut state = [0u64; 18];
+            let mut state = [0u64; 19];
             state[17] = 2
                 | u64::from(c)
                 | (u64::from(p) << 2)
@@ -281,7 +281,7 @@ fn rotates_inc_dec_and_unsupported_stack_widths() {
         for count in [0, 1, 7, 8, 9, 31, 32] {
             let code = compile(&[0xc0, if left { 0xc0 } else { 0xc8 }, count], 0x20000);
             for value in [0u8, 1, 0x7f, 0x80, 0xff] {
-                let mut state = [0u64; 18];
+                let mut state = [0u64; 19];
                 state[0] = 0xaabbcc00 | u64::from(value);
                 state[17] = 0xa03;
                 execute(&code, &mut state, &mut GuestMemory::default()).unwrap();
@@ -319,7 +319,7 @@ fn rotates_inc_dec_and_unsupported_stack_widths() {
     for bytes in [[0x48, 0xff, 0xc0], [0x48, 0xff, 0xc8]] {
         let code = compile(&bytes, 0x20000);
         for carry in [0, 1] {
-            let mut state = [0u64; 18];
+            let mut state = [0u64; 19];
             state[0] = u64::MAX;
             state[17] = 2 | carry;
             execute(&code, &mut state, &mut GuestMemory::default()).unwrap();
@@ -342,9 +342,9 @@ fn kernel_keeps_guest_descriptors_private_and_rejects_unsupported_services() {
     let mut kernel = syscall::Kernel::new(Instant::now() + Duration::from_secs(1));
     let mut memory = GuestMemory::default();
     memory.map(0x30000, 4096, true, false).unwrap();
-    let mut state = [0u64; 18];
+    let mut state = [0u64; 19];
     let invoke = |kernel: &mut syscall::Kernel,
-                  state: &mut [u64; 18],
+                  state: &mut [u64; 19],
                   memory: &mut GuestMemory,
                   n,
                   a,
