@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Benchmark the HTTP guest: bare native vs ISR host-native vs ISR + optional LAM.
+"""Benchmark the heap-churn HTTP guest: bare native vs ISR host-native vs ISR + optional LAM.
 
-Configurations (same freestanding Linux x86-64 guest, same request mix):
+The guest is tests/fixtures/heap_bench_server.rs — every request performs real
+allocator work (scratch, header table, parse state, response buffer, a 32-slot
+live session ring, and periodic bulk alloc/free). Not a stack-only toy.
+
+Configurations (same guest, same request mix):
   1. Native          — guest ELF executed directly (Linux x86-64 host)
   2. ISR x86_64      — lifted + host-native JIT, default hardening
                        (shadow tags, PAC, mid-instruction CFI, randomized heap)
   3. ISR + LAM       — same as (2) with Intel LAM_U57 requested
-                       (hardware tag mask when the kernel allows it)
 
 Outputs benchmark_results.json and benchmark_results.svg.
 
@@ -20,6 +23,8 @@ import json
 import os
 import platform
 import shutil
+import signal
+import socket
 import statistics
 import subprocess
 import sys
@@ -34,9 +39,10 @@ PORT = 29876
 
 
 def build_guest() -> Path:
+    """Build the heap-churn HTTP guest (real malloc/free + live session ring)."""
     OUT.mkdir(parents=True, exist_ok=True)
-    src = FIXTURES / "bench_server.rs"
-    elf = OUT / "bench_server.elf"
+    src = FIXTURES / "heap_bench_server.rs"
+    elf = OUT / "heap_bench_server.elf"
     rustc = (
         subprocess.check_output(
             ["rustup", "which", "--toolchain", "stable", "rustc"], text=True
@@ -108,11 +114,43 @@ def stats(config: str, total: float, lat: list[float], extra: dict | None = None
 def drain_port(timeout: float = 8.0) -> None:
     """Wait until the guest port is free so the next config can bind."""
     deadline = time.monotonic() + timeout
+
+    def port_busy() -> bool:
+        # Linux: ss; macOS/BSD: lsof. Fall back to a bind probe.
+        if shutil.which("ss"):
+            r = subprocess.run(["ss", "-ltn"], capture_output=True, text=True)
+            return f":{PORT}" in r.stdout
+        if shutil.which("lsof"):
+            r = subprocess.run(
+                ["lsof", "-nP", f"-iTCP:{PORT}", "-sTCP:LISTEN"],
+                capture_output=True,
+                text=True,
+            )
+            return bool(r.stdout.strip())
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("127.0.0.1", PORT))
+            return False
+        except OSError:
+            return True
+
     while time.monotonic() < deadline:
-        r = subprocess.run(["ss", "-ltn"], capture_output=True, text=True)
-        if f":{PORT}" not in r.stdout:
+        if not port_busy():
             return
-        subprocess.run(["fuser", "-k", "-9", f"{PORT}/tcp"], capture_output=True)
+        if shutil.which("fuser"):
+            subprocess.run(["fuser", "-k", "-9", f"{PORT}/tcp"], capture_output=True)
+        elif shutil.which("lsof"):
+            r = subprocess.run(
+                ["lsof", "-nP", f"-iTCP:{PORT}", "-sTCP:LISTEN", "-t"],
+                capture_output=True,
+                text=True,
+            )
+            for pid in r.stdout.split():
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except OSError:
+                    pass
         time.sleep(0.25)
     time.sleep(0.5)
 
