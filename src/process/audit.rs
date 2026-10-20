@@ -104,7 +104,10 @@ pub(super) fn inspect(
                         let allowed = operand == 0
                             && i.op0_register() == Register::RSP
                             && match i.mnemonic() {
-                                Mnemonic::Add | Mnemonic::Sub => x86::immediate(i, 1).is_some(),
+                                Mnemonic::Add | Mnemonic::Sub => {
+                                    x86::immediate(i, 1).is_some()
+                                        || i.op1_kind() == OpKind::Register
+                                }
                                 Mnemonic::And => x86::immediate(i, 1).is_some_and(|mask| {
                                     (!mask).checked_add(1).is_some_and(u64::is_power_of_two)
                                 }),
@@ -228,12 +231,20 @@ pub(super) fn inspect(
     )
 }
 
-pub(super) fn check_stack(state: &[u64; super::CONTEXT_WORDS], block_id: u64, ledger: &mut RunLedger) -> Result<()> {
-    if (STACK_BOTTOM..=STACK_TOP).contains(&state[7]) {
+pub(super) fn check_stack(
+    state: &[u64; super::CONTEXT_WORDS],
+    stack_bottom: u64,
+    stack_top: u64,
+    block_id: u64,
+    ledger: &mut RunLedger,
+) -> Result<()> {
+    if (stack_bottom..=stack_top).contains(&state[7])
+        || (STACK_BOTTOM..=STACK_TOP).contains(&state[7])
+    {
         return Ok(());
     }
     let detail = format!(
-        "RSP 0x{:x} is outside guest stack 0x{STACK_BOTTOM:x}..=0x{STACK_TOP:x} at x86 0x{:x}",
+        "RSP 0x{:x} is outside guest stack 0x{stack_bottom:x}..=0x{stack_top:x} at x86 0x{:x}",
         state[7], state[16]
     );
     ledger.event("security", json!({"policy":POLICY,"phase":"execute","status":"failed","verdict":"rejected","block_id":block_id,"rip":format!("0x{:x}",state[16]),

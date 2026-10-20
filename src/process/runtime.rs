@@ -1,17 +1,20 @@
-//! Guest initialization, execution, allocator interception and syscall
-//! continuation. Translation cache operations never replace this state or its
-//! descriptor table.
+//! Guest initialization, per-thread execution (`Runtime`), shared process state
+//! (`SharedProcess`), allocator interception and syscall continuation.
 //!
-//! Hardening state lives here and nowhere the guest can reach: the shadow tag
-//! map, the pointer-authentication secret and the allocator metadata are Rust
-//! values owned by `Runtime`, and `ProcessBus` is the only path from a guest
-//! address to memory.
+//! Modeled on Blink's `System` / `Machine` split:
+//! - `SharedProcess` owns the process-wide address space (`GuestMemory`, `Heap`,
+//!   `Pac`), file-descriptor table (`Kernel`), translation cache (`BlockCache`,
+//!   `InstructionMap`), and durable ledger (`RunLedger`).
+//! - Each guest thread (the initial thread plus every thread created via
+//!   `clone(CLONE_THREAD)`) owns its own `Runtime` with independent registers,
+//!   provenance bitmap, stack bounds, TID, and `clear_child_tid`.
 use super::{
     audit,
-    cache::CachedBlock,
+    cache::{BlockCache, CachedBlock},
+    cfi::InstructionMap,
     csprng::Csprng,
     heap::{Heap, HEAP_BASE, HEAP_SIZE},
-    input::AllocFn,
+    input::{AllocFn, AllocIntercepts},
     jit::NativeBlockFn,
     lam::{self, LamStatus},
     lower::Backend,
@@ -19,7 +22,7 @@ use super::{
     mpk,
     observe::operation,
     pac::Pac,
-    syscall::{Kernel, Outcome},
+    syscall::{Kernel, Outcome, SyscallSpace, ThreadSpawn},
     Options, Report, Result,
 };
 use crate::{
@@ -28,22 +31,75 @@ use crate::{
     EngineError,
 };
 use serde_json::json;
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
 
-pub(super) struct Runtime {
+pub(super) struct AddressSpace {
     pub memory: GuestMemory,
-    pub state: [u64; super::CONTEXT_WORDS],
-    pub kernel: Kernel,
     pub heap: Heap,
     pub pac: Pac,
+}
+
+impl SyscallSpace for &Mutex<AddressSpace> {
+    fn with<R>(&mut self, f: impl FnOnce(&mut GuestMemory, &mut Heap) -> R) -> R {
+        let mut guard = self.lock().unwrap();
+        let space = &mut *guard;
+        f(&mut space.memory, &mut space.heap)
+    }
+}
+
+pub(super) struct CompileState {
+    pub cache: BlockCache,
+    pub cfi_map: InstructionMap,
+    pub report: Report,
+}
+
+pub(super) struct SharedProcess {
+    pub address_space: Mutex<AddressSpace>,
+    pub kernel: Kernel,
+    pub compile_state: Mutex<CompileState>,
+    pub ledger: Mutex<RunLedger>,
+    pub intercepts: AllocIntercepts,
+    pub options: Options,
     pub lam: LamStatus,
     pub domain: mpk::Domain,
+    pub next_tid: AtomicU64,
+    pub aborted: AtomicBool,
+    pub exit_code: Mutex<Option<i32>>,
+    pub thread_error: Mutex<Option<String>>,
+    pub child_handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
+}
+
+pub(super) struct Runtime {
+    pub process: Arc<SharedProcess>,
+    pub state: [u64; super::CONTEXT_WORDS],
+    pub state_prov: u64,
+    pub stack_bottom: u64,
+    pub stack_top: u64,
+    pub tid: u64,
+    pub is_child_thread: bool,
+    pub is_forked_child: bool,
+    pub clear_child_tid: u64,
+    pub robust_list_head: u64,
     stack: Vec<u8>,
     deadline: Instant,
     last_progress: Instant,
     /// Set by the native helpers when a tag, PAC or mapping check fails.
     pub native_fault: Option<(u64, EngineError)>,
+    /// Non-null only while a native block is actively executing on this thread
+    /// with `process.address_space` locked.
+    active_space: *mut AddressSpace,
 }
+
+// SAFETY: `active_space` is always null outside `execute_x86_64`, and all shared
+// state is behind `Arc<SharedProcess>`.
+unsafe impl Send for Runtime {}
+
 impl Runtime {
     pub fn initialize(
         memory: GuestMemory,
@@ -51,11 +107,27 @@ impl Runtime {
         options: &Options,
         ledger: &mut RunLedger,
     ) -> Result<Self> {
+        Self::initialize_with_intercepts(
+            memory,
+            entry,
+            AllocIntercepts::default(),
+            options,
+            ledger,
+        )
+    }
+
+    pub fn initialize_with_intercepts(
+        memory: GuestMemory,
+        entry: u64,
+        intercepts: AllocIntercepts,
+        options: &Options,
+        ledger: &mut RunLedger,
+    ) -> Result<Self> {
         operation(
             ledger,
             "initialize",
             json!({}),
-            |_| {
+            |ledger| {
                 let mut rng = Csprng::new().map_err(memory::error)?;
                 let mut secret = [0u8; 16];
                 rng.fill(&mut secret);
@@ -81,16 +153,26 @@ impl Runtime {
                     string_cursor += arg_bytes.len() as u64;
                 }
 
+                let mut env_addrs = Vec::new();
+                for (k, v) in &options.env {
+                    let env_str = format!("{k}={v}\0");
+                    memory.write(string_cursor, env_str.as_bytes())?;
+                    env_addrs.push(string_cursor);
+                    string_cursor += env_str.len() as u64;
+                }
+
                 let mut stack_words = Vec::new();
                 stack_words.push(argv_addrs.len() as u64); // argc
                 for addr in argv_addrs {
                     stack_words.push(addr); // argv[i]
                 }
                 stack_words.push(0); // argv NULL
+                for addr in env_addrs {
+                    stack_words.push(addr); // envp[i]
+                }
                 stack_words.push(0); // envp NULL
 
                 let auxv = [
-                    // auxv
                     3, memory.phdr,     // AT_PHDR
                     4, memory.phent,    // AT_PHENT
                     5, memory.phnum,    // AT_PHNUM
@@ -134,11 +216,24 @@ impl Runtime {
                     .filter(|r| r.executable)
                     .map(|r| r.start..r.start + r.data.len() as u64)
                     .collect();
+                let image_ranges: Vec<std::ops::Range<u64>> = memory
+                    .regions
+                    .iter()
+                    .filter(|r| r.writable && !r.executable && r.start < HEAP_BASE)
+                    .map(|r| r.start..r.start + r.data.len() as u64)
+                    .collect();
+                let readonly_ranges: Vec<std::ops::Range<u64>> = memory
+                    .regions
+                    .iter()
+                    .filter(|r| !r.writable)
+                    .map(|r| r.start..r.start + r.data.len() as u64)
+                    .collect();
                 let mut pac = Pac::new(secret, code, options.hardening.pac);
+                pac.set_image_ranges(image_ranges, readonly_ranges);
                 let data: Vec<(u64, Vec<u8>)> = memory
                     .regions
                     .iter()
-                    .filter(|r| r.writable && !r.executable)
+                    .filter(|r| r.writable && !r.executable && r.start < HEAP_BASE)
                     .map(|r| (r.start, r.data.clone()))
                     .collect();
                 if options.hardening.pac {
@@ -147,6 +242,16 @@ impl Runtime {
                         pac.seed_image(*base, bytes, &mut |at, word| writes.push((at, word)));
                         for (at, word) in writes {
                             memory.write(at, &word)?;
+                        }
+                    }
+                    // Sign any initial stack words (such as AT_ENTRY) that name code.
+                    for (i, &word) in stack_words.iter().enumerate() {
+                        let slot_addr = sp + (i * 8) as u64;
+                        if let Ok(signed) = pac.on_store(slot_addr, word, 8, true, entry) {
+                            if signed != word {
+                                pac.set_stack_provenance(slot_addr, 8, true);
+                                memory.write(slot_addr, &signed.to_le_bytes())?;
+                            }
                         }
                     }
                 }
@@ -163,36 +268,68 @@ impl Runtime {
                     .map(|r| ((r.start + r.data.len() as u64 + 4095) / 4096) * 4096)
                     .max()
                     .unwrap_or(0x100_0000);
-                Ok(Self {
-                    memory,
-                    state,
+                let host_pid = unsafe { libc::getpid() as u64 };
+                let shared = Arc::new(SharedProcess {
+                    address_space: Mutex::new(AddressSpace { memory, heap, pac }),
                     kernel: Kernel::new(deadline, initial_brk),
-                    heap,
-                    pac,
+                    compile_state: Mutex::new(CompileState {
+                        cache: BlockCache::with_backend(options.backend),
+                        cfi_map: InstructionMap::new(),
+                        report: Report::default(),
+                    }),
+                    ledger: Mutex::new(ledger.try_clone()?),
+                    intercepts,
+                    options: options.clone(),
                     lam,
                     domain: mpk::acquire(),
+                    next_tid: AtomicU64::new(host_pid.saturating_add(1000).max(2000)),
+                    aborted: AtomicBool::new(false),
+                    exit_code: Mutex::new(None),
+                    thread_error: Mutex::new(None),
+                    child_handles: Mutex::new(Vec::new()),
+                });
+                Ok(Self {
+                    process: shared,
+                    state,
+                    state_prov: 0,
+                    stack_bottom: STACK_BOTTOM,
+                    stack_top: STACK_TOP,
+                    tid: host_pid,
+                    is_child_thread: false,
+                    is_forked_child: false,
+                    clear_child_tid: 0,
+                    robust_list_head: 0,
                     stack: vec![0; 64 * 1024],
                     deadline,
                     last_progress: Instant::now(),
                     native_fault: None,
+                    active_space: std::ptr::null_mut(),
                 })
             },
             |runtime| {
+                let space = runtime.process.address_space.lock().unwrap();
                 json!({"entry_rip":format!("0x{:x}",runtime.state[16]),"guest_rsp":format!("0x{:x}",runtime.state[7]),
             "rv64_stack_bytes":runtime.stack.len(),"state_words":runtime.state.len(),"options":options,
             "heap_base":format!("0x{HEAP_BASE:x}"),"heap_bytes":HEAP_SIZE,
-            "tag_scheme":runtime.lam.scheme().label,"lam":runtime.lam.label(),"lam_detail":runtime.lam.detail(),
-            "mpk":runtime.domain.available(),"mpk_reason":runtime.domain.reason(),
-            "hardening":options.hardening,"pac_static_pointers":runtime.pac.stats().static_pointers})
+            "tag_scheme":runtime.process.lam.scheme().label,"lam":runtime.process.lam.label(),"lam_detail":runtime.process.lam.detail(),
+            "mpk":runtime.process.domain.available(),"mpk_reason":runtime.process.domain.reason(),
+            "hardening":options.hardening,"pac_static_pointers":space.pac.stats().static_pointers})
             },
         )
     }
+
+    pub fn with_memory<R>(&self, f: impl FnOnce(&GuestMemory) -> R) -> R {
+        let space = self.process.address_space.lock().unwrap();
+        f(&space.memory)
+    }
+
     pub fn check_budget(&self, report: &Report, options: &Options) -> Result<()> {
         if report.rv64_steps >= options.max_rv64_steps || Instant::now() >= self.deadline {
             return Err(memory::error("process execution budget exhausted").into());
         }
         Ok(())
     }
+
     pub fn execute(
         &mut self,
         block: &mut CachedBlock,
@@ -200,7 +337,19 @@ impl Runtime {
         options: &Options,
         ledger: &mut RunLedger,
     ) -> Result<()> {
-        audit::check_stack(&self.state, block.compiled.id, ledger)?;
+        {
+            let space = self.process.address_space.lock().unwrap();
+            let (sb, st) = space.memory.stack_bounds_for_sp(self.state[7]);
+            self.stack_bottom = sb;
+            self.stack_top = st;
+        }
+        audit::check_stack(
+            &self.state,
+            self.stack_bottom,
+            self.stack_top,
+            block.compiled.id,
+            ledger,
+        )?;
 
         match block.compiled.backend {
             Backend::Rv64 => self.execute_rv64(block, report, options, ledger),
@@ -215,34 +364,55 @@ impl Runtime {
         options: &Options,
         ledger: &mut RunLedger,
     ) -> Result<()> {
-        let mut cpu = RiscvCpu::default();
-        cpu.regs[1] = RETURN_ADDRESS;
-        cpu.regs[2] = RV_STACK_BASE + self.stack.len() as u64;
-        cpu.regs[10] = CONTEXT_BASE;
-        cpu.authenticate_calls = self.pac.enabled();
-        let mut bus = ProcessBus {
-            code: &block.compiled.code,
-            memory: &mut self.memory,
-            state: &mut self.state,
-            stack: &mut self.stack,
-            heap: &mut self.heap,
-            pac: &mut self.pac,
+        let steps = {
+            let mut space_guard = self.process.address_space.lock().unwrap();
+            let space = &mut *space_guard;
+            let (sb, st) = space.memory.stack_bounds_for_sp(self.state[7]);
+            self.stack_bottom = sb;
+            self.stack_top = st;
+            let mut cpu = RiscvCpu::default();
+            cpu.regs[1] = RETURN_ADDRESS;
+            cpu.regs[2] = RV_STACK_BASE + self.stack.len() as u64;
+            cpu.regs[10] = CONTEXT_BASE;
+            cpu.authenticate_calls = space.pac.enabled();
+            let mut bus = ProcessBus {
+                code: &block.compiled.code,
+                memory: &mut space.memory,
+                state: &mut self.state,
+                state_prov: &mut self.state_prov,
+                stack: &mut self.stack,
+                heap: &mut space.heap,
+                pac: &mut space.pac,
+                stack_bottom: self.stack_bottom,
+                stack_top: self.stack_top,
+            };
+            // SAFETY: ProcessBus maps only owned slices and checked guest regions,
+            // and every access is tag-checked before it is issued.
+            unsafe {
+                cpu.run(
+                    &mut bus,
+                    (options.max_rv64_steps - report.rv64_steps).min(100_000) as usize,
+                )
+            }?
         };
-        // SAFETY: ProcessBus maps only owned slices and checked guest regions,
-        // and every access is tag-checked before it is issued.
-        let steps = unsafe {
-            cpu.run(
-                &mut bus,
-                (options.max_rv64_steps - report.rv64_steps).min(100_000) as usize,
-            )
-        }?;
         report.rv64_steps += steps;
         block.rv64_steps += steps;
-        audit::check_stack(&self.state, block.compiled.id, ledger)?;
+        {
+            let space = self.process.address_space.lock().unwrap();
+            let (sb, st) = space.memory.stack_bounds_for_sp(self.state[7]);
+            self.stack_bottom = sb;
+            self.stack_top = st;
+        }
+        audit::check_stack(
+            &self.state,
+            self.stack_bottom,
+            self.stack_top,
+            block.compiled.id,
+            ledger,
+        )?;
         report.block_executions += 1;
         report.x86_instructions_executed += block.compiled.source_instructions.len() as u64;
         block.executions += 1;
-        // Bounded, time-based progress for hot cached code. No per-instruction I/O.
         if self.last_progress.elapsed() >= Duration::from_millis(250) {
             self.update_counters(report);
             ledger.event("progress",json!({"status":"running","block_id":block.compiled.id,"rip":format!("0x{:x}",block.compiled.rip),
@@ -262,30 +432,49 @@ impl Runtime {
         let jit_page = block
             .jit_page
             .as_ref()
-            .ok_or_else(|| memory::error("x86_64 block has no JIT page"))?;
+            .ok_or_else(|| memory::error("x86_64 block has no JIT page"))?
+            .clone();
 
-        // Every native access goes through the helpers on this context, so the
-        // block is built around a NativeGuest rather than a bare register file.
-        let cookie = self as *mut Runtime;
-        let mut guest = super::native::NativeGuest::new(cookie);
-        guest.cookie = (&mut guest as *mut super::native::NativeGuest).cast();
-        guest.regs.copy_from_slice(&self.state);
-        self.native_fault = None;
+        let process_arc = self.process.clone();
+        let (steps, fault) = {
+            let mut space_guard = process_arc.address_space.lock().unwrap();
+            let (sb, st) = space_guard.memory.stack_bounds_for_sp(self.state[7]);
+            self.stack_bottom = sb;
+            self.stack_top = st;
+            self.active_space = &mut *space_guard as *mut AddressSpace;
 
-        // Cast the JIT page pointer to a native function and call it.
-        // SAFETY: the JIT page contains valid x86-64 machine code compiled
-        // from audited/lowered Cranelift IR, the page is marked RX, and the
-        // helpers are ordinary C-ABI functions that only touch Runtime.
-        let f: NativeBlockFn = unsafe { std::mem::transmute(jit_page.ptr()) };
-        let steps = unsafe { f(&mut guest, std::ptr::null()) };
+            let cookie = self as *mut Runtime;
+            let mut guest = super::native::NativeGuest::new(cookie);
+            guest.cookie = (&mut guest as *mut super::native::NativeGuest).cast();
+            guest.regs.copy_from_slice(&self.state);
+            guest.provenance = self.state_prov;
+            guest.stack_bottom = self.stack_bottom;
+            guest.stack_top = self.stack_top;
+            self.native_fault = None;
 
-        self.state.copy_from_slice(&guest.regs);
-        if let Some((kind, pc)) = guest.take_fault() {
+            // SAFETY: the JIT page contains valid x86-64 machine code compiled
+            // from audited/lowered Cranelift IR, the page is marked RX, and the
+            // helpers are ordinary C-ABI functions that only touch Runtime.
+            let f: NativeBlockFn = unsafe { std::mem::transmute(jit_page.ptr()) };
+            let steps = unsafe { f(&mut guest, std::ptr::null()) };
+
+            self.active_space = std::ptr::null_mut();
+            self.state.copy_from_slice(&guest.regs);
+            self.state_prov = guest.provenance;
+            let (sb2, st2) = space_guard.memory.stack_bounds_for_sp(self.state[7]);
+            self.stack_bottom = sb2;
+            self.stack_top = st2;
+            (steps, guest.take_fault())
+        };
+
+        if let Some((kind, pc)) = fault {
             let err = self
                 .native_fault
                 .take()
                 .map(|(_, e)| e)
-                .unwrap_or_else(|| memory::error(format!("native memory fault kind {kind} at 0x{pc:x}")));
+                .unwrap_or_else(|| {
+                    memory::error(format!("native memory fault kind {kind} at 0x{pc:x}"))
+                });
             return Err(err.into());
         }
         if let Some((_, err)) = self.native_fault.take() {
@@ -298,7 +487,13 @@ impl Runtime {
 
         report.rv64_steps += steps;
         block.rv64_steps += steps;
-        audit::check_stack(&self.state, block.compiled.id, ledger)?;
+        audit::check_stack(
+            &self.state,
+            self.stack_bottom,
+            self.stack_top,
+            block.compiled.id,
+            ledger,
+        )?;
         report.block_executions += 1;
         report.native_x86_instructions_executed += block.compiled.source_instructions.len() as u64;
         block.executions += 1;
@@ -313,29 +508,38 @@ impl Runtime {
 
     /// Checked load for native-compiled blocks. Mirrors the interpreter's
     /// load path: tag screen, then PAC verify on code pointers.
-    pub fn native_load(&mut self, guest_ptr: u64, size: u64, pc: u64) -> u64 {
+    pub fn native_load(&mut self, guest_ptr: u64, size: u64, pc: u64) -> (u64, bool) {
         let biased = guest_ptr.wrapping_add(super::memory::GUEST_BIAS);
+        assert!(
+            !self.active_space.is_null(),
+            "native_load outside active block"
+        );
+        // SAFETY: active_space points to the MutexGuard<AddressSpace> held by
+        // execute_x86_64 on this thread.
+        let space = unsafe { &mut *self.active_space };
         let mut bus = ProcessBus {
             code: &[],
-            memory: &mut self.memory,
+            memory: &mut space.memory,
             state: &mut self.state,
+            state_prov: &mut self.state_prov,
             stack: &mut self.stack,
-            heap: &mut self.heap,
-            pac: &mut self.pac,
+            heap: &mut space.heap,
+            pac: &mut space.pac,
+            stack_bottom: self.stack_bottom,
+            stack_top: self.stack_top,
         };
-        // SAFETY: ProcessBus maps only owned slices and checked guest regions.
         let loaded = unsafe { bus.load(biased, size as usize, pc) };
         match loaded {
             Ok(raw) => match bus.authenticate_load(biased, size as usize, raw, pc) {
-                Ok((value, _)) => value,
+                Ok((value, prov)) => (value, prov),
                 Err(err) => {
                     self.native_fault = Some((pc, err));
-                    0
+                    (0, false)
                 }
             },
             Err(err) => {
                 self.native_fault = Some((pc, err));
-                0
+                (0, false)
             }
         }
     }
@@ -351,13 +555,23 @@ impl Runtime {
         pc: u64,
     ) {
         let biased = guest_ptr.wrapping_add(super::memory::GUEST_BIAS);
+        assert!(
+            !self.active_space.is_null(),
+            "native_store outside active block"
+        );
+        // SAFETY: active_space points to the MutexGuard<AddressSpace> held by
+        // execute_x86_64 on this thread.
+        let space = unsafe { &mut *self.active_space };
         let mut bus = ProcessBus {
             code: &[],
-            memory: &mut self.memory,
+            memory: &mut space.memory,
             state: &mut self.state,
+            state_prov: &mut self.state_prov,
             stack: &mut self.stack,
-            heap: &mut self.heap,
-            pac: &mut self.pac,
+            heap: &mut space.heap,
+            pac: &mut space.pac,
+            stack_bottom: self.stack_bottom,
+            stack_top: self.stack_top,
         };
         let signed = match bus.authenticate_store(
             biased,
@@ -372,17 +586,13 @@ impl Runtime {
                 return;
             }
         };
-        // SAFETY: ProcessBus maps only owned slices and checked guest regions.
         if let Err(err) = unsafe { bus.store(biased, size as usize, signed, pc) } {
             self.native_fault = Some((pc, err));
         }
     }
 
-    /// Serve a call to the guest's own `malloc`/`calloc`/`realloc`/`free`.
-    ///
-    /// The guest binary is not modified and is not re-executed: the call is
-    /// intercepted at its entry address, the return address is popped exactly
-    /// as the guest's `call` left it, and the result is placed in rax.
+    /// Serve a call to the guest's own allocator (`malloc`/`calloc`/`realloc`/`free`/
+    /// `posix_memalign`/`aligned_alloc`/`memalign`).
     pub fn allocator_call(
         &mut self,
         function: AllocFn,
@@ -392,52 +602,155 @@ impl Runtime {
         let rip = self.state[16];
         let arg0 = self.state[5]; // rdi
         let arg1 = self.state[4]; // rsi
-        let result: u64 = match function {
-            AllocFn::Malloc => self.heap.allocate(arg0)?,
-            AllocFn::Calloc => {
-                let total = arg0.saturating_mul(arg1);
-                let address = self.heap.allocate(total)?;
-                let bytes = self.heap.scheme().strip(address);
-                if total != 0 {
-                    if let Ok(slice) = self.memory.read_mut(bytes, total as usize) {
-                        slice.fill(0);
+        let arg2 = self.state[3]; // rdx
+        let (result, returned_rip) = {
+            let mut space_guard = self.process.address_space.lock().unwrap();
+            let space = &mut *space_guard;
+            let scheme = space.heap.scheme();
+            // Pad libc allocator requests by one 64-byte SIMD line so glibc's
+            // 64-byte unrolled SSE2 string routines (__strlen_sse2, __strchr_sse2)
+            // do not fault on speculative in-page vector loads past a short string.
+            let pad_simd = |sz: u64| sz.max(1).saturating_add(48).div_ceil(64) * 64;
+            let res: u64 = match function {
+                AllocFn::Malloc => {
+                    let req = pad_simd(arg0);
+                    let address = space.heap.allocate(req)?;
+                    let bare = scheme.strip(address);
+                    let actual_size = space.heap.live_size(bare).unwrap_or(req);
+                    space.pac.clear_range(bare, actual_size);
+                    address
+                }
+                AllocFn::Calloc => {
+                    let total = arg0.saturating_mul(arg1);
+                    let req = pad_simd(total);
+                    let address = space.heap.allocate(req)?;
+                    let bytes = scheme.strip(address);
+                    let actual_size = space.heap.live_size(bytes).unwrap_or(req);
+                    space.pac.clear_range(bytes, actual_size);
+                    if req != 0 {
+                        if let Ok(slice) = space.memory.read_mut(bytes, req as usize) {
+                            slice.fill(0);
+                        }
+                    }
+                    address
+                }
+                AllocFn::Realloc => {
+                    let pointer = arg0;
+                    let size = arg1;
+                    if pointer == 0 {
+                        let req = pad_simd(size);
+                        let address = space.heap.allocate(req)?;
+                        let bare = scheme.strip(address);
+                        let actual_size = space.heap.live_size(bare).unwrap_or(req);
+                        space.pac.clear_range(bare, actual_size);
+                        address
+                    } else if size == 0 {
+                        let old = scheme.strip(pointer);
+                        let old_size = space.heap.live_size(old).unwrap_or(0);
+                        space.pac.clear_range(old, old_size);
+                        space.heap.release(pointer, rip)?;
+                        0
+                    } else {
+                        let old = scheme.strip(pointer);
+                        let old_size = space.heap.live_size(old).unwrap_or(0);
+                        let req = pad_simd(size);
+                        let address = space.heap.allocate(req)?;
+                        let new_bare = scheme.strip(address);
+                        let new_size = space.heap.live_size(new_bare).unwrap_or(req);
+                        space.pac.clear_range(new_bare, new_size);
+                        let copy_len = req.min(old_size) as usize;
+                        let copy = space
+                            .memory
+                            .read(old, copy_len)
+                            .map(|b| b.to_vec())
+                            .unwrap_or_default();
+                        space.memory.write(new_bare, &copy)?;
+                        // Re-sign any PAC-signed code pointers inside the reallocated block.
+                        if space.pac.enabled() {
+                            let mut off = 0usize;
+                            while off + 8 <= copy_len {
+                                let old_slot = old + off as u64;
+                                if space.pac.is_signed_slot(old_slot) {
+                                    let raw = u64::from_le_bytes(
+                                        copy[off..off + 8].try_into().unwrap(),
+                                    );
+                                    if let Ok(plain) = space.pac.on_load(old_slot, raw, 8, rip) {
+                                        if let Ok(resigned) = space.pac.on_store(
+                                            new_bare + off as u64,
+                                            plain,
+                                            8,
+                                            true,
+                                            rip,
+                                        ) {
+                                            let _ = space.memory.write(
+                                                new_bare + off as u64,
+                                                &resigned.to_le_bytes(),
+                                            );
+                                        }
+                                    }
+                                }
+                                off += 8;
+                            }
+                        }
+                        space.pac.clear_range(old, old_size);
+                        space.heap.release(pointer, rip)?;
+                        address
                     }
                 }
-                address
-            }
-            AllocFn::Realloc => {
-                let pointer = arg0;
-                let size = arg1;
-                let old = self.heap.scheme().strip(pointer);
-                let address = self.heap.allocate(size)?;
-                let copy = self
-                    .memory
-                    .read(old, size.min(self.live_size(old)) as usize)
-                    .map(|b| b.to_vec())
-                    .unwrap_or_default();
-                self.memory
-                    .write(self.heap.scheme().strip(address), &copy)?;
-                if pointer != 0 {
-                    self.heap.release(pointer, rip)?;
+                AllocFn::Free => {
+                    let pointer = arg0;
+                    if pointer != 0 {
+                        let old = scheme.strip(pointer);
+                        let old_size = space.heap.live_size(old).unwrap_or(0);
+                        space.pac.clear_range(old, old_size);
+                        space.heap.release(pointer, rip)?;
+                    }
+                    0
                 }
-                address
-            }
-            AllocFn::Free => {
-                let pointer = arg0;
-                if pointer != 0 {
-                    self.heap.release(pointer, rip)?;
+                AllocFn::PosixMemalign => {
+                    let memptr = scheme.strip(arg0);
+                    let alignment = arg1;
+                    let size = pad_simd(arg2);
+                    if alignment == 0 || !alignment.is_power_of_two() || alignment % 8 != 0 {
+                        22 // EINVAL
+                    } else {
+                        match space.heap.allocate_aligned(alignment.max(64), size) {
+                            Ok(ptr) => {
+                                let bare = scheme.strip(ptr);
+                                let actual_size = space.heap.live_size(bare).unwrap_or(size);
+                                space.pac.clear_range(bare, actual_size);
+                                space.memory.write(memptr, &ptr.to_le_bytes())?;
+                                0
+                            }
+                            Err(_) => 12, // ENOMEM
+                        }
+                    }
                 }
-                0
-            }
+                AllocFn::AlignedAlloc | AllocFn::Memalign => {
+                    let req = pad_simd(arg1);
+                    let ptr = space.heap.allocate_aligned(arg0.max(64), req)?;
+                    let bare = scheme.strip(ptr);
+                    let actual_size = space.heap.live_size(bare).unwrap_or(req);
+                    space.pac.clear_range(bare, actual_size);
+                    ptr
+                }
+            };
+            let rsp = self.state[7];
+            let mut returned = [0u8; 8];
+            returned.copy_from_slice(space.memory.read(rsp, 8)?);
+            let ret_addr = u64::from_le_bytes(returned);
+            let plain_ret = if space.pac.is_signed_slot(rsp) {
+                space.pac.on_load(rsp, ret_addr, 8, rip)?
+            } else {
+                ret_addr
+            };
+            space.pac.unmark_stack_slot(rsp);
+            (res, plain_ret)
         };
-        // Return exactly as the guest's `call` expects.
-        let mut rsp = self.state[7];
-        let mut returned = [0u8; 8];
-        returned.copy_from_slice(self.memory.read(rsp, 8)?);
-        rsp = rsp.wrapping_add(8);
-        self.state[7] = rsp;
+        self.state[7] = self.state[7].wrapping_add(8);
         self.state[0] = result;
-        self.state[16] = u64::from_le_bytes(returned);
+        self.state_prov &= !(1u64 << 0);
+        self.state[16] = returned_rip;
         report.heap_calls += 1;
         self.update_counters(report);
         ledger.event(
@@ -447,9 +760,7 @@ impl Runtime {
         )?;
         Ok(())
     }
-    fn live_size(&self, address: u64) -> u64 {
-        self.heap.live_size(address).unwrap_or(0)
-    }
+
     pub fn syscall(
         &mut self,
         block_rip: u64,
@@ -459,59 +770,253 @@ impl Runtime {
     ) -> Result<Outcome> {
         report.syscalls += 1;
         ledger.event("syscall_started",json!({"number":self.state[0],"block_rip":format!("0x{block_rip:x}"),"syscall_rip":format!("0x{syscall_rip:x}"),
-            "next_rip":format!("0x{:x}",self.state[16]),"syscall_seq":report.syscalls,"rv64_steps":report.rv64_steps,"block_executions":report.block_executions}))?;
+            "next_rip":format!("0x{:x}",self.state[16]),"syscall_seq":report.syscalls,"rv64_steps":report.rv64_steps,"block_executions":report.block_executions,"tid":self.tid}))?;
         let start = Instant::now();
-        let outcome = match self
-            .kernel
-            .call(&mut self.state, &mut self.memory, &mut self.heap)
-        {
+        let mut space_ref = &self.process.address_space;
+        let outcome = match self.process.kernel.call_shared(
+            &mut self.state,
+            self.tid,
+            self.is_child_thread,
+            &mut self.clear_child_tid,
+            &mut self.robust_list_head,
+            Some(&self.process.next_tid),
+            &mut space_ref,
+        ) {
             Ok(outcome) => outcome,
             Err(error) => {
-                ledger.event("syscall_failed",json!({"syscall_seq":report.syscalls,"number":self.state[0],"elapsed_ns":start.elapsed().as_nanos() as u64,"error":error.to_string()}))?;
+                ledger.event("syscall_failed",json!({"syscall_seq":report.syscalls,"number":self.state[0],"elapsed_ns":start.elapsed().as_nanos() as u64,"error":error.to_string(),"tid":self.tid}))?;
                 return Err(error.into());
             }
         };
+        self.state_prov &= !(1u64 << 0);
+        if outcome.forked_child {
+            self.is_forked_child = true;
+            self.tid = unsafe { libc::getpid() as u64 };
+            let child_ledger = ledger.fork_child()?;
+            *ledger = child_ledger.try_clone()?;
+            *self.process.ledger.lock().unwrap() = child_ledger;
+        }
+        if let Some(spawn) = outcome.spawn_thread.clone() {
+            self.spawn_child_thread(spawn, ledger)?;
+        }
+        if outcome.thread_exit {
+            self.finish_child_thread(ledger)?;
+        }
         self.update_counters(report);
         ledger.event("syscall_completed",json!({"syscall_seq":report.syscalls,"elapsed_ns":start.elapsed().as_nanos() as u64,
-            "detail":outcome.detail,"rv64_steps":report.rv64_steps,"block_executions":report.block_executions}))?;
+            "detail":outcome.detail,"rv64_steps":report.rv64_steps,"block_executions":report.block_executions,"tid":self.tid}))?;
         Ok(outcome)
     }
+
+    fn spawn_child_thread(&self, spawn: ThreadSpawn, ledger: &mut RunLedger) -> Result<()> {
+        const CLONE_SETTLS: u64 = 0x0008_0000;
+        const CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
+
+        let mut child_state = self.state;
+        child_state[0] = 0; // rax = 0 in child thread
+        child_state[7] = spawn.child_stack; // rsp = child_stack
+        child_state[2] = self.state[16]; // rcx = next_rip
+        child_state[11] = self.state[17]; // r11 = rflags
+        if (spawn.flags & CLONE_SETTLS) != 0 {
+            child_state[18] = spawn.tls;
+        }
+        let child_prov = self.state_prov & !((1u64 << 0) | (1u64 << 7));
+        let (stack_bottom, stack_top) = {
+            let space = self.process.address_space.lock().unwrap();
+            space.memory.stack_bounds_for_sp(spawn.child_stack)
+        };
+        let clear_child_tid = if (spawn.flags & CLONE_CHILD_CLEARTID) != 0 {
+            spawn.ctid
+        } else {
+            0
+        };
+        ledger.event(
+            "thread_started",
+            json!({
+                "tid": spawn.child_tid,
+                "parent_tid": self.tid,
+                "rip": format!("0x{:x}", child_state[16]),
+                "rsp": format!("0x{:x}", child_state[7]),
+                "fs_base": format!("0x{:x}", child_state[18]),
+                "stack_bottom": format!("0x{stack_bottom:x}"),
+                "stack_top": format!("0x{stack_top:x}"),
+            }),
+        )?;
+
+        let mut child_runtime = Runtime {
+            process: self.process.clone(),
+            state: child_state,
+            state_prov: child_prov,
+            stack_bottom,
+            stack_top,
+            tid: spawn.child_tid,
+            is_child_thread: true,
+            is_forked_child: self.is_forked_child,
+            clear_child_tid,
+            robust_list_head: 0,
+            stack: vec![0; 64 * 1024],
+            deadline: self.deadline,
+            last_progress: Instant::now(),
+            native_fault: None,
+            active_space: std::ptr::null_mut(),
+        };
+
+        let handle = std::thread::Builder::new()
+            .name(format!("isr-tid-{}", spawn.child_tid))
+            .spawn(move || {
+                if let Err(err) = child_runtime.run_child_loop() {
+                    let msg = err.to_string();
+                    let mut slot = child_runtime.process.thread_error.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(msg);
+                    }
+                    child_runtime.process.aborted.store(true, Ordering::SeqCst);
+                }
+            })
+            .map_err(memory::error)?;
+        self.process.child_handles.lock().unwrap().push(handle);
+        Ok(())
+    }
+
+    fn finish_child_thread(&mut self, ledger: &mut RunLedger) -> Result<()> {
+        if self.robust_list_head != 0 {
+            let head = self.robust_list_head;
+            let mut wakes = Vec::new();
+            {
+                let mut space = self.process.address_space.lock().unwrap();
+                if let Ok(hdr) = space.memory.read(head, 24).map(|b| b.to_vec()) {
+                    let mut entry = u64::from_le_bytes(hdr[0..8].try_into().unwrap());
+                    let futex_offset = i64::from_le_bytes(hdr[8..16].try_into().unwrap());
+                    for _ in 0..64 {
+                        if entry == 0 || entry == head {
+                            break;
+                        }
+                        let futex_addr = (entry as i64).wrapping_add(futex_offset) as u64;
+                        if let Ok(word_bytes) = space.memory.read(futex_addr, 4) {
+                            let val = u32::from_le_bytes(word_bytes.try_into().unwrap());
+                            if (val & 0x3fff_ffff) == (self.tid as u32) {
+                                let new_val = (val & 0x8000_0000) | 0x4000_0000;
+                                let _ = space.memory.write(futex_addr, &new_val.to_le_bytes());
+                                wakes.push(futex_addr);
+                            }
+                        }
+                        let Ok(next_bytes) = space.memory.read(entry, 8) else {
+                            break;
+                        };
+                        entry = u64::from_le_bytes(next_bytes.try_into().unwrap());
+                    }
+                }
+            }
+            for addr in wakes {
+                self.process.kernel.futex_manager.wake(addr, 1, u32::MAX);
+            }
+        }
+        if self.clear_child_tid != 0 {
+            let ctid = self.clear_child_tid;
+            self.clear_child_tid = 0;
+            {
+                let mut space = self.process.address_space.lock().unwrap();
+                let _ = space.memory.write(ctid, &0u32.to_le_bytes());
+            }
+            self.process.kernel.futex_manager.wake(ctid, 1, u32::MAX);
+        }
+        ledger.event("thread_exited", json!({"tid": self.tid}))?;
+        Ok(())
+    }
+
+    fn run_child_loop(&mut self) -> Result<()> {
+        let mut local_ledger = self.process.ledger.lock().unwrap().try_clone()?;
+        let mut local_report = Report::default();
+        let options = self.process.options.clone();
+        loop {
+            if self.process.aborted.load(Ordering::Relaxed)
+                || self.process.exit_code.lock().unwrap().is_some()
+            {
+                break;
+            }
+            self.check_budget(&local_report, &options)?;
+            let rip = self.state[16];
+            if let Some(function) = self.process.intercepts.by_address.get(&rip) {
+                self.allocator_call(*function, &mut local_report, &mut local_ledger)?;
+                continue;
+            }
+            let mut block = {
+                let mut cs = self.process.compile_state.lock().unwrap();
+                if options.hardening.cfi && !cs.cfi_map.allows(rip) {
+                    return Err(memory::error(format!(
+                        "CFI violation: transfer to 0x{rip:x} lands inside a known instruction"
+                    ))
+                    .into());
+                }
+                let space = self.process.address_space.lock().unwrap();
+                let CompileState {
+                    ref mut cache,
+                    ref mut cfi_map,
+                    ref mut report,
+                } = *cs;
+                let cloned = {
+                    let cached =
+                        cache.get_or_compile(&space.memory, rip, report, &mut local_ledger)?;
+                    cfi_map.record_block(&cached.compiled.source_instructions);
+                    cached.clone()
+                };
+                cache.mark_executed(rip);
+                cloned
+            };
+            self.execute(&mut block, &mut local_report, &options, &mut local_ledger)?;
+            if let Some(syscall_rip) = block.compiled.syscall {
+                let outcome =
+                    self.syscall(rip, syscall_rip, &mut local_report, &mut local_ledger)?;
+                if outcome.thread_exit {
+                    break;
+                }
+                if let Some(code) = outcome.exit {
+                    *self.process.exit_code.lock().unwrap() = Some(code);
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn update_counters(&self, report: &mut Report) {
         self.update_network_counters(report);
-        let heap = self.heap.stats();
+        let space = self.process.address_space.lock().unwrap();
+        let heap = space.heap.stats();
         report.heap_allocations = heap.allocations;
         report.heap_frees = heap.frees;
         report.heap_live_bytes = heap.live_bytes;
         report.heap_quarantined = heap.quarantined;
         report.heap_tag_faults = heap.tag_faults;
-        let pac = self.pac.stats();
+        let pac = space.pac.stats();
         report.pac_signings = pac.signings;
         report.pac_verifications = pac.verifications;
         report.pac_faults = pac.auth_faults;
     }
+
     pub fn update_network_counters(&self, report: &mut Report) {
-        report.accepted_connections = self.kernel.accepted;
-        report.network_read_bytes = self.kernel.read_bytes;
-        report.network_written_bytes = self.kernel.written_bytes;
+        report.accepted_connections = self.process.kernel.accepted();
+        report.network_read_bytes = self.process.kernel.read_bytes();
+        report.network_written_bytes = self.process.kernel.written_bytes();
     }
+
     /// Report the final mitigation state, including honest "unavailable" notes.
     pub fn mitigation_summary(&self) -> serde_json::Value {
-        let heap = self.heap.stats();
-        let pac = self.pac.stats();
+        let space = self.process.address_space.lock().unwrap();
+        let heap = space.heap.stats();
+        let pac = space.pac.stats();
         json!({
-            "tags": {"enabled": self.heap.tags_enabled(), "scheme": self.heap.scheme().label,
-                     "granule_bytes": super::heap::GRANULE, "lam": self.lam.label(),
-                     "lam_detail": self.lam.detail(), "faults": heap.tag_faults},
-            "pac": {"enabled": self.pac.enabled(), "signed_slots": pac.signed_slots,
+            "tags": {"enabled": space.heap.tags_enabled(), "scheme": space.heap.scheme().label,
+                     "granule_bytes": super::heap::GRANULE, "lam": self.process.lam.label(),
+                     "lam_detail": self.process.lam.detail(), "faults": heap.tag_faults},
+            "pac": {"enabled": space.pac.enabled(), "signed_slots": pac.signed_slots,
                     "static_pointers": pac.static_pointers, "verifications": pac.verifications,
                     "faults": pac.auth_faults},
             "heap": {"base": format!("0x{HEAP_BASE:x}"), "bytes": HEAP_SIZE,
                      "allocations": heap.allocations, "frees": heap.frees,
                      "live_bytes": heap.live_bytes, "quarantined": heap.quarantined,
                      "placement_draws": heap.placement_draws},
-            "mpk": {"available": self.domain.available(), "reason": self.domain.reason()},
-            // Heap tags and PAC run on ProcessBus, which both the RV64
-            // interpreter and the native backend's checked helpers use.
+            "mpk": {"available": self.process.domain.available(), "reason": self.process.domain.reason()},
             "mitigation_path": "process_bus",
             "native_execution_path": true,
             "native_note": "native blocks call checked load/store helpers (tags + PAC); syscalls are served by the runtime at block boundaries, never as host syscalls"

@@ -24,7 +24,7 @@ use super::{csprng::Csprng, lam::TagScheme};
 use crate::error::{EngineError, MitigationKind};
 
 pub const HEAP_BASE: u64 = 0x0400_0000;
-pub const HEAP_SIZE: u64 = 8 * 1024 * 1024;
+pub const HEAP_SIZE: u64 = 32 * 1024 * 1024;
 pub const GRANULE: u64 = 16;
 /// Tag written to granules of a freed chunk: matches no issued tag.
 pub const QUARANTINE_TAG: u8 = 0xff;
@@ -43,7 +43,7 @@ const CLASS_SIZES: [u64; 9] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 /// Objects at or below this go through the slab; larger ones get their own
 /// randomized run with a trailing guard granule.
 const LARGE_THRESHOLD: u64 = CLASS_SIZES[CLASS_SIZES.len() - 1];
-const SLAB_PAGES: usize = 64;
+const SLAB_PAGES: usize = 256;
 /// Guests with no allocator of their own reach the heap through these. They sit
 /// far above the Linux x86-64 syscall range and cannot collide with it.
 pub const SYS_ISR_MALLOC: u64 = 0x4953_5200;
@@ -73,10 +73,11 @@ struct Live {
     tag: u64,
     chunk: Chunk,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Class {
     pages: Vec<Page>,
 }
+#[derive(Clone)]
 struct Page {
     index: usize,
     free: Vec<u32>,
@@ -94,6 +95,7 @@ pub struct HeapStats {
     pub placement_draws: u64,
 }
 
+#[derive(Clone)]
 pub struct Heap {
     scheme: TagScheme,
     rng: Csprng,
@@ -211,6 +213,49 @@ impl Heap {
         }
         self.live.insert(address, Live { size, tag, chunk });
         Ok(self.scheme.tag(address, tag).unwrap_or(address))
+    }
+
+    /// Allocate `size` bytes aligned to `alignment` (power of two) and return the tagged pointer.
+    pub fn allocate_aligned(&mut self, alignment: u64, size: u64) -> Result<u64, EngineError> {
+        if alignment <= GRANULE {
+            return self.allocate(size);
+        }
+        let size = size.max(1);
+        if size > HEAP_SIZE / 4 || !alignment.is_power_of_two() {
+            return Err(super::memory::error(format!(
+                "invalid aligned heap allocation: alignment={alignment}, size={size}"
+            )));
+        }
+        self.stats.allocations += 1;
+        let granules = size.div_ceil(GRANULE);
+        let gap = u64::try_from(self.rng.below(5)).expect("small gap") * GRANULE;
+        let raw_start = self.large_cursor + gap;
+        let start = (raw_start + alignment - 1) & !(alignment - 1);
+        let needed = (granules + 1) * GRANULE;
+        if start + needed > HEAP_BASE + HEAP_SIZE {
+            return Err(super::memory::error("guest heap exhausted"));
+        }
+        if start > self.large_cursor {
+            let pad_granules = (start - self.large_cursor) / GRANULE;
+            self.set_granules(self.large_cursor, pad_granules, GUARD_TAG);
+        }
+        self.large_cursor = start + needed;
+        let tag = self.issue_tag();
+        self.set_granules(start, granules, u8::try_from(tag).unwrap_or(GUARD_TAG));
+        self.set_granules(start + granules * GRANULE, 1, GUARD_TAG);
+        self.stats.placement_draws = self.rng.draws();
+        if tag != 0 {
+            *self.live_tags.entry(tag).or_insert(0) += 1;
+        }
+        self.live.insert(
+            start,
+            Live {
+                size,
+                tag,
+                chunk: Chunk::Large { granules },
+            },
+        );
+        Ok(self.scheme.tag(start, tag).unwrap_or(start))
     }
     fn allocate_slab(&mut self, size: u64) -> Result<(u64, u64, Chunk), EngineError> {
         let class = CLASS_SIZES

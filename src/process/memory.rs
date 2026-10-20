@@ -20,13 +20,14 @@ pub(super) fn error(message: impl ToString) -> EngineError {
     EngineError::Process(message.to_string())
 }
 
+#[derive(Clone)]
 pub(super) struct Region {
     pub start: u64,
     pub data: Vec<u8>,
     pub writable: bool,
     pub executable: bool,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct GuestMemory {
     pub regions: Vec<Region>,
     pub phdr: u64,
@@ -201,30 +202,82 @@ impl GuestMemory {
         if len == 0 {
             return Ok(());
         }
-        // Remove any regions that fall entirely within [start, end).
-        self.regions.retain(|r| {
+        let mut next_regions = Vec::with_capacity(self.regions.len());
+        for r in self.regions.drain(..) {
             let r_end = r.start + r.data.len() as u64;
-            !(start <= r.start && r_end <= end)
-        });
+            if end <= r.start || start >= r_end {
+                next_regions.push(r);
+                continue;
+            }
+            if start > r.start {
+                let left_len = (start - r.start) as usize;
+                next_regions.push(Region {
+                    start: r.start,
+                    data: r.data[..left_len].to_vec(),
+                    writable: r.writable,
+                    executable: r.executable,
+                });
+            }
+            if end < r_end {
+                let right_off = (end - r.start) as usize;
+                next_regions.push(Region {
+                    start: end,
+                    data: r.data[right_off..].to_vec(),
+                    writable: r.writable,
+                    executable: r.executable,
+                });
+            }
+        }
+        self.regions = next_regions;
         Ok(())
     }
 
     pub fn mprotect(&mut self, start: u64, len: u64, prot: i32) -> Result<(), EngineError> {
         let end = start.checked_add(len).ok_or_else(|| error("mprotect overflow"))?;
+        let writable = prot & 2 != 0;
+        let executable = prot & 4 != 0;
+        if writable && executable {
+            return Err(error("mprotect W^X violation"));
+        }
         let mut found = false;
-        for r in &mut self.regions {
+        let mut next_regions = Vec::with_capacity(self.regions.len() + 2);
+        for r in self.regions.drain(..) {
             let r_end = r.start + r.data.len() as u64;
-            if start < r_end && end > r.start {
-                found = true;
-                let writable = prot & 2 != 0;
-                let executable = prot & 4 != 0;
-                if writable && executable {
-                    return Err(error("mprotect W^X violation"));
-                }
-                r.writable = writable;
-                r.executable = executable;
+            if end <= r.start || start >= r_end {
+                next_regions.push(r);
+                continue;
+            }
+            found = true;
+            if start > r.start {
+                let left_len = (start - r.start) as usize;
+                next_regions.push(Region {
+                    start: r.start,
+                    data: r.data[..left_len].to_vec(),
+                    writable: r.writable,
+                    executable: r.executable,
+                });
+            }
+            let mid_start = start.max(r.start);
+            let mid_end = end.min(r_end);
+            let mid_off = (mid_start - r.start) as usize;
+            let mid_len = (mid_end - mid_start) as usize;
+            next_regions.push(Region {
+                start: mid_start,
+                data: r.data[mid_off..mid_off + mid_len].to_vec(),
+                writable,
+                executable,
+            });
+            if end < r_end {
+                let right_off = (end - r.start) as usize;
+                next_regions.push(Region {
+                    start: end,
+                    data: r.data[right_off..].to_vec(),
+                    writable: r.writable,
+                    executable: r.executable,
+                });
             }
         }
+        self.regions = next_regions;
         if !found {
             return Err(error("mprotect on unmapped region"));
         }
@@ -271,17 +324,31 @@ impl GuestMemory {
         }
         Ok(&self.regions[i].data[o..])
     }
+
+    pub fn stack_bounds_for_sp(&self, sp: u64) -> (u64, u64) {
+        for probe in [sp, sp.saturating_sub(8)] {
+            if let Some(r) = self.regions.iter().find(|r| {
+                r.writable && probe >= r.start && probe <= r.start + r.data.len() as u64
+            }) {
+                return (r.start, r.start + r.data.len() as u64);
+            }
+        }
+        (STACK_BOTTOM, STACK_TOP)
+    }
 }
 
 pub(super) struct ProcessBus<'a> {
     pub code: &'a [u8],
     pub memory: &'a mut GuestMemory,
     pub state: &'a mut [u64; super::CONTEXT_WORDS],
+    pub state_prov: &'a mut u64,
     pub stack: &'a mut [u8],
     /// Sub-granule shadow tags. Every load and store is checked against it.
     pub heap: &'a mut Heap,
     /// Code-pointer authentication. Host-only; no guest address names it.
     pub pac: &'a mut Pac,
+    pub stack_bottom: u64,
+    pub stack_top: u64,
 }
 impl ProcessBus<'_> {
     /// Screen an address through the shadow tag map before it is used.
@@ -305,26 +372,9 @@ impl ProcessBus<'_> {
 }
 
 impl ProcessBus<'_> {
-    /// Address a pointer signature binds to, or `None` for memory PAC does not
-    /// cover.
-    ///
-    /// Only guest data mappings qualify. The stack is excluded on purpose: a
-    /// `call` pushes a return address there, so signing it would put a code on
-    /// every frame and any frame the guest rewrites would fault. Return
-    /// addresses are guarded by the stack bounds checks instead.
-    fn pac_scope(&self, address: u64) -> Option<u64> {
-        // Strip first: the tag sits above bit 47 and would put every tagged
-        // pointer outside the numeric window.
-        let plain = self.heap.scheme().strip(address);
-        if !(GUEST_BIAS..GUEST_BIAS + ADDRESS_LIMIT).contains(&plain) {
-            return None;
-        }
-        let guest = plain - GUEST_BIAS;
-        if (STACK_BOTTOM..STACK_TOP).contains(&guest) {
-            return None;
-        }
-        // Pointer metadata is not part of the address a signature binds to.
-        Some(guest)
+    fn is_guest_stack(&self, guest: u64) -> bool {
+        (STACK_BOTTOM..STACK_TOP).contains(&guest)
+            || (self.stack_bottom..self.stack_top).contains(&guest)
     }
 }
 
@@ -342,11 +392,33 @@ impl MemoryAccess for ProcessBus<'_> {
         raw: u64,
         pc: u64,
     ) -> Result<(u64, bool), EngineError> {
-        let Some(key) = self.pac_scope(address) else {
+        if (CONTEXT_BASE..CONTEXT_BASE + (super::CONTEXT_WORDS * 8) as u64).contains(&address) {
+            if size == 8 {
+                let idx = ((address - CONTEXT_BASE) / 8) as usize;
+                let prov = (*self.state_prov >> idx) & 1 != 0;
+                return Ok((raw, prov));
+            }
             return Ok((raw, false));
-        };
-        let value = self.pac.on_load(key, raw, size as u64, pc)?;
-        Ok((value, self.pac.is_signed_slot(key)))
+        }
+        if (RV_STACK_BASE..RV_STACK_BASE + self.stack.len() as u64).contains(&address) {
+            return Ok((raw, self.pac.stack_provenance(address, size as u64)));
+        }
+        let plain = self.heap.scheme().strip(address);
+        if !(GUEST_BIAS..GUEST_BIAS + ADDRESS_LIMIT).contains(&plain) {
+            return Ok((raw, false));
+        }
+        let guest = plain - GUEST_BIAS;
+        if self.is_guest_stack(guest) {
+            if self.pac.is_signed_slot(guest) {
+                let value = self.pac.on_load(guest, raw, size as u64, pc)?;
+                let prov =
+                    self.pac.stack_provenance(guest, size as u64) || self.pac.is_trusted_slot(guest);
+                return Ok((value, prov));
+            }
+            return Ok((raw, self.pac.stack_provenance(guest, size as u64)));
+        }
+        let value = self.pac.on_load(guest, raw, size as u64, pc)?;
+        Ok((value, self.pac.is_trusted_slot(guest)))
     }
     fn authenticate_store(
         &mut self,
@@ -356,10 +428,34 @@ impl MemoryAccess for ProcessBus<'_> {
         constant: bool,
         pc: u64,
     ) -> Result<u64, EngineError> {
-        let Some(key) = self.pac_scope(address) else {
+        if (CONTEXT_BASE..CONTEXT_BASE + (super::CONTEXT_WORDS * 8) as u64).contains(&address) {
+            if size == 8 {
+                let idx = ((address - CONTEXT_BASE) / 8) as usize;
+                if constant {
+                    *self.state_prov |= 1u64 << idx;
+                } else {
+                    *self.state_prov &= !(1u64 << idx);
+                }
+            }
             return Ok(value);
-        };
-        self.pac.on_store(key, value, size as u64, constant, pc)
+        }
+        if (RV_STACK_BASE..RV_STACK_BASE + self.stack.len() as u64).contains(&address) {
+            self.pac.set_stack_provenance(address, size as u64, constant);
+            return Ok(value);
+        }
+        let plain = self.heap.scheme().strip(address);
+        if !(GUEST_BIAS..GUEST_BIAS + ADDRESS_LIMIT).contains(&plain) {
+            return Ok(value);
+        }
+        let guest = plain - GUEST_BIAS;
+        if self.is_guest_stack(guest) {
+            self.pac.set_stack_provenance(guest, size as u64, constant);
+            if self.pac.is_signed_slot(guest) {
+                self.pac.unmark_stack_slot(guest);
+            }
+            return Ok(value);
+        }
+        self.pac.on_store(guest, value, size as u64, constant, pc)
     }
     unsafe fn load(&mut self, address: u64, size: usize, pc: u64) -> Result<u64, EngineError> {
         // Tag check first: the access is rejected before any byte is read.

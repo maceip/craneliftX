@@ -32,13 +32,17 @@ fn execute_hardened(
     let mut stack = vec![0u8; 65536];
     let mut heap = Heap::new(TagScheme::SOFTWARE, Csprng::from_seed_test(), tags, true);
     let mut pac = Pac::new([0x5a; 16], Vec::new(), false);
+    let mut state_prov = 0u64;
     let mut bus = ProcessBus {
         code,
         memory,
         state,
+        state_prov: &mut state_prov,
         stack: &mut stack,
         heap: &mut heap,
         pac: &mut pac,
+        stack_bottom: super::memory::STACK_BOTTOM,
+        stack_top: super::memory::STACK_TOP,
     };
     let mut cpu = RiscvCpu::default();
     cpu.regs[1] = RETURN_ADDRESS;
@@ -87,14 +91,20 @@ fn native_pac_fault_stops_the_block_before_later_stores() {
     runtime.state[4] = 0x30008;
     let mut cache = cache::BlockCache::with_backend(Backend::X86_64);
     let mut report = Report::default();
-    let block = cache
-        .get_or_compile(&runtime.memory, 0x20000, &mut report, &mut ledger)
-        .unwrap();
+    let mut block = runtime.with_memory(|mem| {
+        cache
+            .get_or_compile(mem, 0x20000, &mut report, &mut ledger)
+            .unwrap()
+            .clone()
+    });
     let error = runtime
-        .execute(block, &mut report, &options, &mut ledger)
+        .execute(&mut block, &mut report, &options, &mut ledger)
         .unwrap_err();
     assert!(error.to_string().contains("PointerAuth"));
-    assert_eq!(runtime.memory.read(0x30008, 8).unwrap(), &[0; 8]);
+    assert_eq!(
+        runtime.with_memory(|mem| mem.read(0x30008, 8).unwrap().to_vec()),
+        vec![0; 8]
+    );
     assert_eq!(runtime.state[16], 0x20008); // next RIP; the fault reports the store's PC
     assert!(matches!(
         error.downcast_ref::<EngineError>(),
@@ -445,3 +455,64 @@ fn kernel_keeps_guest_descriptors_private_and_rejects_unsupported_services() {
     assert!(invoke(&mut kernel, &mut state, &mut memory, 1, 1, CONTEXT_BASE, 1).is_err());
     assert_eq!(kernel.open_descriptors(), 2);
 }
+
+#[test]
+fn pac_provenance_survives_register_and_xmm_copies_across_blocks_for_seeded_slots() {
+    let mut memory = GuestMemory::default();
+    memory.map(0x20000, 4096, false, true).unwrap();
+    // Block 1 (ends at jmp +0):
+    // mov rax, [rdi]       ; load seeded function pointer from image slot 0x30000
+    // movq xmm0, rax       ; move into xmm0
+    // jmp +0               ; block boundary -> provenance must survive in state_prov
+    // Block 2:
+    // movq rcx, xmm0       ; move back to rcx
+    // mov [rsi], rcx       ; store authenticated function pointer to new slot 0x30008
+    // mov eax, 60; xor edi, edi; syscall
+    let code = [
+        0x48, 0x8b, 0x07, // mov rax, [rdi]
+        0x66, 0x48, 0x0f, 0x6e, 0xc0, // movq xmm0, rax
+        0xeb, 0x00, // jmp $+2
+        0x66, 0x48, 0x0f, 0x7e, 0xc1, // movq rcx, xmm0
+        0x48, 0x89, 0x0e, // mov [rsi], rcx
+        0xb8, 60, 0, 0, 0, 0x31, 0xff, 0x0f, 0x05,
+    ];
+    memory.regions[0].data[..code.len()].copy_from_slice(&code);
+    memory.map(0x30000, 4096, true, false).unwrap();
+    memory.write(0x30000, &0x20000u64.to_le_bytes()).unwrap();
+    memory
+        .map(super::memory::STACK_BOTTOM, 1024 * 1024, true, false)
+        .unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "isr-pac-prov-{}-{}",
+        std::process::id(),
+        crate::ledger::timestamp_ns()
+    ));
+    let mut ledger = RunLedger::create(&root).unwrap();
+    let options = Options {
+        backend: Backend::Rv64,
+        ..Options::default()
+    };
+    let mut runtime = runtime::Runtime::initialize(memory, 0x20000, &options, &mut ledger).unwrap();
+    runtime.state[5] = 0x30000; // rdi
+    runtime.state[4] = 0x30008; // rsi
+    let mut cache = cache::BlockCache::with_backend(Backend::Rv64);
+    let mut report = Report::default();
+    for &rip in &[0x20000u64, 0x2000a] {
+        let mut block = runtime.with_memory(|mem| {
+            cache
+                .get_or_compile(mem, rip, &mut report, &mut ledger)
+                .unwrap()
+                .clone()
+        });
+        runtime
+            .execute(&mut block, &mut report, &options, &mut ledger)
+            .unwrap();
+    }
+    let stored = runtime.with_memory(|mem| {
+        u64::from_le_bytes(mem.read(0x30008, 8).unwrap().try_into().unwrap())
+    });
+    assert_ne!(stored, 0x20000, "copied code pointer must be PAC-signed at new slot");
+    drop(ledger);
+    std::fs::remove_dir_all(root).unwrap();
+}
+

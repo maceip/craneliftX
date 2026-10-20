@@ -277,105 +277,13 @@ def run_isr(elf: Path, n: int, backend: str, label: str, extra_flags: list[str])
 
 
 def generate_svg(results: list[dict], output: Path) -> None:
-    """Clear grouped bar chart with multi-config palette."""
-    valid_results = [r for r in results if not r.get("skipped")]
-    if not valid_results:
-        return
+    """Delegate SVG generation to scripts/generate_graphic.py (ZUNFTMAX editorial design)."""
+    try:
+        import generate_graphic
+        generate_graphic.generate()
+    except Exception as exc:
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "generate_graphic.py")], check=False)
 
-    n_configs = len(valid_results)
-    w, h = 1080, 580
-    margin = {"top": 80, "right": 40, "bottom": 140, "left": 80}
-    chart_w = w - margin["left"] - margin["right"]
-    chart_h = h - margin["top"] - margin["bottom"]
-
-    colors = [
-        "#2e7d32",  # Native - green
-        "#1565c0",  # Baseline - blue
-        "#7b1fa2",  # PAC - purple
-        "#00796b",  # CFI - teal
-        "#c2185b",  # Tags - magenta
-        "#ef6c00",  # Full - amber/orange
-        "#d32f2f",  # Full+LAM - red
-        "#455a64",  # RV64 - grey
-    ]
-
-    plots = [
-        ("rps", "Requests / second (higher is better)"),
-        ("total_seconds", "Total time for N requests (s, lower is better)"),
-        ("latency_ms", "Mean latency (ms, lower is better)"),
-    ]
-
-    def value(r, key):
-        v = r[key]
-        return v["mean"] if isinstance(v, dict) else v
-
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">',
-        f'<rect width="{w}" height="{h}" fill="#fafafa"/>',
-        f'<text x="{w/2}" y="32" text-anchor="middle" fill="#111" font-size="19" font-family="system-ui,sans-serif" font-weight="600">'
-        "Linux x86-64 Benchmark: Bare Metal vs ISR Mitigations</text>",
-        f'<text x="{w/2}" y="56" text-anchor="middle" fill="#555" font-size="12" font-family="system-ui,sans-serif">'
-        f"{n_configs} configs · {valid_results[0].get('requests', '')} requests · host {platform.system()} {platform.machine()}</text>",
-    ]
-
-    group_w = chart_w / len(plots)
-    bar_w = min(36.0, (group_w * 0.75) / n_configs)
-    total_bars_w = n_configs * bar_w
-
-    for pi, (key, label) in enumerate(plots):
-        gx = margin["left"] + pi * group_w + (group_w - total_bars_w) / 2
-        vals = [value(r, key) for r in valid_results]
-        max_val = max(vals) * 1.15 or 1.0
-
-        for i in range(5):
-            y = margin["top"] + chart_h - (i / 4) * chart_h
-            lab = (i / 4) * max_val
-            parts.append(
-                f'<line x1="{gx - 8}" y1="{y:.1f}" x2="{gx + total_bars_w + 8:.1f}" y2="{y:.1f}" stroke="#e0e0e0"/>'
-            )
-            parts.append(
-                f'<text x="{gx - 12}" y="{y + 4:.1f}" text-anchor="end" fill="#888" font-size="10" font-family="system-ui,sans-serif">{lab:.1f}</text>'
-            )
-
-        for ci, r in enumerate(valid_results):
-            v = value(r, key)
-            bh = (v / max_val) * chart_h
-            bx = gx + ci * bar_w
-            by = margin["top"] + chart_h - bh
-            color = colors[ci % len(colors)]
-            parts.append(
-                f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w - 2:.1f}" height="{bh:.1f}" fill="{color}" rx="2"/>'
-            )
-            val_text = f"{v:.1f}" if v >= 10 else f"{v:.2f}"
-            parts.append(
-                f'<text x="{bx + (bar_w-2)/2:.1f}" y="{by - 5:.1f}" text-anchor="middle" fill="#222" font-size="9" font-family="system-ui,sans-serif" font-weight="600">{val_text}</text>'
-            )
-
-        label_y = margin["top"] + chart_h + 30
-        parts.append(
-            f'<text x="{gx + total_bars_w/2:.1f}" y="{label_y}" text-anchor="middle" fill="#333" font-size="12" font-family="system-ui,sans-serif" font-weight="500">{label}</text>'
-        )
-
-    # Multi-column legend at bottom
-    cols = 2
-    per_col = (n_configs + cols - 1) // cols
-    col_w = chart_w / cols
-    base_y = margin["top"] + chart_h + 55
-
-    for ci, r in enumerate(valid_results):
-        col_idx = ci // per_col
-        row_idx = ci % per_col
-        lx = margin["left"] + col_idx * col_w
-        ly = base_y + row_idx * 18
-        color = colors[ci % len(colors)]
-        cfg_name = r["config"]
-        parts.append(f'<rect x="{lx}" y="{ly - 10}" width="12" height="12" fill="{color}" rx="2"/>')
-        parts.append(
-            f'<text x="{lx + 18}" y="{ly}" fill="#222" font-size="11" font-family="system-ui,sans-serif">{cfg_name}</text>'
-        )
-
-    parts.append("</svg>")
-    output.write_text("\n".join(parts))
 
 
 def main() -> int:

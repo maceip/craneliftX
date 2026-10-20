@@ -15,6 +15,11 @@ use super::runtime::Runtime;
 use std::ffi::c_void;
 
 pub const NATIVE_FS_BASE_OFFSET: i32 = 144;
+pub const NATIVE_PROVENANCE_OFFSET: i32 = std::mem::offset_of!(NativeGuest, provenance) as i32;
+pub const NATIVE_LAST_LOAD_PROV_OFFSET: i32 =
+    std::mem::offset_of!(NativeGuest, last_load_prov) as i32;
+pub const NATIVE_STACK_BOTTOM_OFFSET: i32 = std::mem::offset_of!(NativeGuest, stack_bottom) as i32;
+pub const NATIVE_STACK_TOP_OFFSET: i32 = std::mem::offset_of!(NativeGuest, stack_top) as i32;
 pub const NATIVE_COOKIE_OFFSET: i32 = std::mem::offset_of!(NativeGuest, cookie) as i32;
 pub const NATIVE_LOAD_FN_OFFSET: i32 = std::mem::offset_of!(NativeGuest, load_fn) as i32;
 pub const NATIVE_STORE_FN_OFFSET: i32 = std::mem::offset_of!(NativeGuest, store_fn) as i32;
@@ -36,6 +41,10 @@ pub type NativeCpuidFn = unsafe extern "C" fn(*mut c_void, u64, u64);
 #[repr(C)]
 pub struct NativeGuest {
     pub regs: [u64; super::CONTEXT_WORDS],
+    pub provenance: u64,
+    pub last_load_prov: u64,
+    pub stack_bottom: u64,
+    pub stack_top: u64,
     pub cookie: *mut c_void,
     pub load_fn: NativeLoadFn,
     pub store_fn: NativeStoreFn,
@@ -50,6 +59,10 @@ impl NativeGuest {
     pub fn new(runtime: *mut Runtime) -> Self {
         Self {
             regs: [0; super::CONTEXT_WORDS],
+            provenance: 0,
+            last_load_prov: 0,
+            stack_bottom: super::memory::STACK_BOTTOM,
+            stack_top: super::memory::STACK_TOP,
             cookie: std::ptr::null_mut(),
             load_fn: native_load,
             store_fn: native_store,
@@ -86,7 +99,8 @@ pub unsafe extern "C" fn native_load(
     // after constructing it. That guest and its Runtime outlive this call.
     let guest = unsafe { &mut *(cookie as *mut NativeGuest) };
     let rt = unsafe { &mut *guest.runtime };
-    let value = rt.native_load(guest_ptr, size, pc);
+    let (value, prov) = rt.native_load(guest_ptr, size, pc);
+    guest.last_load_prov = u64::from(prov);
     if rt.native_fault.is_some() {
         guest.fault_kind = FAULT_MEMORY;
         guest.fault_pc = pc;

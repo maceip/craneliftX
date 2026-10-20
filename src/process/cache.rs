@@ -11,13 +11,15 @@ use super::{
 use crate::ledger::RunLedger;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+#[derive(Clone)]
 pub(super) struct CachedBlock {
     pub compiled: CompiledBlock,
     pub executions: u64,
     pub rv64_steps: u64,
     /// JIT page for native x86-64 code (None for RV64 interpreted blocks).
-    pub jit_page: Option<JitPage>,
+    pub jit_page: Option<Arc<JitPage>>,
 }
 pub(super) struct BlockCache {
     entries: BTreeMap<u64, CachedBlock>,
@@ -56,7 +58,7 @@ impl BlockCache {
         ledger: &mut RunLedger,
     ) -> Result<&mut CachedBlock> {
         if !self.entries.contains_key(&rip) {
-            if self.entries.len() >= 4096 {
+            if self.entries.len() >= 65536 {
                 return Err(error("compiled block cache limit reached").into());
             }
             // Generate a fresh diversification for this block compilation.
@@ -89,7 +91,7 @@ impl BlockCache {
                     "jit_page",
                     json!({"rip":format!("0x{rip:x}"),"bytes":compiled.code.len(),"wx":true}),
                 )?;
-                Some(page)
+                Some(Arc::new(page))
             } else {
                 None
             };
@@ -113,6 +115,9 @@ impl BlockCache {
     }
     pub fn mark_executed(&mut self, rip: u64) {
         self.executed.insert(rip);
+    }
+    pub fn get_mut(&mut self, rip: u64) -> Option<&mut CachedBlock> {
+        self.entries.get_mut(&rip)
     }
     pub fn addresses(&self) -> Vec<String> {
         self.executed

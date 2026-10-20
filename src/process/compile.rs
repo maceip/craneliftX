@@ -18,6 +18,7 @@ use iced_x86::{Formatter, Instruction, IntelFormatter, Mnemonic};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+#[derive(Clone)]
 pub(super) struct CompiledBlock {
     pub id: u64,
     pub rip: u64,

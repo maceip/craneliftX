@@ -18,6 +18,9 @@ pub enum AllocFn {
     Calloc,
     Realloc,
     Free,
+    PosixMemalign,
+    AlignedAlloc,
+    Memalign,
 }
 impl AllocFn {
     pub fn name(self) -> &'static str {
@@ -26,6 +29,9 @@ impl AllocFn {
             Self::Calloc => "calloc",
             Self::Realloc => "realloc",
             Self::Free => "free",
+            Self::PosixMemalign => "posix_memalign",
+            Self::AlignedAlloc => "aligned_alloc",
+            Self::Memalign => "memalign",
         }
     }
 }
@@ -56,19 +62,29 @@ pub(super) fn bind_allocators(bytes: &[u8]) -> AllocIntercepts {
         return intercepts;
     };
     for symbol in file.symbols() {
-        let Ok(name) = symbol.name() else { continue };
-        let name = name.trim_start_matches('_');
-        let function = matches!(name, "malloc" | "calloc" | "realloc" | "free");
-        if !function || symbol.address() == 0 {
+        let Ok(raw_name) = symbol.name() else { continue };
+        let stripped = raw_name.trim_start_matches('_');
+        let name = stripped
+            .strip_prefix("libc_")
+            .or_else(|| stripped.strip_prefix("GI_"))
+            .unwrap_or(stripped)
+            .trim_start_matches('_');
+        if symbol.address() == 0 {
             continue;
         }
         let kind = match name {
-            "malloc" => AllocFn::Malloc,
-            "calloc" => AllocFn::Calloc,
-            "realloc" => AllocFn::Realloc,
-            _ => AllocFn::Free,
+            "malloc" => Some(AllocFn::Malloc),
+            "calloc" => Some(AllocFn::Calloc),
+            "realloc" => Some(AllocFn::Realloc),
+            "free" | "cfree" => Some(AllocFn::Free),
+            "posix_memalign" => Some(AllocFn::PosixMemalign),
+            "aligned_alloc" => Some(AllocFn::AlignedAlloc),
+            "memalign" => Some(AllocFn::Memalign),
+            _ => None,
         };
-        intercepts.by_address.insert(symbol.address(), kind);
+        if let Some(kind) = kind {
+            intercepts.by_address.insert(symbol.address(), kind);
+        }
     }
     intercepts
 }

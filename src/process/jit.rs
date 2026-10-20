@@ -12,6 +12,11 @@ pub struct JitPage {
     size: usize,
 }
 
+// SAFETY: JitPage owns an anonymous mmap region transitioned to read-execute
+// before any execution; its pointer is read-only after initialization.
+unsafe impl Send for JitPage {}
+unsafe impl Sync for JitPage {}
+
 impl JitPage {
     /// Allocate a new page with at least `code_size` bytes of capacity.
     /// The page is initially read-write.

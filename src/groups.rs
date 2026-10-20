@@ -96,7 +96,12 @@ impl PipelineGroup {
             "harvest" => Self::Decode,
             "artifact" => Self::Artifacts,
             "trace" | "cache_invalidation" | "compilation_progress" => Self::Cache,
-            "execution" | "block_execution_totals" | "progress" | "context" => Self::Execute,
+            "execution"
+            | "block_execution_totals"
+            | "progress"
+            | "context"
+            | "thread_started"
+            | "thread_exited" => Self::Execute,
             "syscall_started" | "syscall_completed" | "syscall_failed" => Self::Syscall,
             "result" | "error" | "cancelled" => Self::Result,
             "security" => Self::Audit,

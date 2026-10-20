@@ -104,6 +104,8 @@ struct Lower<'a> {
     load_sig: Option<cranelift_codegen::ir::SigRef>,
     store_sig: Option<cranelift_codegen::ir::SigRef>,
     cpuid_sig: Option<cranelift_codegen::ir::SigRef>,
+    /// Provenance (0 or 1) of the most recent 64-bit memory load.
+    last_load_prov: Value,
 }
 
 impl Lower<'_> {
@@ -112,6 +114,12 @@ impl Lower<'_> {
     }
     fn var(&mut self, index: usize) -> Value {
         self.b.use_var(Variable::from_u32(index as u32))
+    }
+    fn var_prov(&mut self, index: usize) -> Value {
+        self.b.use_var(Variable::from_u32((51 + index) as u32))
+    }
+    fn set_prov(&mut self, index: usize, prov: Value) {
+        self.b.def_var(Variable::from_u32((51 + index) as u32), prov);
     }
     fn set(&mut self, index: usize, v: Value) {
         if index == self.rsp_var as usize {
@@ -124,15 +132,33 @@ impl Lower<'_> {
                 self.b.append_block_param(block, types::I64);
                 block
             });
-            let below = self
-                .b
-                .ins()
-                .icmp_imm(IntCC::UnsignedLessThan, v, STACK_BOTTOM as i64);
-            let above = self
-                .b
-                .ins()
-                .icmp_imm(IntCC::UnsignedGreaterThan, v, STACK_TOP as i64);
-            let bad = self.b.ins().bor(below, above);
+            let bad = if self.backend == Backend::X86_64 {
+                let sb = self.b.ins().load(
+                    types::I64,
+                    MemFlags::new(),
+                    self.ctx,
+                    super::native::NATIVE_STACK_BOTTOM_OFFSET,
+                );
+                let st = self.b.ins().load(
+                    types::I64,
+                    MemFlags::new(),
+                    self.ctx,
+                    super::native::NATIVE_STACK_TOP_OFFSET,
+                );
+                let below = self.b.ins().icmp(IntCC::UnsignedLessThan, v, sb);
+                let above = self.b.ins().icmp(IntCC::UnsignedGreaterThan, v, st);
+                self.b.ins().bor(below, above)
+            } else {
+                let below = self
+                    .b
+                    .ins()
+                    .icmp_imm(IntCC::UnsignedLessThan, v, STACK_BOTTOM as i64);
+                let above = self
+                    .b
+                    .ins()
+                    .icmp_imm(IntCC::UnsignedGreaterThan, v, STACK_TOP as i64);
+                self.b.ins().bor(below, above)
+            };
             let rip = self.c(self.rip);
             let resume = self.b.create_block();
             self.b.ins().brif(bad, fault, &[v, rip], resume, &[]);
@@ -140,6 +166,12 @@ impl Lower<'_> {
             self.b.seal_block(resume);
         }
         self.b.def_var(Variable::from_u32(index as u32), v);
+        let zero = self.c(0);
+        self.set_prov(index, zero);
+    }
+    fn set_with_prov(&mut self, index: usize, v: Value, prov: Value) {
+        self.set(index, v);
+        self.set_prov(index, prov);
     }
     fn mask(&mut self, v: Value, w: u16) -> Value {
         if w == 64 {
@@ -196,24 +228,66 @@ impl Lower<'_> {
         Ok(())
     }
 
+    fn put_reg_with_prov(
+        &mut self,
+        r: Register,
+        v: Value,
+        prov: Value,
+        i: &Instruction,
+    ) -> Result<(), EngineError> {
+        let (index, w, _) = register_view(r).ok_or_else(|| fail(i, "non-integer register"))?;
+        let var_idx = if index < 16 {
+            self.div.variable(index) as usize
+        } else {
+            index
+        };
+        self.put_reg(r, v, i)?;
+        if w == 64 {
+            self.set_prov(var_idx, prov);
+        }
+        Ok(())
+    }
+
     fn get_xmm(&mut self, idx: usize) -> (Value, Value) {
         (self.var(19 + idx), self.var(35 + idx))
+    }
+    fn get_xmm_prov(&mut self, idx: usize) -> (Value, Value) {
+        (self.var_prov(19 + idx), self.var_prov(35 + idx))
     }
     fn set_xmm(&mut self, idx: usize, lo: Value, hi: Value) {
         self.b.def_var(Variable::from_u32((19 + idx) as u32), lo);
         self.b.def_var(Variable::from_u32((35 + idx) as u32), hi);
+        let zero = self.c(0);
+        self.set_prov(19 + idx, zero);
+        self.set_prov(35 + idx, zero);
+    }
+    fn set_xmm_with_prov(&mut self, idx: usize, lo: Value, hi: Value, plo: Value, phi: Value) {
+        self.b.def_var(Variable::from_u32((19 + idx) as u32), lo);
+        self.b.def_var(Variable::from_u32((35 + idx) as u32), hi);
+        self.set_prov(19 + idx, plo);
+        self.set_prov(35 + idx, phi);
     }
 
     fn read_xmm(&mut self, i: &Instruction, op: u32) -> Result<(Value, Value), EngineError> {
+        Ok(self.read_xmm_with_prov(i, op)?.0)
+    }
+
+    fn read_xmm_with_prov(
+        &mut self,
+        i: &Instruction,
+        op: u32,
+    ) -> Result<((Value, Value), (Value, Value)), EngineError> {
         if i.op_kind(op) == OpKind::Register {
             let idx = xmm_index(i.op_register(op)).ok_or_else(|| fail(i, "expected XMM register"))?;
-            Ok(self.get_xmm(idx))
+            Ok((self.get_xmm(idx), self.get_xmm_prov(idx)))
         } else if i.op_kind(op) == OpKind::Memory {
             let p = self.address(i)?;
             let lo = self.load(p, 64)?;
+            let plo = self.last_load_prov;
             let p8 = self.b.ins().iadd_imm(p, 8);
             let hi = self.load(p8, 64)?;
-            Ok((lo, hi))
+            let phi = self.last_load_prov;
+            Ok(((lo, hi), (plo, phi)))
         } else {
             Err(fail(i, "unsupported XMM operand"))
         }
@@ -249,6 +323,78 @@ impl Lower<'_> {
             let db = self.b.ins().band_imm(db, 0xffffffff);
             let eq = self.b.ins().icmp(IntCC::Equal, da, db);
             let mask = self.b.ins().select(eq, c_ffff, c_0);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pcmpeqw_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        let c_ffff = self.c(0xffff);
+        let c_0 = self.c(0);
+        for idx in 0..4 {
+            let shift = (idx * 16) as i64;
+            let wa = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let wa = self.b.ins().band_imm(wa, 0xffff);
+            let wb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let wb = self.b.ins().band_imm(wb, 0xffff);
+            let eq = self.b.ins().icmp(IntCC::Equal, wa, wb);
+            let mask = self.b.ins().select(eq, c_ffff, c_0);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pcmpgtb_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        let c_ff = self.c(0xff);
+        let c_0 = self.c(0);
+        for byte_idx in 0..8 {
+            let shift = (byte_idx * 8) as i64;
+            let ba = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let sa = self.sign(ba, 8);
+            let bb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let sb = self.sign(bb, 8);
+            let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, sa, sb);
+            let mask = self.b.ins().select(gt, c_ff, c_0);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pcmpgtw_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        let c_ffff = self.c(0xffff);
+        let c_0 = self.c(0);
+        for idx in 0..4 {
+            let shift = (idx * 16) as i64;
+            let wa = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let sa = self.sign(wa, 16);
+            let wb = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let sb = self.sign(wb, 16);
+            let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, sa, sb);
+            let mask = self.b.ins().select(gt, c_ffff, c_0);
+            let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
+            res = self.b.ins().bor(res, shifted);
+        }
+        res
+    }
+
+    fn pcmpgtd_u64(&mut self, a: Value, b: Value) -> Value {
+        let mut res = self.c(0);
+        let c_ffff = self.c(0xffffffff);
+        let c_0 = self.c(0);
+        for dword_idx in 0..2 {
+            let shift = (dword_idx * 32) as i64;
+            let da = if shift > 0 { self.b.ins().ushr_imm(a, shift) } else { a };
+            let sa = self.sign(da, 32);
+            let db = if shift > 0 { self.b.ins().ushr_imm(b, shift) } else { b };
+            let sb = self.sign(db, 32);
+            let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, sa, sb);
+            let mask = self.b.ins().select(gt, c_ffff, c_0);
             let shifted = if shift > 0 { self.b.ins().ishl_imm(mask, shift) } else { mask };
             res = self.b.ins().bor(res, shifted);
         }
@@ -447,17 +593,44 @@ impl Lower<'_> {
         }
     }
     fn read(&mut self, i: &Instruction, n: u32) -> Result<Value, EngineError> {
+        Ok(self.read_with_prov(i, n)?.0)
+    }
+    fn read_with_prov(&mut self, i: &Instruction, n: u32) -> Result<(Value, Value), EngineError> {
         if let Some(v) = immediate(i, n) {
-            return Ok(self.c(v));
+            let w0 = self.width(i, 0).unwrap_or(64);
+            let prov = self.c(u64::from(w0 == 64));
+            return Ok((self.c(v), prov));
         }
         match i.op_kind(n) {
-            OpKind::Register => self.reg(i.op_register(n), i),
+            OpKind::Register => {
+                let r = i.op_register(n);
+                let (index, w, _) =
+                    register_view(r).ok_or_else(|| fail(i, "non-integer register"))?;
+                let var_idx = if index < 16 {
+                    self.div.variable(index) as usize
+                } else {
+                    index
+                };
+                let v = self.reg(r, i)?;
+                let prov = if w == 64 {
+                    self.var_prov(var_idx)
+                } else {
+                    self.c(0)
+                };
+                Ok((v, prov))
+            }
             OpKind::Memory => {
                 let w = self.width(i, n)?;
                 let p = self.address(i)?;
-                self.load(p, w)
+                let v = self.load(p, w)?;
+                let prov = if w == 64 {
+                    self.last_load_prov
+                } else {
+                    self.c(0)
+                };
+                Ok((v, prov))
             }
-            OpKind::NearBranch64 => Ok(self.c(i.near_branch_target())),
+            OpKind::NearBranch64 => Ok((self.c(i.near_branch_target()), self.c(1))),
             _ => Err(fail(i, "unsupported source operand")),
         }
     }
@@ -467,6 +640,7 @@ impl Lower<'_> {
         }
         let p = self.ptr(p, w);
         let v = self.b.ins().load(ty(w), MemFlags::new(), p, 0);
+        self.last_load_prov = self.c(0);
         Ok(if w < 64 {
             self.b.ins().uextend(types::I64, v)
         } else {
@@ -474,8 +648,12 @@ impl Lower<'_> {
         })
     }
     fn store(&mut self, p: Value, w: u16, v: Value, constant: bool) {
+        let prov = self.c(u64::from(constant));
+        self.store_with_prov(p, w, v, prov);
+    }
+    fn store_with_prov(&mut self, p: Value, w: u16, v: Value, prov: Value) {
         if self.backend == Backend::X86_64 {
-            self.native_store(p, w, v, constant);
+            self.native_store(p, w, v, prov);
             return;
         }
         let p = self.ptr(p, w);
@@ -508,13 +686,23 @@ impl Lower<'_> {
         let call = self.b.ins().call_indirect(load_sig, load_fn, &[cookie, p, size, pc]);
         let raw = self.b.inst_results(call)[0];
         self.check_native_fault();
+        self.last_load_prov = if w == 64 {
+            self.b.ins().load(
+                types::I64,
+                MemFlags::new(),
+                self.ctx,
+                super::native::NATIVE_LAST_LOAD_PROV_OFFSET,
+            )
+        } else {
+            self.c(0)
+        };
         // Helper returns the zero-extended load already.
         Ok(raw)
     }
 
     /// Store through the runtime's checked helper so tags and PAC apply.
-    /// `constant` marks immediate/lea provenance for PAC signing.
-    fn native_store(&mut self, p: Value, w: u16, v: Value, constant: bool) {
+    /// `constant_v` marks immediate/lea/trusted-table provenance for PAC signing.
+    fn native_store(&mut self, p: Value, w: u16, v: Value, constant_v: Value) {
         self.bounds_check(p, w);
         let store_sig = self.store_sig.expect("x86_64 store signature");
         let cookie = self.b.ins().load(
@@ -530,8 +718,6 @@ impl Lower<'_> {
             super::native::NATIVE_STORE_FN_OFFSET,
         );
         let size = self.c(u64::from(w / 8));
-        // Helpers write only `size` bytes of the value; high bytes are ignored.
-        let constant_v = self.c(u64::from(constant));
         let pc = self.c(self.rip);
         self.b.ins().call_indirect(
             store_sig,
@@ -571,15 +757,25 @@ impl Lower<'_> {
         *self.mem_fault.get_or_insert_with(|| self.b.create_block())
     }
     fn write(&mut self, i: &Instruction, n: u32, v: Value) -> Result<(), EngineError> {
+        let constant = (immediate(i, 1).is_some()
+            || (i.mnemonic() == Mnemonic::Lea && i.is_ip_rel_memory_operand()))
+            && self.width(i, n).unwrap_or(64) == 64;
+        let prov = self.c(u64::from(constant));
+        self.write_with_prov(i, n, v, prov)
+    }
+    fn write_with_prov(
+        &mut self,
+        i: &Instruction,
+        n: u32,
+        v: Value,
+        prov: Value,
+    ) -> Result<(), EngineError> {
         match i.op_kind(n) {
-            OpKind::Register => self.put_reg(i.op_register(n), v, i),
+            OpKind::Register => self.put_reg_with_prov(i.op_register(n), v, prov, i),
             OpKind::Memory => {
                 let w = self.width(i, n)?;
                 let p = self.address(i)?;
-                // An immediate (or lea of a code address) is the only source
-                // with constant provenance for PAC signing.
-                let constant = immediate(i, 1).is_some() || i.mnemonic() == Mnemonic::Lea;
-                self.store(p, w, v, constant);
+                self.store_with_prov(p, w, v, prov);
                 Ok(())
             }
             _ => Err(fail(i, "unsupported destination operand")),
@@ -710,18 +906,25 @@ impl Lower<'_> {
         ))
     }
     fn push(&mut self, v: Value) {
+        let one = self.c(1);
+        self.push_with_prov(v, one);
+    }
+    fn push_with_prov(&mut self, v: Value, prov: Value) {
         let sp = self.var(self.rsp_var as usize);
         let sp = self.b.ins().iadd_imm(sp, -8);
         self.set(self.rsp_var as usize, sp);
-        // Return addresses on the stack are not PAC-covered; constant is irrelevant.
-        self.store(sp, 64, v, true);
+        self.store_with_prov(sp, 64, v, prov);
     }
     fn pop(&mut self) -> Result<Value, EngineError> {
+        Ok(self.pop_with_prov()?.0)
+    }
+    fn pop_with_prov(&mut self) -> Result<(Value, Value), EngineError> {
         let sp = self.var(self.rsp_var as usize);
         let v = self.load(sp, 64)?;
+        let prov = self.last_load_prov;
         let sp = self.b.ins().iadd_imm(sp, 8);
         self.set(self.rsp_var as usize, sp);
-        Ok(v)
+        Ok((v, prov))
     }
 
     /// Insert an inline CFI check for an indirect branch target.
@@ -837,8 +1040,9 @@ pub fn lower_block(
         (None, None, None)
     };
 
-    // Declare variables 0..50 (0..15 GPR, 16 RIP, 17 RFLAGS, 18 FS_BASE, 19..34 XMM lo, 35..50 XMM hi).
-    for j in 0..51 {
+    // Declare variables 0..50 (0..15 GPR, 16 RIP, 17 RFLAGS, 18 FS_BASE, 19..34 XMM lo, 35..50 XMM hi)
+    // and 51..101 for per-slot provenance (0 or 1).
+    for j in 0..102 {
         let var = Variable::from_u32(j);
         b.declare_var(var, types::I64);
     }
@@ -860,6 +1064,34 @@ pub fn lower_block(
             .load(types::I64, MemFlags::new(), ctx, (i * 8) as i32);
         b.def_var(var, v);
     }
+    if backend == Backend::X86_64 {
+        let prov_word = b.ins().load(
+            types::I64,
+            MemFlags::new(),
+            ctx,
+            super::native::NATIVE_PROVENANCE_OFFSET,
+        );
+        for i in 0..16 {
+            let var_idx = div.variable(i) as usize;
+            let shifted = if i > 0 {
+                b.ins().ushr_imm(prov_word, i as i64)
+            } else {
+                prov_word
+            };
+            let bit = b.ins().band_imm(shifted, 1);
+            b.def_var(Variable::from_u32((51 + var_idx) as u32), bit);
+        }
+        for i in 16..super::CONTEXT_WORDS {
+            let shifted = b.ins().ushr_imm(prov_word, i as i64);
+            let bit = b.ins().band_imm(shifted, 1);
+            b.def_var(Variable::from_u32((51 + i) as u32), bit);
+        }
+    } else {
+        let zero = b.ins().iconst(types::I64, 0);
+        for i in 0..super::CONTEXT_WORDS {
+            b.def_var(Variable::from_u32((51 + i) as u32), zero);
+        }
+    }
 
     // Stack padding for diversification (x86_64 only): create a dummy stack
     // slot so the function prologue reserves extra space. This shifts the
@@ -877,6 +1109,7 @@ pub fn lower_block(
         b.ins().store(MemFlags::new(), zero, addr, 0);
     }
 
+    let zero_prov = b.ins().iconst(types::I64, 0);
     let mut l = Lower {
         b,
         stack_fault: None,
@@ -892,6 +1125,7 @@ pub fn lower_block(
         load_sig,
         store_sig,
         cpuid_sig,
+        last_load_prov: zero_prov,
     };
 
     for i in trace {
@@ -899,7 +1133,10 @@ pub fn lower_block(
         l.rip = i.ip();
         let next = l.c(i.next_ip());
         l.set(16, next);
-        if matches!(i.mnemonic(), Nop | Endbr64 | Endbr32) {
+        if matches!(
+            i.mnemonic(),
+            Nop | Endbr64 | Endbr32 | Rdsspq | Rdsspd | Incsspq | Incsspd
+        ) {
             continue;
         }
         if i.has_rep_prefix() || i.has_repne_prefix() {
@@ -911,16 +1148,26 @@ pub fn lower_block(
             }
         }
         match i.mnemonic() {
-            Mov | Movzx | Movsx | Movsxd => {
+            Mov => {
+                let (v, prov) = l.read_with_prov(i, 1)?;
+                l.write_with_prov(i, 0, v, prov)?;
+            }
+            Movzx | Movsx | Movsxd => {
                 let mut v = l.read(i, 1)?;
                 if matches!(i.mnemonic(), Movsx | Movsxd) {
                     v = l.sign(v, l.width(i, 1)?);
                 }
-                l.write(i, 0, v)?;
+                let zero = l.c(0);
+                l.write_with_prov(i, 0, v, zero)?;
             }
             Lea => {
                 let v = l.address(i)?;
-                l.write(i, 0, v)?;
+                let prov = if i.is_ip_rel_memory_operand() && l.width(i, 0)? == 64 {
+                    l.c(1)
+                } else {
+                    l.c(0)
+                };
+                l.write_with_prov(i, 0, v, prov)?;
             }
             Push => {
                 if !matches!(
@@ -929,21 +1176,21 @@ pub fn lower_block(
                 ) {
                     return Err(fail(i, "only 64-bit push supported"));
                 }
-                let v = l.read(i, 0)?;
-                l.push(v);
+                let (v, prov) = l.read_with_prov(i, 0)?;
+                l.push_with_prov(v, prov);
             }
             Pop => {
                 if i.op0_kind() != OpKind::Register || l.width(i, 0)? != 64 {
                     return Err(fail(i, "only 64-bit register pop supported"));
                 }
-                let v = l.pop()?;
-                l.write(i, 0, v)?;
+                let (v, prov) = l.pop_with_prov()?;
+                l.write_with_prov(i, 0, v, prov)?;
             }
             Leave => {
                 let rbp = l.reg(Register::RBP, i)?;
                 l.set(l.rsp_var as usize, rbp);
-                let v = l.pop()?;
-                l.put_reg(Register::RBP, v, i)?;
+                let (v, prov) = l.pop_with_prov()?;
+                l.put_reg_with_prov(Register::RBP, v, prov, i)?;
             }
             Cpuid => {
                 let leaf = l.reg(Register::RAX, i)?;
@@ -1039,10 +1286,11 @@ pub fn lower_block(
             Cmove | Cmovne | Cmovb | Cmovae | Cmovbe | Cmova | Cmovl | Cmovge | Cmovle | Cmovg
             | Cmovs | Cmovns | Cmovo | Cmovno | Cmovp | Cmovnp => {
                 let cond = l.condition(i.mnemonic(), i)?;
-                let a = l.read(i, 0)?;
-                let b = l.read(i, 1)?;
+                let (a, pa) = l.read_with_prov(i, 0)?;
+                let (b, pb) = l.read_with_prov(i, 1)?;
                 let v = l.b.ins().select(cond, b, a);
-                l.write(i, 0, v)?;
+                let pv = l.b.ins().select(cond, pb, pa);
+                l.write_with_prov(i, 0, v, pv)?;
             }
             Sete | Setne | Setb | Setae | Setbe | Seta | Setl | Setge | Setle | Setg | Sets
             | Setns | Seto | Setno | Setp | Setnp => {
@@ -1112,7 +1360,7 @@ pub fn lower_block(
                 };
                 l.write(i, 0, v)?;
             }
-            Bt | Bts => {
+            Bt | Bts | Btr | Btc => {
                 let w = l.width(i, 0)?;
                 let a = l.read(i, 0)?;
                 let bit_idx_raw = l.read(i, 1)?;
@@ -1130,11 +1378,25 @@ pub fn lower_block(
                     let v = l.b.ins().bor(a, mask_bit);
                     let v = l.mask(v, w);
                     l.write(i, 0, v)?;
+                } else if i.mnemonic() == Btr {
+                    let one = l.c(1);
+                    let mask_bit = l.b.ins().ishl(one, bit_idx);
+                    let inv_mask = l.b.ins().bnot(mask_bit);
+                    let v = l.b.ins().band(a, inv_mask);
+                    let v = l.mask(v, w);
+                    l.write(i, 0, v)?;
+                } else if i.mnemonic() == Btc {
+                    let one = l.c(1);
+                    let mask_bit = l.b.ins().ishl(one, bit_idx);
+                    let v = l.b.ins().bxor(a, mask_bit);
+                    let v = l.mask(v, w);
+                    l.write(i, 0, v)?;
                 }
             }
             Bsf | Bsr | Tzcnt => {
                 let w = l.width(i, 0)?;
-                let a = l.read(i, 0)?;
+                let a = l.read(i, 1)?;
+                let a = l.mask(a, w);
                 let is_zero = l.b.ins().icmp_imm(IntCC::Equal, a, 0);
                 let v = match i.mnemonic() {
                     Bsf => {
@@ -1362,46 +1624,52 @@ pub fn lower_block(
             Rol | Ror => {
                 let w = l.width(i, 0)?;
                 let a = l.read(i, 0)?;
-                let count = immediate(i, 1)
-                    .ok_or_else(|| fail(i, "only immediate rotations supported"))?
-                    & if w == 64 { 63 } else { 31 };
-                if count != 0 {
-                    let effective = count % u64::from(w);
-                    let v = if effective == 0 {
-                        a
-                    } else {
-                        let (left, right) = if i.mnemonic() == Rol {
-                            (effective, u64::from(w) - effective)
-                        } else {
-                            (u64::from(w) - effective, effective)
-                        };
-                        let lo = l.b.ins().ishl_imm(a, left as i64);
-                        let hi = l.b.ins().ushr_imm(a, right as i64);
-                        let v = l.b.ins().bor(lo, hi);
-                        l.mask(v, w)
-                    };
-                    let c = l.bit(v, if i.mnemonic() == Rol { 0 } else { w - 1 });
-                    // RFLAGS is always variable 17
-                    let old = l.var(17);
-                    let old =
-                        l.b
-                            .ins()
-                            .band_imm(old, if count == 1 { !0x801 } else { !1 });
-                    let mut f = l.b.ins().bor(old, c);
-                    if count == 1 {
-                        let top = l.bit(v, w - 1);
-                        let other = if i.mnemonic() == Rol {
-                            c
-                        } else {
-                            l.bit(v, w - 2)
-                        };
-                        let o = l.b.ins().bxor(top, other);
-                        let o = l.b.ins().ishl_imm(o, 11);
-                        f = l.b.ins().bor(f, o);
-                    }
-                    l.set(17, f);
-                    l.write(i, 0, v)?;
-                }
+                let count_raw = l.read(i, 1)?;
+                let mask = if w == 64 { 63 } else { 31 };
+                let count = l.b.ins().band_imm(count_raw, mask);
+                let is_zero = l.b.ins().icmp_imm(IntCC::Equal, count, 0);
+                let effective = if w == 64 || w == 32 {
+                    count
+                } else {
+                    l.b.ins().band_imm(count, (w - 1) as i64)
+                };
+                let eff_zero = l.b.ins().icmp_imm(IntCC::Equal, effective, 0);
+                let a_masked = l.mask(a, w);
+                let w_val = l.c(u64::from(w));
+                let comp = l.b.ins().isub(w_val, effective);
+                let (left, right) = if i.mnemonic() == Rol {
+                    (effective, comp)
+                } else {
+                    (comp, effective)
+                };
+                let lo = l.b.ins().ishl(a_masked, left);
+                let hi = l.b.ins().ushr(a_masked, right);
+                let bor_lh = l.b.ins().bor(lo, hi);
+                let rotated = l.mask(bor_lh, w);
+                let v = l.b.ins().select(eff_zero, a_masked, rotated);
+
+                let c = l.bit(v, if i.mnemonic() == Rol { 0 } else { w - 1 });
+                let is_one = l.b.ins().icmp_imm(IntCC::Equal, count, 1);
+                let old_flags = l.var(17);
+                let cleared_cf = l.b.ins().band_imm(old_flags, !1);
+                let cleared_cf_of = l.b.ins().band_imm(old_flags, !0x801);
+                let base_flags = l.b.ins().select(is_one, cleared_cf_of, cleared_cf);
+                let with_cf = l.b.ins().bor(base_flags, c);
+                let top = l.bit(v, w - 1);
+                let other = if i.mnemonic() == Rol {
+                    c
+                } else {
+                    l.bit(v, w - 2)
+                };
+                let o = l.b.ins().bxor(top, other);
+                let o = l.b.ins().ishl_imm(o, 11);
+                let with_cf_of = l.b.ins().bor(with_cf, o);
+                let new_flags = l.b.ins().select(is_one, with_cf_of, with_cf);
+
+                let final_v = l.b.ins().select(is_zero, a, v);
+                let final_flags = l.b.ins().select(is_zero, old_flags, new_flags);
+                l.set(17, final_flags);
+                l.write(i, 0, final_v)?;
             }
             Shl | Shr | Sar => {
                 let w = l.width(i, 0)?;
@@ -1453,11 +1721,19 @@ pub fn lower_block(
                 l.set(17, final_flags);
                 l.write(i, 0, final_res)?;
             }
-            Cld | Pause => {
+            Cld | Clc | Stc | Pause => {
                 if i.mnemonic() == Cld {
                     let old = l.var(17);
                     let cleared = l.b.ins().band_imm(old, !(1 << 10));
                     l.set(17, cleared);
+                } else if i.mnemonic() == Clc {
+                    let old = l.var(17);
+                    let cleared = l.b.ins().band_imm(old, !1);
+                    l.set(17, cleared);
+                } else if i.mnemonic() == Stc {
+                    let old = l.var(17);
+                    let set = l.b.ins().bor_imm(old, 1);
+                    l.set(17, set);
                 }
             }
             Cdqe => {
@@ -1555,6 +1831,41 @@ pub fn lower_block(
                 }
             }
             Movsb | Movsw | Movsd | Movsq => {
+                if i.mnemonic() == Movsd
+                    && ((i.op0_kind() == OpKind::Register && xmm_index(i.op0_register()).is_some())
+                        || (i.op1_kind() == OpKind::Register
+                            && xmm_index(i.op1_register()).is_some()))
+                {
+                    if i.op0_kind() == OpKind::Register && i.op1_kind() == OpKind::Register {
+                        let dst = xmm_index(i.op0_register())
+                            .ok_or_else(|| fail(i, "expected XMM register"))?;
+                        let src = xmm_index(i.op1_register())
+                            .ok_or_else(|| fail(i, "expected XMM register"))?;
+                        let (_, dst_hi) = l.get_xmm(dst);
+                        let (_, pdst_hi) = l.get_xmm_prov(dst);
+                        let (src_lo, _) = l.get_xmm(src);
+                        let (psrc_lo, _) = l.get_xmm_prov(src);
+                        l.set_xmm_with_prov(dst, src_lo, dst_hi, psrc_lo, pdst_hi);
+                    } else if i.op0_kind() == OpKind::Register && i.op1_kind() == OpKind::Memory {
+                        let dst = xmm_index(i.op0_register())
+                            .ok_or_else(|| fail(i, "expected XMM register"))?;
+                        let p = l.address(i)?;
+                        let lo = l.load(p, 64)?;
+                        let plo = l.last_load_prov;
+                        let zero = l.c(0);
+                        l.set_xmm_with_prov(dst, lo, zero, plo, zero);
+                    } else if i.op0_kind() == OpKind::Memory && i.op1_kind() == OpKind::Register {
+                        let src = xmm_index(i.op1_register())
+                            .ok_or_else(|| fail(i, "expected XMM register"))?;
+                        let (lo, _) = l.get_xmm(src);
+                        let (plo, _) = l.get_xmm_prov(src);
+                        let p = l.address(i)?;
+                        l.store_with_prov(p, 64, lo, plo);
+                    } else {
+                        return Err(fail(i, "unsupported movsd operand combination"));
+                    }
+                    continue;
+                }
                 let w: u16 = match i.mnemonic() {
                     Movsb => 8,
                     Movsw => 16,
@@ -1583,8 +1894,9 @@ pub fn lower_block(
                     l.b.seal_block(body);
                     let rsi = l.var(rsi_var);
                     let val = l.load(rsi, w)?;
+                    let prov = if w == 64 { l.last_load_prov } else { l.c(0) };
                     let rdi = l.var(rdi_var);
-                    l.store(rdi, w, val, false);
+                    l.store_with_prov(rdi, w, val, prov);
                     let new_rsi = l.b.ins().iadd_imm(rsi, step);
                     l.set(rsi_var, new_rsi);
                     let new_rdi = l.b.ins().iadd_imm(rdi, step);
@@ -1599,8 +1911,9 @@ pub fn lower_block(
                 } else {
                     let rsi = l.var(rsi_var);
                     let val = l.load(rsi, w)?;
+                    let prov = if w == 64 { l.last_load_prov } else { l.c(0) };
                     let rdi = l.var(rdi_var);
-                    l.store(rdi, w, val, false);
+                    l.store_with_prov(rdi, w, val, prov);
                     let new_rsi = l.b.ins().iadd_imm(rsi, step);
                     l.set(rsi_var, new_rsi);
                     let new_rdi = l.b.ins().iadd_imm(rdi, step);
@@ -1652,17 +1965,18 @@ pub fn lower_block(
                 let dst = l.read(i, 0)?;
                 let src = l.read(i, 1)?;
                 let sum = l.b.ins().iadd(dst, src);
+                let sum = l.mask(sum, w);
                 l.flags(dst, src, sum, w, Add);
                 l.write(i, 1, dst)?;
                 l.write(i, 0, sum)?;
             }
             Xchg => {
-                let v0 = l.read(i, 0)?;
-                let v1 = l.read(i, 1)?;
-                l.write(i, 0, v1)?;
-                l.write(i, 1, v0)?;
+                let (v0, p0) = l.read_with_prov(i, 0)?;
+                let (v1, p1) = l.read_with_prov(i, 1)?;
+                l.write_with_prov(i, 0, v1, p1)?;
+                l.write_with_prov(i, 1, v0, p0)?;
             }
-            Pxor | Xorps => {
+            Pxor | Xorps | Xorpd => {
                 let op0 = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                 if i.op1_kind() == OpKind::Register {
                     let op1 = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
@@ -1689,26 +2003,30 @@ pub fn lower_block(
                     return Err(fail(i, "unsupported pxor operand"));
                 }
             }
-            Movaps | Movups | Movdqa | Movdqu => {
+            Movaps | Movups | Movdqa | Movdqu | Movapd | Movupd => {
                 if i.op0_kind() == OpKind::Register && i.op1_kind() == OpKind::Register {
                     let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                     let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                     let (lo, hi) = l.get_xmm(src);
-                    l.set_xmm(dst, lo, hi);
+                    let (plo, phi) = l.get_xmm_prov(src);
+                    l.set_xmm_with_prov(dst, lo, hi, plo, phi);
                 } else if i.op0_kind() == OpKind::Register && i.op1_kind() == OpKind::Memory {
                     let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                     let p = l.address(i)?;
                     let lo = l.load(p, 64)?;
+                    let plo = l.last_load_prov;
                     let p8 = l.b.ins().iadd_imm(p, 8);
                     let hi = l.load(p8, 64)?;
-                    l.set_xmm(dst, lo, hi);
+                    let phi = l.last_load_prov;
+                    l.set_xmm_with_prov(dst, lo, hi, plo, phi);
                 } else if i.op0_kind() == OpKind::Memory && i.op1_kind() == OpKind::Register {
                     let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                     let (lo, hi) = l.get_xmm(src);
+                    let (plo, phi) = l.get_xmm_prov(src);
                     let p = l.address(i)?;
-                    l.store(p, 64, lo, false);
+                    l.store_with_prov(p, 64, lo, plo);
                     let p8 = l.b.ins().iadd_imm(p, 8);
-                    l.store(p8, 64, hi, false);
+                    l.store_with_prov(p8, 64, hi, phi);
                 } else {
                     return Err(fail(i, "unsupported movaps/movups operand combination"));
                 }
@@ -1718,46 +2036,57 @@ pub fn lower_block(
                 if i.op0_kind() == OpKind::Register && xmm_index(i.op0_register()).is_some() {
                     let dst = xmm_index(i.op0_register()).unwrap();
                     let zero = l.c(0);
-                    let val = if i.op1_kind() == OpKind::Register {
-                        let v = l.reg(i.op1_register(), i)?;
-                        l.mask(v, w)
+                    let (val, prov) = if i.op1_kind() == OpKind::Register {
+                        if let Some(src_xmm) = xmm_index(i.op1_register()) {
+                            let (lo, _) = l.get_xmm(src_xmm);
+                            let (plo, _) = l.get_xmm_prov(src_xmm);
+                            (l.mask(lo, w), if w == 64 { plo } else { zero })
+                        } else {
+                            let (v, p) = l.read_with_prov(i, 1)?;
+                            (l.mask(v, w), if w == 64 { p } else { zero })
+                        }
                     } else if i.op1_kind() == OpKind::Memory {
                         let p = l.address(i)?;
-                        l.load(p, w)?
+                        let v = l.load(p, w)?;
+                        let pr = if w == 64 { l.last_load_prov } else { zero };
+                        (v, pr)
                     } else {
                         return Err(fail(i, "unsupported operand for movd/movq to xmm"));
                     };
-                    l.set_xmm(dst, val, zero);
+                    l.set_xmm_with_prov(dst, val, zero, prov, zero);
                 } else if i.op1_kind() == OpKind::Register && xmm_index(i.op1_register()).is_some() {
                     let src = xmm_index(i.op1_register()).unwrap();
                     let (lo, _) = l.get_xmm(src);
+                    let (plo, _) = l.get_xmm_prov(src);
                     let val = l.mask(lo, w);
+                    let prov = if w == 64 { plo } else { l.c(0) };
                     if i.op0_kind() == OpKind::Register {
-                        l.put_reg(i.op0_register(), val, i)?;
+                        l.put_reg_with_prov(i.op0_register(), val, prov, i)?;
                     } else if i.op0_kind() == OpKind::Memory {
                         let p = l.address(i)?;
-                        l.store(p, w, val, false);
+                        l.store_with_prov(p, w, val, prov);
                     } else {
                         return Err(fail(i, "unsupported operand for movd/movq from xmm"));
                     }
                 } else {
-                    let v = l.read(i, 1)?;
-                    l.write(i, 0, v)?;
+                    let (v, prov) = l.read_with_prov(i, 1)?;
+                    l.write_with_prov(i, 0, v, prov)?;
                 }
             }
-            Pcmpeqb | Pcmpeqd => {
+            Pcmpeqb | Pcmpeqw | Pcmpeqd | Pcmpgtb | Pcmpgtw | Pcmpgtd => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                 let (dst_lo, dst_hi) = l.get_xmm(dst);
                 let (src_lo, src_hi) = l.read_xmm(i, 1)?;
-                if i.mnemonic() == Pcmpeqb {
-                    let res_lo = l.pcmpeqb_u64(dst_lo, src_lo);
-                    let res_hi = l.pcmpeqb_u64(dst_hi, src_hi);
-                    l.set_xmm(dst, res_lo, res_hi);
-                } else {
-                    let res_lo = l.pcmpeqd_u64(dst_lo, src_lo);
-                    let res_hi = l.pcmpeqd_u64(dst_hi, src_hi);
-                    l.set_xmm(dst, res_lo, res_hi);
-                }
+                let (res_lo, res_hi) = match i.mnemonic() {
+                    Pcmpeqb => (l.pcmpeqb_u64(dst_lo, src_lo), l.pcmpeqb_u64(dst_hi, src_hi)),
+                    Pcmpeqw => (l.pcmpeqw_u64(dst_lo, src_lo), l.pcmpeqw_u64(dst_hi, src_hi)),
+                    Pcmpeqd => (l.pcmpeqd_u64(dst_lo, src_lo), l.pcmpeqd_u64(dst_hi, src_hi)),
+                    Pcmpgtb => (l.pcmpgtb_u64(dst_lo, src_lo), l.pcmpgtb_u64(dst_hi, src_hi)),
+                    Pcmpgtw => (l.pcmpgtw_u64(dst_lo, src_lo), l.pcmpgtw_u64(dst_hi, src_hi)),
+                    Pcmpgtd => (l.pcmpgtd_u64(dst_lo, src_lo), l.pcmpgtd_u64(dst_hi, src_hi)),
+                    _ => unreachable!(),
+                };
+                l.set_xmm(dst, res_lo, res_hi);
             }
             Pmovmskb => {
                 let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
@@ -1796,18 +2125,18 @@ pub fn lower_block(
                 m = l.b.ins().bor(m, b3);
                 l.put_reg(i.op0_register(), m, i)?;
             }
-            Pand | Pandn | Por => {
+            Pand | Pandn | Por | Andps | Andpd | Andnps | Andnpd | Orps | Orpd => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                 let (lo0, hi0) = l.get_xmm(dst);
                 let (lo1, hi1) = l.read_xmm(i, 1)?;
                 let (new_lo, new_hi) = match i.mnemonic() {
-                    Pand => (l.b.ins().band(lo0, lo1), l.b.ins().band(hi0, hi1)),
-                    Pandn => {
+                    Pand | Andps | Andpd => (l.b.ins().band(lo0, lo1), l.b.ins().band(hi0, hi1)),
+                    Pandn | Andnps | Andnpd => {
                         let not0 = l.b.ins().bnot(lo0);
                         let not1 = l.b.ins().bnot(hi0);
                         (l.b.ins().band(not0, lo1), l.b.ins().band(not1, hi1))
                     }
-                    Por => (l.b.ins().bor(lo0, lo1), l.b.ins().bor(hi0, hi1)),
+                    Por | Orps | Orpd => (l.b.ins().bor(lo0, lo1), l.b.ins().bor(hi0, hi1)),
                     _ => unreachable!(),
                 };
                 l.set_xmm(dst, new_lo, new_hi);
@@ -1849,6 +2178,39 @@ pub fn lower_block(
                 let shift_hi3 = l.b.ins().ishl_imm(dwords[sel3], 32);
                 let new_hi = l.b.ins().bor(dwords[sel2], shift_hi3);
                 l.set_xmm(dst, new_lo, new_hi);
+            }
+            Palignr => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (d_lo, d_hi) = l.get_xmm(dst);
+                let (pd_lo, pd_hi) = l.get_xmm_prov(dst);
+                let ((s_lo, s_hi), (ps_lo, ps_hi)) = l.read_xmm_with_prov(i, 1)?;
+                let imm = i.immediate8() as usize;
+                let zero = l.c(0);
+                if imm >= 32 {
+                    l.set_xmm(dst, zero, zero);
+                } else {
+                    let words = [s_lo, s_hi, d_lo, d_hi, zero, zero];
+                    let prows = [ps_lo, ps_hi, pd_lo, pd_hi, zero, zero];
+                    let w_idx = imm / 8;
+                    let bit_shift = ((imm % 8) * 8) as i64;
+                    if bit_shift == 0 {
+                        l.set_xmm_with_prov(
+                            dst,
+                            words[w_idx],
+                            words[w_idx + 1],
+                            prows[w_idx],
+                            prows[w_idx + 1],
+                        );
+                    } else {
+                        let a0 = l.b.ins().ushr_imm(words[w_idx], bit_shift);
+                        let a1 = l.b.ins().ishl_imm(words[w_idx + 1], 64 - bit_shift);
+                        let out_lo = l.b.ins().bor(a0, a1);
+                        let b0 = l.b.ins().ushr_imm(words[w_idx + 1], bit_shift);
+                        let b1 = l.b.ins().ishl_imm(words[w_idx + 2], 64 - bit_shift);
+                        let out_hi = l.b.ins().bor(b0, b1);
+                        l.set_xmm(dst, out_lo, out_hi);
+                    }
+                }
             }
             Punpcklbw => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
@@ -2043,34 +2405,224 @@ pub fn lower_block(
             Punpcklqdq => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                 let (lo0, _) = l.get_xmm(dst);
-                let (lo1, _) = l.read_xmm(i, 1)?;
-                l.set_xmm(dst, lo0, lo1);
+                let (plo0, _) = l.get_xmm_prov(dst);
+                let ((lo1, _), (plo1, _)) = l.read_xmm_with_prov(i, 1)?;
+                l.set_xmm_with_prov(dst, lo0, lo1, plo0, plo1);
             }
             Punpckhqdq => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                 let (_, hi0) = l.get_xmm(dst);
-                let (_, hi1) = l.read_xmm(i, 1)?;
-                l.set_xmm(dst, hi0, hi1);
+                let (_, phi0) = l.get_xmm_prov(dst);
+                let ((_, hi1), (_, phi1)) = l.read_xmm_with_prov(i, 1)?;
+                l.set_xmm_with_prov(dst, hi0, hi1, phi0, phi1);
             }
             Movlhps => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                 let (lo0, _) = l.get_xmm(dst);
-                let (lo1, _) = l.read_xmm(i, 1)?;
-                l.set_xmm(dst, lo0, lo1);
+                let (plo0, _) = l.get_xmm_prov(dst);
+                let ((lo1, _), (plo1, _)) = l.read_xmm_with_prov(i, 1)?;
+                l.set_xmm_with_prov(dst, lo0, lo1, plo0, plo1);
             }
-            Movhps => {
+            Movhlps => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (_, dst_hi) = l.get_xmm(dst);
+                let (_, pdst_hi) = l.get_xmm_prov(dst);
+                let (_, src_hi) = l.get_xmm(src);
+                let (_, psrc_hi) = l.get_xmm_prov(src);
+                l.set_xmm_with_prov(dst, src_hi, dst_hi, psrc_hi, pdst_hi);
+            }
+            Movhps | Movhpd => {
                 if i.op0_kind() == OpKind::Register {
                     let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                     let (lo, _) = l.get_xmm(dst);
+                    let (plo, _) = l.get_xmm_prov(dst);
                     let p = l.address(i)?;
                     let hi = l.load(p, 64)?;
-                    l.set_xmm(dst, lo, hi);
+                    let phi = l.last_load_prov;
+                    l.set_xmm_with_prov(dst, lo, hi, plo, phi);
                 } else if i.op0_kind() == OpKind::Memory {
                     let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
                     let (_, hi) = l.get_xmm(src);
+                    let (_, phi) = l.get_xmm_prov(src);
                     let p = l.address(i)?;
-                    l.store(p, 64, hi, false);
+                    l.store_with_prov(p, 64, hi, phi);
                 }
+            }
+            Movlps | Movlpd => {
+                if i.op0_kind() == OpKind::Register {
+                    let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let (_, hi) = l.get_xmm(dst);
+                    let (_, phi) = l.get_xmm_prov(dst);
+                    let p = l.address(i)?;
+                    let lo = l.load(p, 64)?;
+                    let plo = l.last_load_prov;
+                    l.set_xmm_with_prov(dst, lo, hi, plo, phi);
+                } else if i.op0_kind() == OpKind::Memory {
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    let (lo, _) = l.get_xmm(src);
+                    let (plo, _) = l.get_xmm_prov(src);
+                    let p = l.address(i)?;
+                    l.store_with_prov(p, 64, lo, plo);
+                }
+            }
+            Shufpd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, dst_hi) = l.get_xmm(dst);
+                let (pdst_lo, pdst_hi) = l.get_xmm_prov(dst);
+                let ((src_lo, src_hi), (psrc_lo, psrc_hi)) = l.read_xmm_with_prov(i, 1)?;
+                let imm = i.immediate8();
+                let (new_lo, pnew_lo) = if imm & 1 == 0 {
+                    (dst_lo, pdst_lo)
+                } else {
+                    (dst_hi, pdst_hi)
+                };
+                let (new_hi, pnew_hi) = if imm & 2 == 0 {
+                    (src_lo, psrc_lo)
+                } else {
+                    (src_hi, psrc_hi)
+                };
+                l.set_xmm_with_prov(dst, new_lo, new_hi, pnew_lo, pnew_hi);
+            }
+            Psrldq | Pslldq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo, hi) = l.get_xmm(dst);
+                let (plo, phi) = l.get_xmm_prov(dst);
+                let shift_bytes = i.immediate8() as u32;
+                let zero = l.c(0);
+                if i.mnemonic() == Psrldq {
+                    if shift_bytes == 0 {
+                        l.set_xmm_with_prov(dst, lo, hi, plo, phi);
+                    } else if shift_bytes == 8 {
+                        l.set_xmm_with_prov(dst, hi, zero, phi, zero);
+                    } else if shift_bytes < 8 {
+                        let bits = (shift_bytes * 8) as i64;
+                        let new_lo = l.b.ins().ushr_imm(lo, bits);
+                        let carry = l.b.ins().ishl_imm(hi, 64 - bits);
+                        let new_lo = l.b.ins().bor(new_lo, carry);
+                        let new_hi = l.b.ins().ushr_imm(hi, bits);
+                        l.set_xmm(dst, new_lo, new_hi);
+                    } else if shift_bytes < 16 {
+                        let bits = ((shift_bytes - 8) * 8) as i64;
+                        let new_lo = l.b.ins().ushr_imm(hi, bits);
+                        l.set_xmm(dst, new_lo, zero);
+                    } else {
+                        l.set_xmm(dst, zero, zero);
+                    }
+                } else if shift_bytes == 0 {
+                    l.set_xmm_with_prov(dst, lo, hi, plo, phi);
+                } else if shift_bytes == 8 {
+                    l.set_xmm_with_prov(dst, zero, lo, zero, plo);
+                } else if shift_bytes < 8 {
+                    let bits = (shift_bytes * 8) as i64;
+                    let new_hi = l.b.ins().ishl_imm(hi, bits);
+                    let carry = l.b.ins().ushr_imm(lo, 64 - bits);
+                    let new_hi = l.b.ins().bor(new_hi, carry);
+                    let new_lo = l.b.ins().ishl_imm(lo, bits);
+                    l.set_xmm(dst, new_lo, new_hi);
+                } else if shift_bytes < 16 {
+                    let bits = ((shift_bytes - 8) * 8) as i64;
+                    let new_hi = l.b.ins().ishl_imm(lo, bits);
+                    l.set_xmm(dst, zero, new_hi);
+                } else {
+                    l.set_xmm(dst, zero, zero);
+                }
+            }
+            Psllw | Pslld | Psllq | Psrlw | Psrld | Psrlq => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (lo, hi) = l.get_xmm(dst);
+                let count = if let Some(imm) = immediate(i, 1) {
+                    imm
+                } else {
+                    0
+                };
+                let left = matches!(i.mnemonic(), Psllw | Pslld | Psllq);
+                let elem_bits: u64 = match i.mnemonic() {
+                    Psllw | Psrlw => 16,
+                    Pslld | Psrld => 32,
+                    Psllq | Psrlq => 64,
+                    _ => unreachable!(),
+                };
+                if count >= elem_bits {
+                    let zero = l.c(0);
+                    l.set_xmm(dst, zero, zero);
+                } else if count > 0 {
+                    let shift_half = |l: &mut Lower, half: Value| -> Value {
+                        if elem_bits == 64 {
+                            if left {
+                                l.b.ins().ishl_imm(half, count as i64)
+                            } else {
+                                l.b.ins().ushr_imm(half, count as i64)
+                            }
+                        } else {
+                            let lanes = 64 / elem_bits;
+                            let lane_mask = ((1u64 << elem_bits) - 1) as i64;
+                            let mut acc = l.c(0);
+                            for k in 0..lanes {
+                                let off = (k * elem_bits) as i64;
+                                let v = if off > 0 {
+                                    l.b.ins().ushr_imm(half, off)
+                                } else {
+                                    half
+                                };
+                                let v = l.b.ins().band_imm(v, lane_mask);
+                                let v = if left {
+                                    l.b.ins().ishl_imm(v, count as i64)
+                                } else {
+                                    l.b.ins().ushr_imm(v, count as i64)
+                                };
+                                let v = l.b.ins().band_imm(v, lane_mask);
+                                let v = if off > 0 {
+                                    l.b.ins().ishl_imm(v, off)
+                                } else {
+                                    v
+                                };
+                                acc = l.b.ins().bor(acc, v);
+                            }
+                            acc
+                        }
+                    };
+                    let new_lo = shift_half(&mut l, lo);
+                    let new_hi = shift_half(&mut l, hi);
+                    l.set_xmm(dst, new_lo, new_hi);
+                }
+            }
+            Packuswb => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, dst_hi) = l.get_xmm(dst);
+                let (src_lo, src_hi) = l.read_xmm(i, 1)?;
+                let pack_words = |l: &mut Lower, w_lo: Value, w_hi: Value| -> Value {
+                    let mut out = l.c(0);
+                    let zero = l.c(0);
+                    let max_b = l.c(0xff);
+                    for (half_idx, half) in [(0u64, w_lo), (1u64, w_hi)] {
+                        for k in 0..4u64 {
+                            let shift = (k * 16) as i64;
+                            let w = if shift > 0 {
+                                l.b.ins().ushr_imm(half, shift)
+                            } else {
+                                half
+                            };
+                            let w16 = l.b.ins().ireduce(types::I16, w);
+                            let s = l.b.ins().sextend(types::I64, w16);
+                            let neg = l.b.ins().icmp_imm(IntCC::SignedLessThan, s, 0);
+                            let big = l.b.ins().icmp_imm(IntCC::SignedGreaterThan, s, 255);
+                            let clamped = l.b.ins().select(neg, zero, s);
+                            let clamped = l.b.ins().select(big, max_b, clamped);
+                            let byte_pos = ((half_idx * 4 + k) * 8) as i64;
+                            let placed = if byte_pos > 0 {
+                                l.b.ins().ishl_imm(clamped, byte_pos)
+                            } else {
+                                clamped
+                            };
+                            out = l.b.ins().bor(out, placed);
+                        }
+                    }
+                    out
+                };
+                let new_lo = pack_words(&mut l, dst_lo, dst_hi);
+                let new_hi = pack_words(&mut l, src_lo, src_hi);
+                l.set_xmm(dst, new_lo, new_hi);
             }
             Pinsrw | Pinsrb | Pinsrd | Pinsrq => {
                 let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
@@ -2162,16 +2714,18 @@ pub fn lower_block(
                     }
                     Pinsrq => {
                         let imm = (i.immediate8() & 1) as u32;
-                        let val = if i.op1_kind() == OpKind::Register {
-                            l.reg(i.op1_register(), i)?
+                        let (plo, phi) = l.get_xmm_prov(dst);
+                        let (val, prov) = if i.op1_kind() == OpKind::Register {
+                            l.read_with_prov(i, 1)?
                         } else {
                             let p = l.address(i)?;
-                            l.load(p, 64)?
+                            let v = l.load(p, 64)?;
+                            (v, l.last_load_prov)
                         };
                         if imm == 0 {
-                            l.set_xmm(dst, val, hi);
+                            l.set_xmm_with_prov(dst, val, hi, prov, phi);
                         } else {
-                            l.set_xmm(dst, lo, val);
+                            l.set_xmm_with_prov(dst, lo, val, plo, prov);
                         }
                     }
                     _ => unreachable!(),
@@ -2229,12 +2783,13 @@ pub fn lower_block(
                     }
                     Pextrq => {
                         let imm = (i.immediate8() & 1) as u32;
-                        let qword = if imm == 0 { lo } else { hi };
+                        let (plo, phi) = l.get_xmm_prov(src);
+                        let (qword, prov) = if imm == 0 { (lo, plo) } else { (hi, phi) };
                         if i.op0_kind() == OpKind::Register {
-                            l.put_reg(i.op0_register(), qword, i)?;
+                            l.put_reg_with_prov(i.op0_register(), qword, prov, i)?;
                         } else {
                             let p = l.address(i)?;
-                            l.store(p, 64, qword, false);
+                            l.store_with_prov(p, 64, qword, prov);
                         }
                     }
                     _ => unreachable!(),
@@ -2293,6 +2848,82 @@ pub fn lower_block(
 
                 l.write(i, 0, final_res)?;
             }
+            Addsd | Subsd | Mulsd | Divsd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, dst_hi) = l.get_xmm(dst);
+                let src_lo = if i.op1_kind() == OpKind::Register {
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    l.get_xmm(src).0
+                } else {
+                    let p = l.address(i)?;
+                    l.load(p, 64)?
+                };
+                let fa = l.b.ins().bitcast(types::F64, MemFlags::new(), dst_lo);
+                let fb = l.b.ins().bitcast(types::F64, MemFlags::new(), src_lo);
+                let fres = match i.mnemonic() {
+                    Addsd => l.b.ins().fadd(fa, fb),
+                    Subsd => l.b.ins().fsub(fa, fb),
+                    Mulsd => l.b.ins().fmul(fa, fb),
+                    Divsd => l.b.ins().fdiv(fa, fb),
+                    _ => unreachable!(),
+                };
+                let new_lo = l.b.ins().bitcast(types::I64, MemFlags::new(), fres);
+                l.set_xmm(dst, new_lo, dst_hi);
+            }
+            Comisd | Ucomisd => {
+                use cranelift_codegen::ir::condcodes::FloatCC;
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (dst_lo, _) = l.get_xmm(dst);
+                let src_lo = if i.op1_kind() == OpKind::Register {
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    l.get_xmm(src).0
+                } else {
+                    let p = l.address(i)?;
+                    l.load(p, 64)?
+                };
+                let fa = l.b.ins().bitcast(types::F64, MemFlags::new(), dst_lo);
+                let fb = l.b.ins().bitcast(types::F64, MemFlags::new(), src_lo);
+                let unord = l.b.ins().fcmp(FloatCC::Unordered, fa, fb);
+                let lt = l.b.ins().fcmp(FloatCC::LessThan, fa, fb);
+                let eq = l.b.ins().fcmp(FloatCC::Equal, fa, fb);
+                let zf_b = l.b.ins().bor(unord, eq);
+                let cf_b = l.b.ins().bor(unord, lt);
+                let zf_64 = l.bool64(zf_b);
+                let pf_64 = l.bool64(unord);
+                let zf = l.b.ins().ishl_imm(zf_64, 6);
+                let pf = l.b.ins().ishl_imm(pf_64, 2);
+                let cf = l.bool64(cf_b);
+                let old = l.var(17);
+                let cleared = l.b.ins().band_imm(old, !0x8d5);
+                let f = l.b.ins().bor(cleared, zf);
+                let f = l.b.ins().bor(f, pf);
+                let f = l.b.ins().bor(f, cf);
+                l.set(17, f);
+            }
+            Cvtsi2sd => {
+                let dst = xmm_index(i.op0_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                let (_, dst_hi) = l.get_xmm(dst);
+                let w = l.width(i, 1)?;
+                let v = l.read(i, 1)?;
+                let sv = l.sign(v, w);
+                let f = l.b.ins().fcvt_from_sint(types::F64, sv);
+                let new_lo = l.b.ins().bitcast(types::I64, MemFlags::new(), f);
+                l.set_xmm(dst, new_lo, dst_hi);
+            }
+            Cvttsd2si => {
+                let src_lo = if i.op1_kind() == OpKind::Register {
+                    let src = xmm_index(i.op1_register()).ok_or_else(|| fail(i, "expected XMM register"))?;
+                    l.get_xmm(src).0
+                } else {
+                    let p = l.address(i)?;
+                    l.load(p, 64)?
+                };
+                let f = l.b.ins().bitcast(types::F64, MemFlags::new(), src_lo);
+                let iv = l.b.ins().fcvt_to_sint_sat(types::I64, f);
+                let w = l.width(i, 0)?;
+                let iv = l.mask(iv, w);
+                l.write(i, 0, iv)?;
+            }
             _ => return Err(fail(i, "instruction unsupported by process lowerer")),
         }
     }
@@ -2306,6 +2937,32 @@ pub fn lower_block(
     for i in 16..super::CONTEXT_WORDS {
         let v = l.var(i);
         l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
+    }
+    if backend == Backend::X86_64 {
+        let mut prov_word = l.c(0);
+        for i in 0..16 {
+            let var_idx = div.variable(i) as usize;
+            let raw_p = l.var_prov(var_idx);
+            let bit = l.b.ins().band_imm(raw_p, 1);
+            let shifted = if i > 0 {
+                l.b.ins().ishl_imm(bit, i as i64)
+            } else {
+                bit
+            };
+            prov_word = l.b.ins().bor(prov_word, shifted);
+        }
+        for i in 16..super::CONTEXT_WORDS {
+            let raw_p = l.var_prov(i);
+            let bit = l.b.ins().band_imm(raw_p, 1);
+            let shifted = l.b.ins().ishl_imm(bit, i as i64);
+            prov_word = l.b.ins().bor(prov_word, shifted);
+        }
+        l.b.ins().store(
+            MemFlags::new(),
+            prov_word,
+            ctx,
+            super::native::NATIVE_PROVENANCE_OFFSET,
+        );
     }
 
     if backend == Backend::X86_64 {
@@ -2344,6 +3001,30 @@ pub fn lower_block(
             l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
         }
         if backend == Backend::X86_64 {
+            let mut prov_word = l.c(0);
+            for i in 0..16 {
+                let var_idx = div.variable(i) as usize;
+                let raw_p = l.var_prov(var_idx);
+                let bit = l.b.ins().band_imm(raw_p, 1);
+                let shifted = if i > 0 {
+                    l.b.ins().ishl_imm(bit, i as i64)
+                } else {
+                    bit
+                };
+                prov_word = l.b.ins().bor(prov_word, shifted);
+            }
+            for i in 16..super::CONTEXT_WORDS {
+                let raw_p = l.var_prov(i);
+                let bit = l.b.ins().band_imm(raw_p, 1);
+                let shifted = l.b.ins().ishl_imm(bit, i as i64);
+                prov_word = l.b.ins().bor(prov_word, shifted);
+            }
+            l.b.ins().store(
+                MemFlags::new(),
+                prov_word,
+                ctx,
+                super::native::NATIVE_PROVENANCE_OFFSET,
+            );
             let three = l.c(super::native::FAULT_MEMORY);
             l.b.ins().return_(&[three]);
         } else {

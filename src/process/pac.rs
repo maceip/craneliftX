@@ -35,7 +35,7 @@
 //! this struct, which no guest address can name.
 
 use crate::error::{EngineError, MitigationKind};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Bits 48:55. Chosen because a 48-bit user address leaves them zero, and
 /// because LAM_U57 masks 57:62 rather than this field.
@@ -91,17 +91,34 @@ pub struct PacStats {
     pub static_pointers: usize,
 }
 
+#[derive(Clone)]
 pub struct Pac {
     k0: u64,
     k1: u64,
-    /// Addresses of 8-byte slots currently holding an authenticated pointer.
-    slots: HashSet<u64>,
+    /// Addresses of 8-byte slots currently holding an authenticated pointer,
+    /// mapped to the authenticated plain pointer value stored there.
+    slots: HashMap<u64, u64>,
     /// Addresses that have *ever* held an authenticated pointer. A data store
     /// clears `slots` so the word reads back as ordinary data, but this set
     /// keeps the slot classified: a later code-pointer store still requires
     /// constant provenance. Without it an attacker unmarks the slot with a
     /// data write and then signs an arbitrary code pointer into it.
     pointer_history: HashSet<u64>,
+    /// Addresses of 8-byte slots in the static ELF image whose code pointers
+    /// originated from static image initialization or constant provenance.
+    /// Heap slots are never placed here, so copying a signed pointer from one
+    /// heap object to another (`pointer_substitution`) does not carry constant
+    /// provenance.
+    trusted_slots: HashSet<u64>,
+    /// Slots initialized by `seed_image` at program load.
+    seeded_slots: HashSet<u64>,
+    /// 8-byte stack slots currently holding a value stored with constant
+    /// provenance (register spills across calls).
+    stack_trusted: HashSet<u64>,
+    /// Writable ELF image data ranges (excluding heap and stack).
+    image_ranges: Vec<std::ops::Range<u64>>,
+    /// Read-only ELF image ranges (e.g. `.rodata`, `.rela.plt`).
+    readonly_ranges: Vec<std::ops::Range<u64>>,
     /// Guest virtual ranges that hold executable code.
     code: Vec<std::ops::Range<u64>>,
     enabled: bool,
@@ -116,11 +133,62 @@ impl Pac {
         Self {
             k0: u64::from_le_bytes(k0),
             k1: u64::from_le_bytes(k1),
-            slots: HashSet::new(),
+            slots: HashMap::new(),
             pointer_history: HashSet::new(),
+            trusted_slots: HashSet::new(),
+            seeded_slots: HashSet::new(),
+            stack_trusted: HashSet::new(),
+            image_ranges: Vec::new(),
+            readonly_ranges: Vec::new(),
             code,
             enabled,
             stats: PacStats::default(),
+        }
+    }
+    pub fn set_image_ranges(
+        &mut self,
+        writable: Vec<std::ops::Range<u64>>,
+        readonly: Vec<std::ops::Range<u64>>,
+    ) {
+        self.image_ranges = writable;
+        self.readonly_ranges = readonly;
+    }
+    fn is_image_data(&self, address: u64) -> bool {
+        self.image_ranges.iter().any(|r| r.contains(&address))
+    }
+    fn is_readonly_image(&self, address: u64) -> bool {
+        self.readonly_ranges.iter().any(|r| r.contains(&address))
+    }
+    /// Whether an 8-byte load from `address` carries trusted constant/image
+    /// provenance (either a read-only ELF constant or a statically-seeded /
+    /// constant-provenance ELF image slot). Heap slots are never trusted.
+    pub fn is_trusted_slot(&self, address: u64) -> bool {
+        self.trusted_slots.contains(&address) || self.is_readonly_image(address)
+    }
+    pub fn set_stack_provenance(&mut self, address: u64, size: u64, constant: bool) {
+        if size == 8 && constant {
+            self.stack_trusted.insert(address);
+        } else {
+            let aligned = address & !7;
+            self.stack_trusted.remove(&address);
+            self.stack_trusted.remove(&aligned);
+        }
+    }
+    pub fn stack_provenance(&self, address: u64, size: u64) -> bool {
+        size == 8 && self.stack_trusted.contains(&address)
+    }
+    pub fn unmark_stack_slot(&mut self, address: u64) {
+        self.slots.remove(&address);
+        self.trusted_slots.remove(&address);
+    }
+    pub fn clear_range(&mut self, base: u64, size: u64) {
+        let mut addr = base & !7;
+        let end = base.saturating_add(size);
+        while addr < end {
+            self.slots.remove(&addr);
+            self.pointer_history.remove(&addr);
+            self.trusted_slots.remove(&addr);
+            addr += 8;
         }
     }
     pub fn stats(&self) -> PacStats {
@@ -146,7 +214,7 @@ impl Pac {
         }
     }
     pub fn is_signed_slot(&self, address: u64) -> bool {
-        self.enabled && self.slots.contains(&address)
+        self.enabled && self.slots.contains_key(&address)
     }
     /// Word value as it must be stored at `address`.
     pub fn signed_word(&self, value: u64, address: u64) -> u64 {
@@ -172,9 +240,11 @@ impl Pac {
             return Ok(value);
         }
         if self.is_code_address(value) {
+            let same_live_pointer = self.slots.get(&address).copied() == Some(value)
+                && !self.seeded_slots.contains(&address);
             let was_pointer_slot =
-                self.slots.contains(&address) || self.pointer_history.contains(&address);
-            if was_pointer_slot && !constant_provenance {
+                self.slots.contains_key(&address) || self.pointer_history.contains(&address);
+            if was_pointer_slot && !constant_provenance && !same_live_pointer {
                 self.stats.auth_faults += 1;
                 return Err(EngineError::Mitigation {
                     pc,
@@ -184,8 +254,13 @@ impl Pac {
                     ),
                 });
             }
-            self.slots.insert(address);
+            self.slots.insert(address, value);
             self.pointer_history.insert(address);
+            if constant_provenance && self.is_image_data(address) {
+                self.trusted_slots.insert(address);
+            } else if !same_live_pointer {
+                self.trusted_slots.remove(&address);
+            }
             self.stats.signings += 1;
             return Ok(self.signed_word(value, address));
         }
@@ -193,6 +268,7 @@ impl Pac {
         // the live marking. The history entry remains, so a later code-pointer
         // store into this field still needs constant provenance.
         self.slots.remove(&address);
+        self.trusted_slots.remove(&address);
         Ok(value)
     }
 
@@ -216,7 +292,7 @@ impl Pac {
         }
         let presented = (raw >> PAC_SHIFT) & 0xff;
         let value = raw & !PAC_MASK;
-        let marked = self.slots.contains(&address);
+        let marked = self.slots.contains_key(&address);
         // An unmarked slot holding an ordinary word is none of our business.
         if !marked && (presented == 0 || !self.is_code_address(value)) {
             return Ok(raw);
@@ -268,8 +344,10 @@ impl Pac {
             if word & PAC_MASK == 0 && self.is_code_address(word) {
                 let address = base + offset as u64;
                 let signed = self.signed_word(word, address);
-                self.slots.insert(address);
+                self.slots.insert(address, word);
                 self.pointer_history.insert(address);
+                self.trusted_slots.insert(address);
+                self.seeded_slots.insert(address);
                 write(address, signed.to_le_bytes());
                 count += 1;
             }

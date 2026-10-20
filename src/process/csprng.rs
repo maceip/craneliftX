@@ -67,6 +67,7 @@ fn os_entropy() -> Result<([u8; 32], [u8; 12]), std::io::Error> {
     }
 }
 
+#[derive(Clone)]
 pub struct Csprng {
     state: [u32; 16],
     buffer: [u8; 64],

@@ -119,9 +119,13 @@ pub fn run_file(path: &Path, options: &Options, ledger: &mut RunLedger) -> Resul
     }
     let bytes = input::ingest(path, options, ledger)?;
     let (memory, entry, intercepts) = input::load(&bytes, ledger)?;
-    let mut runtime = runtime::Runtime::initialize(memory, entry, options, ledger)?;
-    let mut cache = cache::BlockCache::with_backend(options.backend);
-    let mut cfi_map = cfi::InstructionMap::new();
+    let mut runtime = runtime::Runtime::initialize_with_intercepts(
+        memory,
+        entry,
+        intercepts.clone(),
+        options,
+        ledger,
+    )?;
     let mut report = Report::default();
     let execution = observe::operation(
         ledger,
@@ -129,6 +133,19 @@ pub fn run_file(path: &Path, options: &Options, ledger: &mut RunLedger) -> Resul
         json!({"allocator_intercepts":intercepts.names(),"intercepted":!intercepts.is_empty()}),
         |ledger| {
             loop {
+                if runtime
+                    .process
+                    .aborted
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    if let Some(err) = runtime.process.thread_error.lock().unwrap().take() {
+                        return Err(memory::error(err).into());
+                    }
+                }
+                if let Some(code) = *runtime.process.exit_code.lock().unwrap() {
+                    report.exit_code = Some(code);
+                    break;
+                }
                 runtime.check_budget(&report, options)?;
                 let rip = runtime.state[16];
                 // A call that landed on the guest's own allocator is served by
@@ -137,23 +154,42 @@ pub fn run_file(path: &Path, options: &Options, ledger: &mut RunLedger) -> Resul
                     runtime.allocator_call(*function, &mut report, ledger)?;
                     continue;
                 }
-                // Forward-edge CFI: a transfer into the body of a previously
-                // decoded instruction is never a legal target.
-                if options.hardening.cfi && !cfi_map.allows(rip) {
-                    return Err(memory::error(format!(
-                        "CFI violation: transfer to 0x{rip:x} lands inside a known instruction"
-                    ))
-                    .into());
+                let mut block = {
+                    let mut cs = runtime.process.compile_state.lock().unwrap();
+                    if options.hardening.cfi && !cs.cfi_map.allows(rip) {
+                        return Err(memory::error(format!(
+                            "CFI violation: transfer to 0x{rip:x} lands inside a known instruction"
+                        ))
+                        .into());
+                    }
+                    let space = runtime.process.address_space.lock().unwrap();
+                    let runtime::CompileState {
+                        ref mut cache,
+                        ref mut cfi_map,
+                        ref mut report,
+                    } = *cs;
+                    let cloned = {
+                        let cached = cache.get_or_compile(&space.memory, rip, report, ledger)?;
+                        cfi_map.record_block(&cached.compiled.source_instructions);
+                        cached.clone()
+                    };
+                    cache.mark_executed(rip);
+                    cloned
+                };
+                runtime.execute(&mut block, &mut report, options, ledger)?;
+                {
+                    let mut cs = runtime.process.compile_state.lock().unwrap();
+                    if let Some(entry) = cs.cache.get_mut(rip) {
+                        entry.executions += 1;
+                        entry.rv64_steps += block.rv64_steps;
+                    }
                 }
-                let block = cache.get_or_compile(&runtime.memory, rip, &mut report, ledger)?;
-                cfi_map.record_block(&block.compiled.source_instructions);
-                runtime.execute(block, &mut report, options, ledger)?;
                 let syscall = block.compiled.syscall;
-                cache.mark_executed(rip);
                 if let Some(syscall_rip) = syscall {
                     let outcome = runtime.syscall(rip, syscall_rip, &mut report, ledger)?;
                     if let Some(code) = outcome.exit {
                         report.exit_code = Some(code);
+                        *runtime.process.exit_code.lock().unwrap() = Some(code);
                         break;
                     }
                     if options.recompile_every_syscalls != 0
@@ -161,26 +197,52 @@ pub fn run_file(path: &Path, options: &Options, ledger: &mut RunLedger) -> Resul
                             .syscalls
                             .is_multiple_of(options.recompile_every_syscalls)
                     {
-                        cache.invalidate(
-                            runtime.kernel.open_descriptors(),
-                            &runtime.state,
-                            ledger,
-                        )?;
+                        let open_fds = runtime.process.kernel.open_descriptors();
+                        let mut cs = runtime.process.compile_state.lock().unwrap();
+                        cs.cache.invalidate(open_fds, &runtime.state, ledger)?;
                         report.cache_invalidations += 1;
                     }
+                }
+            }
+            if runtime
+                .process
+                .aborted
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                if let Some(err) = runtime.process.thread_error.lock().unwrap().take() {
+                    return Err(memory::error(err).into());
                 }
             }
             Ok(())
         },
         |_| json!({}),
     );
+    {
+        let cs = runtime.process.compile_state.lock().unwrap();
+        report.compiled_blocks = cs.report.compiled_blocks;
+        report.emitted_rv64_bytes = cs.report.emitted_rv64_bytes;
+        report.unique_lifted_instructions = cs.report.unique_lifted_instructions;
+        report.unique_lifted_bytes = cs.report.unique_lifted_bytes;
+        cs.cache.summarize(ledger)?;
+    }
     runtime.update_counters(&mut report);
-    cache.summarize(ledger)?;
+    let executed_addresses = {
+        let cs = runtime.process.compile_state.lock().unwrap();
+        cs.cache.addresses()
+    };
     ledger.event("execution",json!({"status":if execution.is_ok(){"completed"}else{"failed"},"counters":report,
         "error":execution.as_ref().err().map(ToString::to_string),"rip":format!("0x{:x}",runtime.state[16]),
-        "rflags":format!("0x{:x}",runtime.state[17]),"executed_block_addresses":cache.addresses(),
-        "open_descriptors_at_exit":runtime.kernel.open_descriptors()}))?;
+        "rflags":format!("0x{:x}",runtime.state[17]),"executed_block_addresses":executed_addresses,
+        "open_descriptors_at_exit":runtime.process.kernel.open_descriptors()}))?;
     ledger.event("mitigations", runtime.mitigation_summary())?;
+    if runtime.is_forked_child {
+        let code = if execution.is_ok() {
+            report.exit_code.unwrap_or(0)
+        } else {
+            1
+        };
+        unsafe { libc::_exit(code) };
+    }
     execution?;
     Ok(report)
 }

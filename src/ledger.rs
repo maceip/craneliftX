@@ -45,7 +45,7 @@ pub struct RunLedger {
     directory: PathBuf,
     file: File,
     run_id: String,
-    seq: u64,
+    seq: Arc<AtomicU64>,
     start: Instant,
     observer_error: Option<io::Error>,
     journal: Arc<crate::live::JournalState>,
@@ -71,11 +71,26 @@ impl RunLedger {
             directory,
             file,
             run_id,
-            seq: 0,
+            seq: Arc::new(AtomicU64::new(0)),
             start: Instant::now(),
             observer_error: None,
             journal: Arc::default(),
         })
+    }
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            directory: self.directory.clone(),
+            file: self.file.try_clone()?,
+            run_id: self.run_id.clone(),
+            seq: self.seq.clone(),
+            start: self.start,
+            observer_error: None,
+            journal: self.journal.clone(),
+        })
+    }
+    pub fn fork_child(&self) -> io::Result<Self> {
+        let root = self.directory.parent().unwrap_or(self.directory.as_path());
+        Self::create(root)
     }
     pub fn serve_events(&self, bind: std::net::SocketAddr) -> io::Result<crate::live::LiveFeed> {
         crate::live::LiveFeed::for_journal(
@@ -104,11 +119,11 @@ impl RunLedger {
         let map = fields
             .as_object_mut()
             .ok_or_else(|| io::Error::other("event fields must be an object"))?;
-        self.seq += 1;
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
         map.insert("v".into(), json!(1));
         map.insert("type".into(), json!(kind));
         map.insert("run_id".into(), json!(self.run_id));
-        map.insert("seq".into(), json!(self.seq));
+        map.insert("seq".into(), json!(seq));
         // Preserve the actual stage timestamp, rather than time of persistence.
         map.entry("timestamp_unix_ns")
             .or_insert_with(|| json!(timestamp_ns()));
@@ -157,7 +172,6 @@ impl RunLedger {
             .create_new(true)
             .open(&path)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
         self.event(
             "artifact",
             json!({"name":name, "path":path, "bytes":bytes.len(), "sha256":sha256(bytes)}),
@@ -167,6 +181,8 @@ impl RunLedger {
 
 impl Drop for RunLedger {
     fn drop(&mut self) {
-        self.journal.closed.store(true, Ordering::Release);
+        if Arc::strong_count(&self.seq) == 1 {
+            self.journal.closed.store(true, Ordering::Release);
+        }
     }
 }

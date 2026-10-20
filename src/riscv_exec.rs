@@ -245,10 +245,11 @@ impl RiscvCpu {
                     let raw = unsafe { memory.load(address, size, pc)? };
                     let (value, authenticated) =
                         memory.authenticate_load(address, size, raw, pc)?;
-                    // Deliberately not granted constant provenance: a pointer
-                    // that merely verified was loaded from memory, and letting
-                    // it re-sign elsewhere is exactly pointer substitution.
-                    let _ = authenticated;
+                    // `authenticated` is true only for trusted static-image
+                    // constants, stack spills, or CONTEXT_BASE register slots
+                    // that already carried constant provenance — never for heap
+                    // slots (`pointer_substitution`).
+                    from_constant = from_constant || authenticated;
                     result = Some(if signed {
                         sext(value, (size * 8) as u32)
                     } else {
@@ -311,6 +312,11 @@ impl RiscvCpu {
                     result = Some(sext(value as u64, 32));
                 }
                 0x33 => {
+                    from_constant = match (funct3, funct7) {
+                        (0, 0) | (6, 0) if rs2 == 0 => self.constant & (1 << rs1) != 0,
+                        (0, 0) | (6, 0) if rs1 == 0 => self.constant & (1 << rs2) != 0,
+                        _ => false,
+                    };
                     result = Some(match (funct3, funct7) {
                         (0, 1) => a.wrapping_mul(b),
                         (1, 1) => (((a as i64 as i128) * (b as i64 as i128)) >> 64) as u64,
