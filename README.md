@@ -1,6 +1,10 @@
 # Skillet
 **Heap exploit mitigation for x86-64 Linux services — measured, not promised.**
 
+**[Explore the Heap Workshop →](https://maceip.github.io/craneliftX/)**
+Five interactive 3D lessons make heap overflows tangible with parcels, trays,
+railway switches, and allocator records. [Site source and local setup](site/README.md).
+
 You ship a static x86-64 binary. We lift it, recompile it behind checked
 memory, and stop the three primitives every modern heap exploit is built on:
 **linear overflow, use-after-free, and function-pointer substitution**.
