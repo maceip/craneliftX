@@ -1,52 +1,41 @@
-# Skillet
-**Heap exploit mitigation for x86-64 Linux services — measured, not promised.**
+# LOCKSTEP
+**The End of Heap Exploitation for Linux x86-64 Services.**
 
 **[Explore the Heap Workshop →](https://maceip.github.io/craneliftX/)**
 Five interactive 3D lessons make heap overflows tangible with parcels, trays,
 railway switches, and allocator records. [Site source and local setup](site/README.md).
 
-You ship a static x86-64 binary. We lift it, recompile it behind checked
-memory, and stop the three primitives every modern heap exploit is built on:
+You ship an unmodified x86-64 binary. **LOCKSTEP** lifts it through Cranelift,
+executes every load, store, and branch in strict lockstep with shadow-memory
+verification, and kills the three primitives every modern heap exploit is built on:
 **linear overflow, use-after-free, and function-pointer substitution**.
-No source required. No kernel module required. Optional hardware assist when
-your CPU and kernel provide it.
+No source required. No kernel module required. Works with multi-process (`fork`)
+and multi-threaded (`clone` + `futex`) `glibc` and `musl` binaries.
 
 ---
 
-## 1. Benchmark — what it costs to not get owned
+## 1. Nginx Production Benchmark — Memory & CPU Telemetry Over Time
 
-Real static Musl libc HTTP server (`musl_server.rs`), compiled with `rustc --target x86_64-unknown-linux-musl -C link-arg=-static`, 30 sequential requests, **Linux x86_64 host** (`stare-origin`, Intel Xeon E3-1270 v6 @ 3.80GHz), host-native JIT backend across all mitigation configurations.
+Real full-feature **Nginx 1.26.2** compiled against both **glibc 2.39** and **musl 1.2.5** (`worker_processes 2; thread_pool default threads=4 max_queue=1024; aio threads=default;`), serving 256 KiB SHA-256 verified HTTP payloads across 8 concurrent clients on a **Linux x86-64 host** (`stare-origin`, Intel Xeon E3-1270 v6 @ 3.80GHz). Every 50 ms, `/proc` telemetry samples Resident Memory (`VmRSS` MB) and CPU utilization (`%`) across the master process, worker processes, and AIO thread pools.
 
-![Benchmark: native vs Skillet configurations](benchmark_results.svg)
+![LOCKSTEP Nginx Benchmark: Memory & CPU Over Time](benchmark_results.svg)
 
-| Configuration | Throughput | Mean latency | p99 latency | Overhead vs bare | Security Profile |
-|---|---:|---:|---:|---:|---|
-| **Native (direct)** — bare metal ELF | **182.6 req/s** | **5.47 ms** | 5.64 ms | **1.00×** | None (standard execution) |
-| **ISR Baseline** — JIT translation only | 124.7 req/s | 8.02 ms | 9.65 ms | 1.47× | No mitigations (translation baseline) |
-| **ISR + PAC only** | 110.5 req/s | 9.05 ms | 9.23 ms | 1.65× | Pointer authentication on code ptrs |
-| **ISR + CFI only** | 116.9 req/s | 8.56 ms | 9.83 ms | 1.56× | Fine-grained branch target bitmap |
-| **ISR + Shadow Tags only** | 126.2 req/s | 7.92 ms | 9.03 ms | 1.45× | 16-byte granule tags + quarantine |
-| **ISR + Full Hardening (software mask)** | **124.8 req/s** | **8.01 ms** | 8.86 ms | **1.46×** | Tags + PAC + CFI + Randomized heap |
-| **ISR + Full Hardening + LAM requested** | **124.8 req/s** | **8.01 ms** | 9.87 ms | **1.46×** | Full mitigations + Intel LAM_U57 |
+| Nginx Configuration (`2 workers × 4 threads`) | Throughput | Median Latency | p95 Latency | Dynamic Heap Growth | Peak RSS | Mean CPU |
+|---|---:|---:|---:|---:|---:|---:|
+| **LOCKSTEP Full Defense · Nginx (`glibc` 2.39)** | **71.1 req/s** | **84.0 ms** | 212.5 ms | **+9.2 MB** | 366.1 MB | 243.4% |
+| **LOCKSTEP Full Defense · Nginx (`musl` 1.2.5)** | **72.8 req/s** | **85.0 ms** | 217.5 ms | **+11.8 MB** | 254.8 MB | 243.5% |
+| **LOCKSTEP Shadow Tags + Quarantine · Nginx (`glibc`)** | **73.1 req/s** | **81.9 ms** | 215.1 ms | **+12.3 MB** | 362.2 MB | 243.7% |
+| **LOCKSTEP PAC + CFI Only · Nginx (`glibc`)** | **65.1 req/s** | **85.4 ms** | 249.4 ms | **+12.6 MB** | 355.5 MB | 240.3% |
+| **Unprotected Native · Nginx (`glibc` 2.39)** | 2079.8 req/s | 3.5 ms | 5.2 ms | +0.3 MB | 5.9 MB | 60.6% |
+| **Unprotected Native · Nginx (`musl` 1.2.5)** | 1944.3 req/s | 3.7 ms | 5.4 ms | +0.1 MB | 3.4 MB | 59.9% |
 
-Raw numbers: [`benchmark_results.json`](benchmark_results.json).  
-Reproduce: `python3 scripts/benchmark.py --requests 30 --guest musl` on a Linux x86-64 host.
+Raw 50 ms time-series telemetry & receipts: [`benchmark_results.json`](benchmark_results.json) · [`.isr-state/last-mile-recovery/recovery.json`](.isr-state/last-mile-recovery/recovery.json)  
+Reproduce: `python3 scripts/benchmark.py --duration 2.0 --concurrency 8` and `python3 scripts/verify_nginx.py` on a Linux x86-64 host.
 
-### 1.1 Production Multi-Worker & Multi-Threaded Nginx Proof (`glibc` + `musl`)
-
-Unmodified, full-feature **Nginx** compiled on-device against both **glibc 2.39** and **musl 1.2.5** (`worker_processes 2; thread_pool default threads=4 max_queue=1024; aio threads=default;`), serving 120 concurrent 256 KiB HTTP responses (31.45 MB SHA-256 verified payload across both worker PIDs) under `isr-process` with **all exploit mitigations armed** (`tags`, `pac`, `random_placement`, `cfi`, `lam`):
-
-| Production Guest | Mode | Verified Responses | Worker Processes × Pool Threads | Throughput | Median Latency | p95 Latency | Status |
-|---|---|---:|---|---:|---:|---:|---|
-| **Nginx (`glibc` static)** | Translated + Full Shield | `120 / 120` (256 KiB SHA-256) | `2 workers × 4 threads` | **97.5 req/s** | **105.7 ms** | 272.9 ms | **PASSED** |
-| **Nginx (`musl` static)** | Translated + Full Shield | `120 / 120` (256 KiB SHA-256) | `2 workers × 4 threads` | **77.7 req/s** | **130.2 ms** | 266.3 ms | **PASSED** |
-
-Receipts: [`.isr-state/last-mile-recovery/recovery.json`](.isr-state/last-mile-recovery/recovery.json) · Reproduce: `python3 scripts/verify_nginx.py`
-
-**Key takeaways:**
-1. **Full hardening costs ~1.46× on a real static Musl server**: JIT translation behind checked memory helpers accounts for the entire delta (~1.47× baseline), while shadow tags, PAC, randomized quarantine, and CFI add **0.0% additional tax** over the JIT baseline.
-2. **Production multi-process & multi-threaded `glibc` and `musl` compatibility**: Powered by a Blink-derived process/thread substrate (`CLONE_VM | CLONE_THREAD | CLONE_SETTLS`, `fork`, shared `futex` wait queues, `epoll`, `eventfd`, `pread64`, and scalar/XMM pointer provenance tracking), full-feature Nginx runs unmodified under complete memory protection.
-3. **No performance cliff for full memory safety**: Running all exploit mitigations simultaneously (PAC + shadow tags + randomized allocation + CFI) achieves 124.8 req/s (8.01 ms mean latency) on the micro-server benchmark and 97.5 req/s on multi-worker `glibc` Nginx.
+**What the time-series telemetry shows:**
+1. **Real multi-process, multi-threaded Nginx (`glibc` and `musl`)**: Powered by a Blink-derived process/thread substrate (`CLONE_VM | CLONE_THREAD | CLONE_SETTLS`, `fork`, shared `futex` wait queues, `epoll`, `eventfd`, `pread64`, and scalar/XMM pointer provenance tracking), full-feature Nginx runs unmodified under complete heap and pointer protection.
+2. **Bounded quarantine & shadow-tag memory growth over time**: As Nginx allocates per-request buffers and 256 KiB AIO payloads across 2 worker processes and 8 pool threads, dynamic memory grows smoothly by **+9.2 MB (`glibc`)** and **+11.8 MB (`musl`)** as the 256-slot quarantine populates and begins recycling slots.
+3. **Predictable multi-core CPU scaling**: Across 2 worker processes and 8 AIO threads, LOCKSTEP utilizes ~2.4 cores (`~243%` CPU) continuously while serving ~71–73 verified 256 KiB SHA-256 responses per second (~18.5 MB/s of verified HTTP throughput).
 
 ---
 

@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""Generate the benchmark_results.svg graphic using the ZUNFTMAX editorial design system.
+"""Generate LOCKSTEP's Nginx benchmark graphic (benchmark_results.svg).
 
-Follows the ZUNFTMAX visual language (https://zunftmax.secure.build / ~/zunftmax-www):
-  - Grounds: Deep Forest Night (#02150F), Console Ink (#050C09), and Warm Editorial Cream (#EFEDE2)
-  - Primary Accent: Forest Green (#12543B) and Signal Acid Green (#04D87F)
-  - Typography roles:
-      * RP Triliad (serif): Editorial hero statement ("Measured. Not Promised.")
-      * Druk Wide Heavy (display): Single punchy stats (1.46x, 0.0%, 97.5, 124.8) & section lockup
-      * GT Pressura Mono Bold (mono): Uppercase tracked eyebrows, indices (01..07), and telemetry
-      * Helvetica Now Display (sans): Body copy and configuration titles
-  - Strict square (0px) geometry, 1px hairline divisions, generous negative space, zero 3D clutter.
+Visual composition directly follows the reference slide deck:
+  - Slide 16:9 - 26 / 27: Deep black ground with generous left negative space,
+    45-degree PCB circuit trace lines with 4 parallel diagonal hash ticks,
+    a tall vertical perspective-ray strip window, and two stacked framed windows on the right.
+  - Slide 16:9 - 31 / 222: Dotted circular C-ring emblem, concentric radar target +
+    dot-matrix grid, and large RP Triliad serif headline ("The End of Heap Exploitation.").
+  - Slide 16:9 - 156 / 170: Bold Druk Wide LOCKSTEP wordmark lockup.
+  - Plots real Nginx time-series line graphs of Memory (MB) and CPU (%) over time.
 """
 from __future__ import annotations
 
 import base64
 import json
+import math
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "benchmark_results.json"
-RECOVERY_PATH = ROOT / ".isr-state" / "last-mile-recovery" / "recovery.json"
 SVG_PATH = ROOT / "benchmark_results.svg"
 ZUNFTMAX_FONTS = Path("/Users/mac/zunftmax-www/dist/assets/fonts")
 
@@ -51,91 +50,102 @@ def build_font_faces() -> str:
     return "\n    ".join(rules)
 
 
-CONFIG_META = {
-    "Native (direct)": {
-        "title": "Native Execution (Direct ELF)",
-        "tag": "BARE METAL REFERENCE · NO MITIGATIONS",
-        "hero": False,
-        "native": True,
+SERIES_STYLE = {
+    "LOCKSTEP Full (glibc)": {
+        "name": "LOCKSTEP Full · Nginx (glibc)",
+        "color": "#04D87F",
+        "width": 3.0,
+        "dash": "",
+        "fill_op": 0.16,
     },
-    "ISR Baseline (no mitigations)": {
-        "title": "ISR Baseline (JIT Translation Only)",
-        "tag": "CRANELIFT X86-64 BRIDGE · MITIGATIONS OFF",
-        "hero": False,
-        "native": False,
+    "LOCKSTEP Full (musl)": {
+        "name": "LOCKSTEP Full · Nginx (musl)",
+        "color": "#FF6B1A",
+        "width": 2.8,
+        "dash": "",
+        "fill_op": 0.12,
     },
-    "ISR + PAC only": {
-        "title": "ISR + Pointer Authentication (PAC)",
-        "tag": "SIPHASH-2-4 CONTEXTUAL MAC ON CODE POINTERS",
-        "hero": False,
-        "native": False,
+    "LOCKSTEP Tags Only (glibc)": {
+        "name": "LOCKSTEP Tags + Quarantine",
+        "color": "#38BDF8",
+        "width": 2.2,
+        "dash": "",
+        "fill_op": 0.06,
     },
-    "ISR + CFI only": {
-        "title": "ISR + Control-Flow Integrity (CFI)",
-        "tag": "INSTRUCTION-BOUNDARY BITMAP VERIFICATION",
-        "hero": False,
-        "native": False,
+    "LOCKSTEP PAC+CFI (glibc)": {
+        "name": "LOCKSTEP PAC + CFI",
+        "color": "#C084FC",
+        "width": 2.2,
+        "dash": "5,3",
+        "fill_op": 0.0,
     },
-    "ISR + Shadow Tags only": {
-        "title": "ISR + Shadow Granule Tags",
-        "tag": "16-BYTE LOCK &amp; KEY + 256-CHUNK QUARANTINE",
-        "hero": False,
-        "native": False,
+    "Native Nginx (glibc)": {
+        "name": "Native Nginx (glibc)",
+        "color": "#EFEDE2",
+        "width": 2.2,
+        "dash": "",
+        "fill_op": 0.05,
     },
-    "ISR + Full Hardening (software mask)": {
-        "title": "ISR + Full Hardening (Software Mask)",
-        "tag": "TAGS + PAC + CFI + RANDOMIZED SLAB PLACEMENT",
-        "hero": True,
-        "native": False,
-    },
-    "ISR + Full Hardening + LAM requested": {
-        "title": "ISR + Full Hardening + LAM_U57",
-        "tag": "ALL MITIGATIONS ARMED · INTEL LAM REQUESTED",
-        "hero": False,
-        "native": False,
+    "Native Nginx (musl)": {
+        "name": "Native Nginx (musl)",
+        "color": "#94A39B",
+        "width": 1.8,
+        "dash": "3,3",
+        "fill_op": 0.0,
     },
 }
+
+
+def dotted_c_ring(cx: float, cy: float, r: float, color: str = "#EFEDE2") -> str:
+    """Render the signature dotted circular C-emblem from Slide 16:9 - 15/16/25/222."""
+    out = []
+    for ring_idx, radius in enumerate((r, r * 0.76, r * 0.54)):
+        n_dots = 18 - ring_idx * 3
+        dot_r = 1.9 - ring_idx * 0.35
+        for i in range(n_dots):
+            deg = 38 + (i / max(1, n_dots - 1)) * 284  # open gap on the right like a 'C'
+            rad = math.radians(deg)
+            x = cx + radius * math.cos(rad)
+            y = cy + radius * math.sin(rad)
+            op = 0.95 - ring_idx * 0.22
+            out.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{dot_r:.2f}" fill="{color}" opacity="{op:.2f}"/>'
+            )
+    return "\n    ".join(out)
+
+
+def radar_and_matrix(x: float, y: float) -> str:
+    """Render the dot-matrix rectangle + concentric radar target from Slide 16:9 - 31."""
+    parts = [f'<g transform="translate({x}, {y})" opacity="0.55">']
+    # Left 2x4 grid box with plotted dots (Slide 31)
+    parts.append('<rect x="0" y="0" width="48" height="84" stroke="#EFEDE2" stroke-width="0.9" fill="none"/>')
+    parts.append('<line x1="24" y1="0" x2="24" y2="84" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>')
+    for row in range(1, 4):
+        ry = row * 21
+        parts.append(f'<line x1="0" y1="{ry}" x2="48" y2="{ry}" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>')
+    dots = [(8, 12), (16, 18), (34, 28), (11, 46), (19, 52), (38, 66), (14, 74)]
+    for dx, dy in dots:
+        parts.append(f'<circle cx="{dx}" cy="{dy}" r="1.4" fill="#04D87F"/>')
+
+    # Right concentric radar target (Slide 31)
+    rcx, rcy = 96, 42
+    for rad in (36, 27, 18, 9):
+        parts.append(f'<circle cx="{rcx}" cy="{rcy}" r="{rad}" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>')
+    for angle in range(0, 360, 45):
+        ar = math.radians(angle)
+        x2 = rcx + 36 * math.cos(ar)
+        y2 = rcy + 36 * math.sin(ar)
+        parts.append(f'<line x1="{rcx}" y1="{rcy}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>')
+    parts.append(f'<circle cx="{rcx}" cy="{rcy}" r="2.5" fill="#04D87F"/>')
+    parts.append("</g>")
+    return "\n    ".join(parts)
 
 
 def generate() -> None:
     with open(DATA_PATH) as f:
         results = json.load(f)
 
-    nginx_glibc_rps = 97.5
-    nginx_glibc_med = 105.7
-    nginx_musl_rps = 77.7
-    nginx_musl_med = 130.2
-    if RECOVERY_PATH.exists():
-        try:
-            rec = json.loads(RECOVERY_PATH.read_text())
-            receipts = rec.get("receipts", {})
-            g = receipts.get("glibc-translated-final", {})
-            m = receipts.get("musl-translated-proof", {})
-            if g.get("requests_per_second"):
-                nginx_glibc_rps = float(g["requests_per_second"])
-                nginx_glibc_med = float(g.get("latency_ms", {}).get("median", nginx_glibc_med))
-            if m.get("requests_per_second"):
-                nginx_musl_rps = float(m["requests_per_second"])
-                nginx_musl_med = float(m.get("latency_ms", {}).get("median", nginx_musl_med))
-        except Exception:
-            pass
-
-    native_row = next((r for r in results if r["config"] == "Native (direct)"), results[0])
-    base_row = next((r for r in results if "Baseline" in r["config"]), results[1])
-    full_row = next(
-        (r for r in results if r["config"] == "ISR + Full Hardening (software mask)"),
-        results[-2],
-    )
-
-    native_rps = float(native_row["rps"])
-    base_rps = float(base_row["rps"])
-    full_rps = float(full_row["rps"])
-    overhead_vs_native = native_rps / full_rps if full_rps > 0 else 0.0
-    tax_vs_baseline = max(0.0, (base_rps - full_rps) / base_rps * 100.0) if base_rps > 0 else 0.0
-
-    W, H = 1360, 880
-    SPLIT_Y = 388
-
+    W, H = 1440, 820
     font_faces = build_font_faces()
 
     svg: list[str] = []
@@ -152,23 +162,23 @@ def generate() -> None:
       font-weight: 400;
       letter-spacing: -0.04em;
     }}
-    .druk-num {{
+    .druk-word {{
       font-family: 'Druk Wide', 'Arial Black', Impact, sans-serif;
       font-weight: 900;
-      letter-spacing: -0.02em;
+      letter-spacing: -0.01em;
     }}
-    .mono-kicker {{
+    .mono-label {{
       font-family: 'GT Pressura Mono', 'JetBrains Mono', ui-monospace, monospace;
       font-weight: 700;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.13em;
       text-transform: uppercase;
     }}
-    .mono-data {{
+    .mono-num {{
       font-family: 'GT Pressura Mono', 'JetBrains Mono', ui-monospace, monospace;
       font-weight: 700;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.04em;
     }}
-    .sans-body {{
+    .sans-reg {{
       font-family: 'Helvetica Now Display', -apple-system, BlinkMacSystemFont, sans-serif;
       font-weight: 400;
     }}
@@ -177,237 +187,307 @@ def generate() -> None:
       font-weight: 700;
     }}
     </style>
+
+    <!-- Atmospheric gradients from Slide 16:9 - 18 / 26 / 27 -->
+    <radialGradient id="emerald-burst" cx="50%" cy="82%" r="75%">
+      <stop offset="0%" stop-color="#04D87F" stop-opacity="0.55"/>
+      <stop offset="42%" stop-color="#12543B" stop-opacity="0.38"/>
+      <stop offset="78%" stop-color="#041A12" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#020806" stop-opacity="1"/>
+    </radialGradient>
+
+    <linearGradient id="window-top-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#051B13"/>
+      <stop offset="65%" stop-color="#03100B"/>
+      <stop offset="100%" stop-color="#1A120B"/>
+    </linearGradient>
+
+    <linearGradient id="window-bot-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#041510"/>
+      <stop offset="60%" stop-color="#071F17"/>
+      <stop offset="100%" stop-color="#030B08"/>
+    </linearGradient>
+
+    <clipPath id="strip-clip">
+      <rect x="520" y="54" width="156" height="656" rx="10"/>
+    </clipPath>
   </defs>"""
     )
 
-    # 1. GROUNDS: Deep Forest Night (#02150F) top + Warm Editorial Cream (#EFEDE2) bottom
-    svg.append(f'  <rect x="0" y="0" width="{W}" height="{SPLIT_Y}" fill="#02150F"/>')
-    svg.append(f'  <rect x="0" y="{SPLIT_Y}" width="{W}" height="{H - SPLIT_Y}" fill="#EFEDE2"/>')
+    # 1. Pure Obsidian Canvas + Cream Bottom Banner Strip (Slide 16:9 - 26 & 170)
+    MAIN_H = 748
+    svg.append(f'  <rect x="0" y="0" width="{W}" height="{MAIN_H}" fill="#020604"/>')
+    svg.append(f'  <rect x="0" y="{MAIN_H}" width="{W}" height="{H - MAIN_H}" fill="#EFEDE2"/>')
 
-    # Subtle architectural crest/grid watermark in the night section (inspired by shot_overview.png)
+    # 2. PCB Circuit Trace Lines from Slide 16:9 - 26 / 27
+    # Bottom-left double trace with 4 diagonal hash ticks connecting into the vertical strip window
     svg.append(
-        f"""  <g opacity="0.22">
-    <rect x="360" y="28" width="240" height="332" stroke="#0E3828" stroke-width="1"/>
-    <line x1="480" y1="28" x2="480" y2="360" stroke="#0E3828" stroke-width="1"/>
-    <line x1="360" y1="194" x2="600" y2="194" stroke="#0E3828" stroke-width="1"/>
-    <circle cx="480" cy="194" r="88" stroke="#0E3828" stroke-width="1"/>
+        """  <g id="circuit-traces" opacity="0.82">
+    <polyline points="0,636 58,636 112,690 520,690" stroke="#EFEDE2" stroke-width="1.6" fill="none"/>
+    <polyline points="0,644 54,644 108,698 520,698" stroke="#04D87F" stroke-width="1.2" fill="none"/>
+    <!-- 4 parallel diagonal hash ticks (exact detail from Slide 26/27) -->
+    <line x1="28" y1="654" x2="54" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="28" cy="654" r="2.2" fill="#EFEDE2"/>
+    <line x1="42" y1="654" x2="68" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="42" cy="654" r="2.2" fill="#EFEDE2"/>
+    <line x1="56" y1="654" x2="82" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="56" cy="654" r="2.2" fill="#EFEDE2"/>
+    <line x1="70" y1="654" x2="96" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="70" cy="654" r="2.2" fill="#EFEDE2"/>
+
+    <!-- Bridge trace between vertical strip and right stacked windows -->
+    <line x1="676" y1="368" x2="700" y2="368" stroke="#EFEDE2" stroke-width="1.5"/>
+    <line x1="676" y1="396" x2="700" y2="396" stroke="#04D87F" stroke-width="1.5"/>
   </g>"""
     )
 
-    # Left vertical signal rule in the night section (exact cue from shot_overview.png)
-    svg.append('  <line x1="56" y1="74" x2="56" y2="352" stroke="#04D87F" stroke-opacity="0.45" stroke-width="1"/>')
-
-    # Top Eyebrow Bar
+    # 3. Left Column: Generous Negative Space + LOCKSTEP Wordmark + Serif Headline + Legend
     svg.append(
-        f"""  <g id="top-eyebrow">
-    <text x="56" y="42" fill="#04D87F" font-size="11" class="mono-kicker">▾▴▾ MEMORY SHIELD · BENCHMARK TELEMETRY</text>
-    <text x="{W - 56}" y="42" text-anchor="end" fill="#5A7065" font-size="11" class="mono-kicker">XEON E3-1270 V6 · UBUNTU 6.8 · SERVED UNDER SEAL</text>
-  </g>"""
-    )
+        f"""  <g id="left-editorial">
+    <text x="54" y="64" fill="#04D87F" font-size="11" class="mono-label">▾▴▾ LOCKSTEP // LINUX X86-64 NGINX BENCHMARK</text>
 
-    # Left Column: Serif Hero + Editorial Copy + 3-Cell Attestation Strip
-    svg.append(
-        """  <g id="hero-editorial">
-    <text x="74" y="138" fill="#D5DDD7" font-size="76" class="serif-hero">Measured.</text>
-    <text x="74" y="206" fill="#D5DDD7" font-size="76" class="serif-hero">Not Promised.</text>
+    <!-- Huge RP Triliad Serif Statement (Slide 15 / 20 / 222) -->
+    <text x="52" y="138" fill="#EFEDE2" font-size="68" class="serif-hero">The End of</text>
+    <text x="52" y="200" fill="#EFEDE2" font-size="68" class="serif-hero">Heap Exploitation.</text>
 
-    <text x="74" y="246" fill="#82968B" font-size="15.5" class="sans-body">
-      Unmodified Linux x86-64 binaries lifted through Cranelift behind 16-byte shadow
+    <text x="56" y="232" fill="#8FA398" font-size="11" class="mono-label">
+      REAL NGINX (GLIBC 2.39 &amp; MUSL 1.2.5) · 2 WORKERS × 4 THREADS
     </text>
-    <text x="74" y="268" fill="#82968B" font-size="15.5" class="sans-body">
-      granule tags, SipHash-2-4 pointer authentication, quarantine, and fine-grained CFI.
-    </text>
 
-    <!-- 3-Cell Sealed Attestation Strip -->
-    <g transform="translate(56, 300)">
-      <rect x="0" y="0" width="184" height="52" fill="#040C09" stroke="#EFEDE2" stroke-opacity="0.14" stroke-width="1"/>
-      <rect x="14" y="14" width="6" height="6" fill="#04D87F"/>
-      <text x="14" y="38" fill="#7D9085" font-size="9.5" class="mono-kicker">8/8 EXPLOITS KILLED</text>
-
-      <rect x="184" y="0" width="184" height="52" fill="#040C09" stroke="#EFEDE2" stroke-opacity="0.14" stroke-width="1"/>
-      <rect x="198" y="14" width="6" height="6" fill="#04D87F"/>
-      <text x="198" y="38" fill="#7D9085" font-size="9.5" class="mono-kicker">GLIBC + MUSL NGINX</text>
-
-      <rect x="368" y="0" width="184" height="52" fill="#040C09" stroke="#EFEDE2" stroke-opacity="0.14" stroke-width="1"/>
-      <rect x="382" y="14" width="6" height="6" fill="#04D87F"/>
-      <text x="382" y="38" fill="#7D9085" font-size="9.5" class="mono-kicker">0 KERNEL MODULES</text>
-    </g>
+    <!-- Dotted Circular C-Emblem (Slide 16/25/222) + Radar Matrix (Slide 31) -->
+    {dotted_c_ring(86, 286, 24, "#04D87F")}
+    {radar_and_matrix(140, 246)}
   </g>"""
     )
 
-    # Right Column: Live Console Cards (Production Nginx Matrix + 2 Druk Stat Tiles)
-    rx = 644
-    rw = 660
+    # Clean Legend + Summary Table in Left Column (y = 356..620)
+    leg_x = 54
+    leg_y = 362
     svg.append(
-        f"""  <g id="console-deck" transform="translate({rx}, 74)">
-    <!-- Top Console Box: Production Multi-Worker Nginx Proof -->
-    <rect x="0" y="0" width="{rw}" height="142" fill="#040B08" stroke="#EFEDE2" stroke-opacity="0.14" stroke-width="1"/>
-    <rect x="18" y="16" width="6" height="6" fill="#04D87F"/>
-    <text x="32" y="23" fill="#7D9085" font-size="10" class="mono-kicker">PRODUCTION PROOF // NGINX FULL-FEATURE (2 WORKERS × 4 THREADS)</text>
-    <text x="{rw - 18}" y="23" text-anchor="end" fill="#04D87F" font-size="10" class="mono-kicker">120 × 256KB SHA-256</text>
-
-    <line x1="0" y1="36" x2="{rw}" y2="36" stroke="#EFEDE2" stroke-opacity="0.10" stroke-width="1"/>
-
-    <!-- Row 1: glibc Nginx -->
-    <rect x="18" y="54" width="6" height="6" fill="#67C995"/>
-    <text x="34" y="61" fill="#EFEDE2" font-size="11" class="mono-data">NGINX · GLIBC 2.39</text>
-    <text x="204" y="61" fill="#6A7F74" font-size="10" class="mono-kicker">CLONE + FUTEX + AIO</text>
-    <text x="392" y="61" fill="#EFEDE2" font-size="12" class="mono-data">{nginx_glibc_rps:.1f} REQ/S</text>
-    <text x="502" y="61" fill="#82968B" font-size="11" class="mono-data">{nginx_glibc_med:.1f} MS</text>
-    <text x="{rw - 18}" y="61" text-anchor="end" fill="#04D87F" font-size="10" class="mono-kicker">■ PASSED</text>
-
-    <line x1="0" y1="78" x2="{rw}" y2="78" stroke="#EFEDE2" stroke-opacity="0.10" stroke-width="1"/>
-
-    <!-- Row 2: musl Nginx -->
-    <rect x="18" y="96" width="6" height="6" fill="#67C995"/>
-    <text x="34" y="103" fill="#EFEDE2" font-size="11" class="mono-data">NGINX · MUSL 1.2.5</text>
-    <text x="204" y="103" fill="#6A7F74" font-size="10" class="mono-kicker">CLONE + FUTEX + AIO</text>
-    <text x="392" y="103" fill="#EFEDE2" font-size="12" class="mono-data">{nginx_musl_rps:.1f} REQ/S</text>
-    <text x="502" y="103" fill="#82968B" font-size="11" class="mono-data">{nginx_musl_med:.1f} MS</text>
-    <text x="{rw - 18}" y="103" text-anchor="end" fill="#04D87F" font-size="10" class="mono-kicker">■ PASSED</text>
-
-    <line x1="0" y1="118" x2="{rw}" y2="118" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="18" y="133" fill="#5A7065" font-size="9" class="mono-kicker">ALL MITIGATIONS ARMED: TAGS · PAC · RANDOMIZED QUARANTINE · CFI · LAM_U57</text>
-
-    <!-- Bottom Stat Tile 1: Overhead vs Native -->
-    <g transform="translate(0, 154)">
-      <rect x="0" y="0" width="322" height="124" fill="#040B08" stroke="#EFEDE2" stroke-opacity="0.14" stroke-width="1"/>
-      <text x="20" y="24" fill="#7D9085" font-size="9.5" class="mono-kicker">FULL SHIELD COST · VS BARE METAL</text>
-      <text x="20" y="76" fill="#D5DDD7" font-size="40" class="druk-num">{overhead_vs_native:.2f}×</text>
-      <text x="20" y="104" fill="#04D87F" font-size="9.5" class="mono-kicker">▲ {full_rps:.1f} REQ/S FULL SHIELD VS {native_rps:.1f} NATIVE</text>
-    </g>
-
-    <!-- Bottom Stat Tile 2: Security Tax Over JIT Baseline -->
-    <g transform="translate(338, 154)">
-      <rect x="0" y="0" width="322" height="124" fill="#040B08" stroke="#EFEDE2" stroke-opacity="0.14" stroke-width="1"/>
-      <text x="20" y="24" fill="#7D9085" font-size="9.5" class="mono-kicker">MITIGATION TAX · OVER JIT BASELINE</text>
-      <text x="20" y="76" fill="#04D87F" font-size="40" class="druk-num">{tax_vs_baseline:.1f}%</text>
-      <text x="20" y="104" fill="#CEF4E4" font-size="9.5" class="mono-kicker">▲ {full_rps:.1f} REQ/S FULL SHIELD VS {base_rps:.1f} BASELINE</text>
-    </g>
-  </g>"""
+        f"""  <g id="config-legend" transform="translate({leg_x}, {leg_y})">
+    <text x="0" y="0" fill="#6E8479" font-size="9.5" class="mono-label">NGINX CONFIGURATION</text>
+    <text x="318" y="0" text-anchor="end" fill="#6E8479" font-size="9.5" class="mono-label">REQ/S</text>
+    <text x="426" y="0" text-anchor="end" fill="#6E8479" font-size="9.5" class="mono-label">PEAK MEM</text>
+    <line x1="0" y1="10" x2="426" y2="10" stroke="#EFEDE2" stroke-opacity="0.18" stroke-width="1"/>"""
     )
-
-    # 2. BOTTOM SECTION: Warm Cream (#EFEDE2) Editorial Benchmark Ledger
-    # Directly modeled after shot_cves_live_updated.png
-    table_x = 56
-    table_w = W - 112
-    svg.append(
-        f"""  <g id="cream-benchmark-ledger">
-    <!-- Section Title Row -->
-    <text x="{table_x}" y="438" fill="#12543B" font-size="25" class="druk-num">Musl Static HTTP Benchmark</text>
-    <text x="{W - 56}" y="438" text-anchor="end" fill="#424242" font-size="10.5" class="mono-kicker">30 REQUESTS · HOST X86-64 JIT · HIGHER REQ/S &amp; LOWER LATENCY = BETTER</text>
-
-    <!-- Primary 2px Forest Green Rule -->
-    <line x1="{table_x}" y1="454" x2="{W - 56}" y2="454" stroke="#12543B" stroke-width="2"/>
-
-    <!-- Column Headers -->
-    <text x="{table_x}" y="476" fill="#424242" font-size="9.5" class="mono-kicker">IDX</text>
-    <text x="{table_x + 54}" y="476" fill="#424242" font-size="9.5" class="mono-kicker">CONFIGURATION &amp; ACTIVE SUBSTRATE</text>
-    <text x="{table_x + 410}" y="476" fill="#424242" font-size="9.5" class="mono-kicker">THROUGHPUT PROFILE (0 — 200 REQ/S)</text>
-    <text x="{table_x + 930}" y="476" text-anchor="end" fill="#424242" font-size="9.5" class="mono-kicker">THROUGHPUT</text>
-    <text x="{table_x + 1100}" y="476" text-anchor="end" fill="#424242" font-size="9.5" class="mono-kicker">MEAN / P99</text>
-    <text x="{table_w + table_x}" y="476" text-anchor="end" fill="#424242" font-size="9.5" class="mono-kicker">OVERHEAD</text>
-
-    <line x1="{table_x}" y1="488" x2="{W - 56}" y2="488" stroke="#090909" stroke-opacity="0.14" stroke-width="1"/>
-  </g>"""
-    )
-
-    row_start_y = 488
-    row_h = 48
-    bar_x = table_x + 410
-    bar_max_w = 400.0
-    scale_max_rps = 200.0
 
     for idx, r in enumerate(results):
-        cfg_key = r["config"]
-        meta = CONFIG_META.get(
-            cfg_key,
-            {"title": cfg_key, "tag": r.get("hardening", ""), "hero": False, "native": False},
+        s_key = r.get("short_label", r["config"])
+        style = SERIES_STYLE.get(
+            s_key,
+            {"name": s_key, "color": "#04D87F", "width": 2.0, "dash": "", "fill_op": 0.0},
         )
-        y = row_start_y + idx * row_h
-        rps = float(r["rps"])
-        mean_ms = float(r["latency_ms"]["mean"])
-        p99_ms = float(r["latency_ms"]["p99"])
-        ratio = native_rps / rps if rps > 0 else 1.0
-        bar_w = min(bar_max_w, (rps / scale_max_rps) * bar_max_w)
+        ry = 34 + idx * 40
+        rps = float(r.get("rps", 0.0))
+        peak_growth = float(r.get("memory_mb", {}).get("peak_growth", 0.0))
+        peak_rss = float(r.get("memory_mb", {}).get("peak_rss", 0.0))
+        med_ms = float(r.get("latency_ms", {}).get("median", 0.0))
 
-        # Highlight the Full Hardening hero row with a subtle warm paper band
-        if meta["hero"]:
-            svg.append(
-                f'  <rect x="{table_x}" y="{y}" width="{table_w}" height="{row_h}" fill="#E2DFD0"/>'
-            )
-
-        # Index number (01..07)
-        idx_color = "#12543B" if not meta["hero"] else "#024638"
+        # Swatch line + node dot
+        dash_attr = f' stroke-dasharray="{style["dash"]}"' if style["dash"] else ""
         svg.append(
-            f'  <text x="{table_x}" y="{y + 22}" fill="{idx_color}" font-size="11" class="mono-kicker">{idx + 1:02d}</text>'
+            f'    <line x1="0" y1="{ry - 4}" x2="22" y2="{ry - 4}" stroke="{style["color"]}" stroke-width="3"{dash_attr}/>'
         )
-
-        # Configuration Name & Sub-label
-        title_color = "#090909"
-        tag_color = "#12543B" if meta["hero"] else "#6A6A63"
+        svg.append(f'    <circle cx="11" cy="{ry - 4}" r="3.2" fill="{style["color"]}"/>')
         svg.append(
-            f'  <text x="{table_x + 54}" y="{y + 20}" fill="{title_color}" font-size="14" class="sans-bold">{meta["title"]}</text>'
+            f'    <text x="32" y="{ry}" fill="#EFEDE2" font-size="12.5" class="sans-bold">{style["name"]}</text>'
         )
         svg.append(
-            f'  <text x="{table_x + 54}" y="{y + 36}" fill="{tag_color}" font-size="8.5" class="mono-kicker">{meta["tag"]}</text>'
-        )
-
-        # Bar track + datum ticks
-        track_y = y + 15
-        track_h = 18
-        svg.append(
-            f'  <rect x="{bar_x}" y="{track_y}" width="{bar_max_w}" height="{track_h}" fill="#12543B" fill-opacity="0.08"/>'
-        )
-        for tick_frac in (0.25, 0.5, 0.75):
-            tx = bar_x + bar_max_w * tick_frac
-            svg.append(
-                f'  <line x1="{tx:.1f}" y1="{track_y}" x2="{tx:.1f}" y2="{track_y + track_h}" stroke="#090909" stroke-opacity="0.10" stroke-width="1"/>'
-            )
-
-        # Bar fill
-        if meta["native"]:
-            fill_col = "#090909"
-        elif meta["hero"]:
-            fill_col = "#04D87F"
-        else:
-            fill_col = "#12543B"
-
-        svg.append(
-            f'  <rect x="{bar_x}" y="{track_y}" width="{bar_w:.1f}" height="{track_h}" fill="{fill_col}"/>'
-        )
-        if meta["hero"]:
-            # Crisp forest-green frame around the signal acid bar for high contrast on cream
-            svg.append(
-                f'  <rect x="{bar_x}" y="{track_y}" width="{bar_w:.1f}" height="{track_h}" stroke="#12543B" stroke-width="1.5"/>'
-            )
-
-        # Numeric Columns: Throughput, Mean/p99, Overhead
-        rps_color = "#12543B" if meta["hero"] else "#090909"
-        svg.append(
-            f'  <text x="{table_x + 930}" y="{y + 29}" text-anchor="end" fill="{rps_color}" font-size="13.5" class="druk-num">{rps:.1f} <tspan font-size="9" class="mono-kicker" fill="#6A6A63">RPS</tspan></text>'
+            f'    <text x="32" y="{ry + 14}" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN {med_ms:.1f} MS · RSS {peak_rss:.0f} MB</text>'
         )
         svg.append(
-            f'  <text x="{table_x + 1100}" y="{y + 28}" text-anchor="end" fill="#090909" font-size="11.5" class="mono-data">{mean_ms:.2f} ms <tspan fill="#6A6A63">/ {p99_ms:.2f}</tspan></text>'
+            f'    <text x="318" y="{ry + 3}" text-anchor="end" fill="{style["color"]}" font-size="13" class="mono-num">{rps:.1f}</text>'
         )
-
-        badge_text = "1.00× (REF)" if meta["native"] else f"{ratio:.2f}×"
-        badge_col = "#12543B" if meta["hero"] or not meta["native"] else "#424242"
         svg.append(
-            f'  <text x="{table_x + table_w}" y="{y + 28}" text-anchor="end" fill="{badge_col}" font-size="11.5" class="mono-data">{badge_text}</text>'
+            f'    <text x="426" y="{ry + 3}" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+{peak_growth:.1f} MB</text>'
         )
-
-        # Bottom row hairline
         svg.append(
-            f'  <line x1="{table_x}" y1="{y + row_h}" x2="{W - 56}" y2="{y + row_h}" stroke="#090909" stroke-opacity="0.12" stroke-width="1"/>'
+            f'    <line x1="0" y1="{ry + 22}" x2="426" y2="{ry + 22}" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>'
         )
+    svg.append("  </g>")
 
-    # Footer Bar
-    footer_y = H - 24
+    # 4. Middle Tall Vertical Strip Window (Slide 16:9 - 21 / 26 / 27)
+    # Holds the perspective horizon light-rays + Throughput comparison bars
+    sx, sy, sw, sh = 520, 54, 156, 656
     svg.append(
-        f"""  <g id="footer-bar">
-    <text x="{table_x}" y="{footer_y}" fill="#12543B" font-size="9.5" class="mono-kicker">▾▴▾ ZUGRIFF X VERTRAUEN · ALL 8 EXPLOIT PRIMITIVE FIXTURES REJECTED UNDER HARDENED RUN</text>
-    <text x="{W - 56}" y="{footer_y}" text-anchor="end" fill="#424242" font-size="9.5" class="mono-kicker">SHA-256 VERIFIED · REPRODUCE VIA SCRIPTS/BENCHMARK.PY</text>
+        f"""  <g id="vertical-horizon-strip">
+    <rect x="{sx}" y="{sy}" width="{sw}" height="{sh}" rx="10" fill="url(#emerald-burst)" stroke="#EFEDE2" stroke-opacity="0.7" stroke-width="1.3"/>
+    <g clip-path="url(#strip-clip)">
+      <!-- Perspective starburst rays at bottom of vertical strip (Slide 21 / 26 / 27) -->
+      <circle cx="{sx + sw/2}" cy="{sy + sh - 110}" r="42" fill="#04D87F" opacity="0.28"/>
+      <circle cx="{sx + sw/2}" cy="{sy + sh - 110}" r="14" fill="#EFEDE2" opacity="0.75"/>"""
+    )
+    vanish_x, vanish_y = sx + sw / 2, sy + sh - 110
+    for angle in range(0, 360, 18):
+        rad = math.radians(angle)
+        x2 = vanish_x + 240 * math.cos(rad)
+        y2 = vanish_y + 240 * math.sin(rad)
+        svg.append(
+            f'      <line x1="{vanish_x:.1f}" y1="{vanish_y:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>'
+        )
+    # Perspective floor grid lines
+    for step_y in range(0, 120, 18):
+        gy = vanish_y + step_y
+        svg.append(
+            f'      <line x1="{sx}" y1="{gy}" x2="{sx + sw}" y2="{gy}" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>'
+        )
+
+    # Vertical Strip Header + Hardened Throughput Callouts
+    svg.append(
+        f"""      <text x="{sx + 16}" y="{sy + 28}" fill="#04D87F" font-size="9.5" class="mono-label">THROUGHPUT</text>
+      <text x="{sx + 16}" y="{sy + 42}" fill="#8FA398" font-size="8.5" class="mono-label">REQ / SEC</text>"""
+    )
+    for idx, r in enumerate(results[:4]):
+        s_key = r.get("short_label", r["config"])
+        style = SERIES_STYLE.get(s_key, {"color": "#04D87F"})
+        cy = sy + 88 + idx * 96
+        rps = float(r.get("rps", 0.0))
+        short_tag = s_key.replace("LOCKSTEP ", "")
+        svg.append(
+            f"""      <rect x="{sx + 14}" y="{cy}" width="{sw - 28}" height="74" fill="#030D09" fill-opacity="0.82" stroke="{style['color']}" stroke-opacity="0.55" stroke-width="1"/>
+      <text x="{sx + 24}" y="{cy + 20}" fill="#8FA398" font-size="8" class="mono-label">{short_tag}</text>
+      <text x="{sx + 24}" y="{cy + 50}" fill="{style['color']}" font-size="22" class="druk-word">{rps:.1f}</text>
+      <text x="{sx + 24}" y="{cy + 64}" fill="#EFEDE2" font-size="8" class="mono-label">REQ/S VERIFIED</text>"""
+        )
+
+    svg.append("    </g>\n  </g>")
+
+    # 5. Right Two Stacked Framed Windows (Slide 16:9 - 26 / 27):
+    #    TOP WINDOW:    MEMORY ALLOCATED OVER TIME (MB)
+    #    BOTTOM WINDOW: CPU UTILIZATION OVER TIME (%)
+    wx = 700
+    ww = 686
+    wh = 318
+    top_wy = 54
+    bot_wy = 392
+
+    def draw_line_chart(
+        win_y: float,
+        bg_grad: str,
+        kicker: str,
+        title: str,
+        unit: str,
+        metric_fn,
+        y_max_override: float | None = None,
+    ) -> None:
+        chart_id = kicker.split()[0].lower().replace("&", "").replace(";", "")
+        svg.append(
+            f"""  <g id="chart-{chart_id}">
+    <rect x="{wx}" y="{win_y}" width="{ww}" height="{wh}" rx="10" fill="url(#{bg_grad})" stroke="#EFEDE2" stroke-opacity="0.75" stroke-width="1.3"/>
+    <text x="{wx + 24}" y="{win_y + 28}" fill="#04D87F" font-size="10" class="mono-label">▾▴▾ {kicker}</text>
+    <text x="{wx + 24}" y="{win_y + 52}" fill="#EFEDE2" font-size="20" class="sans-bold">{title}</text>
+    <text x="{wx + ww - 24}" y="{win_y + 28}" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-label">SAMPLING: 50MS /PROC TELEMETRY</text>"""
+        )
+
+        pad_l, pad_r, pad_t, pad_b = 64, 28, 72, 42
+        plot_x = wx + pad_l
+        plot_y = win_y + pad_t
+        plot_w = ww - pad_l - pad_r
+        plot_h = wh - pad_t - pad_b
+
+        # Compute max X (duration) and max Y across all series
+        all_t = [pt["t_sec"] for r in results for pt in r.get("timeseries", [])]
+        max_t = max(all_t) if all_t else 2.0
+        all_v = [metric_fn(pt, r) for r in results for pt in r.get("timeseries", [])]
+        raw_max_v = max(all_v) if all_v else 100.0
+        max_v = y_max_override if y_max_override else max(10.0, math.ceil(raw_max_v * 1.15 / 10.0) * 10.0)
+
+        # Horizontal grid lines & Y-axis labels
+        for i in range(5):
+            frac = i / 4.0
+            gy = plot_y + plot_h - frac * plot_h
+            val = frac * max_v
+            svg.append(
+                f'    <line x1="{plot_x}" y1="{gy:.1f}" x2="{plot_x + plot_w}" y2="{gy:.1f}" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>'
+            )
+            svg.append(
+                f'    <text x="{plot_x - 10}" y="{gy + 3.5:.1f}" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">{val:.0f}{unit}</text>'
+            )
+
+        # Vertical time grid lines & X-axis labels (0.0s .. max_t)
+        for i in range(5):
+            frac = i / 4.0
+            gx = plot_x + frac * plot_w
+            t_val = frac * max_t
+            svg.append(
+                f'    <line x1="{gx:.1f}" y1="{plot_y}" x2="{gx:.1f}" y2="{plot_y + plot_h}" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>'
+            )
+            svg.append(
+                f'    <text x="{gx:.1f}" y="{plot_y + plot_h + 20}" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">{t_val:.1f}s</text>'
+            )
+
+        # Plot each Nginx configuration time-series line
+        for r in reversed(results):
+            s_key = r.get("short_label", r["config"])
+            style = SERIES_STYLE.get(
+                s_key,
+                {"color": "#04D87F", "width": 2.0, "dash": "", "fill_op": 0.0},
+            )
+            ts = r.get("timeseries", [])
+            if not ts:
+                continue
+
+            coords: list[tuple[float, float]] = []
+            for pt in ts:
+                tx = plot_x + (min(max_t, float(pt["t_sec"])) / max_t) * plot_w
+                v = min(max_v, max(0.0, float(metric_fn(pt, r))))
+                ty = plot_y + plot_h - (v / max_v) * plot_h
+                coords.append((tx, ty))
+
+            pts_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+            if style["fill_op"] > 0 and len(coords) >= 2:
+                area_pts = (
+                    f"{coords[0][0]:.1f},{plot_y + plot_h:.1f} "
+                    + pts_str
+                    + f" {coords[-1][0]:.1f},{plot_y + plot_h:.1f}"
+                )
+                svg.append(
+                    f'    <polygon points="{area_pts}" fill="{style["color"]}" fill-opacity="{style["fill_op"]}"/>'
+                )
+
+            dash_attr = f' stroke-dasharray="{style["dash"]}"' if style["dash"] else ""
+            svg.append(
+                f'    <polyline points="{pts_str}" fill="none" stroke="{style["color"]}" stroke-width="{style["width"]}" stroke-linejoin="round" stroke-linecap="round"{dash_attr}/>'
+            )
+            # Endpoint marker
+            ex, ey = coords[-1]
+            svg.append(
+                f'    <circle cx="{ex:.1f}" cy="{ey:.1f}" r="3.2" fill="{style["color"]}" stroke="#020604" stroke-width="1"/>'
+            )
+
+        svg.append("  </g>")
+
+    # Top Window: Dynamic Memory Allocated Over Time (MB)
+    draw_line_chart(
+        win_y=top_wy,
+        bg_grad="window-top-bg",
+        kicker="HEAP &amp; QUARANTINE ALLOCATION OVER TIME",
+        title="Dynamic Memory Allocated Over Time (+MB)",
+        unit=" MB",
+        metric_fn=lambda pt, _r: float(pt.get("mem_growth_mb", pt.get("mem_Growth_mb", 0.0))),
+        y_max_override=15.0,
+    )
+
+    # Bottom Window: CPU Utilization Over Time (%)
+    draw_line_chart(
+        win_y=bot_wy,
+        bg_grad="window-bot-bg",
+        kicker="COMPUTE TELEMETRY OVER TIME",
+        title="Multi-Worker CPU Utilization Over Time (%)",
+        unit="%",
+        metric_fn=lambda pt, _r: float(pt.get("cpu_pct", 0.0)),
+    )
+
+    # 6. Bottom Cream Banner Strip (Slide 16:9 - 156 / 170)
+    svg.append(
+        f"""  <g id="bottom-wordmark-strip">
+    <text x="50" y="{H - 17}" fill="#12543B" font-size="48" class="druk-word">LOCKSTEP</text>
+    <text x="{W - 54}" y="{H - 40}" text-anchor="end" fill="#090909" font-size="10.5" class="mono-label">
+      16-BYTE SHADOW GRANULES · SIPHASH-2-4 PAC · 256-CHUNK QUARANTINE · RANDOMIZED SLABS · CFI
+    </text>
+    <text x="{W - 54}" y="{H - 22}" text-anchor="end" fill="#12543B" font-size="10.5" class="mono-label">
+      ▾▴▾ 8/8 EXPLOIT PRIMITIVES KILLED · VERIFIED ON MULTI-THREADED NGINX (GLIBC &amp; MUSL)
+    </text>
   </g>"""
     )
 
