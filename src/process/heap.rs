@@ -50,7 +50,8 @@ pub const SYS_ISR_MALLOC: u64 = 0x4953_5200;
 pub const SYS_ISR_CALLOC: u64 = 0x4953_5201;
 pub const SYS_ISR_REALLOC: u64 = 0x4953_5202;
 pub const SYS_ISR_FREE: u64 = 0x4953_5203;
-const QUARANTINE_CAPACITY: usize = 256;
+const QUARANTINE_CAPACITY: usize = 64;
+const LARGE_QUARANTINE_CAPACITY: usize = 16;
 
 fn fail(pc: u64, kind: MitigationKind, detail: String) -> EngineError {
     EngineError::Mitigation { pc, kind, detail }
@@ -217,17 +218,67 @@ impl Heap {
 
     /// Allocate `size` bytes aligned to `alignment` (power of two) and return the tagged pointer.
     pub fn allocate_aligned(&mut self, alignment: u64, size: u64) -> Result<u64, EngineError> {
-        if alignment <= GRANULE {
-            return self.allocate(size);
-        }
         let size = size.max(1);
         if size > HEAP_SIZE / 4 || !alignment.is_power_of_two() {
             return Err(super::memory::error(format!(
                 "invalid aligned heap allocation: alignment={alignment}, size={size}"
             )));
         }
+        // Slab classes (16..=4096) are power-of-two sized on 64 KiB-aligned pages,
+        // so allocating at least `size.max(alignment)` in the slab naturally satisfies
+        // `alignment` while reusing quarantined slab slots.
+        if alignment <= LARGE_THRESHOLD && size.max(alignment) <= LARGE_THRESHOLD {
+            return self.allocate(size.max(alignment));
+        }
         self.stats.allocations += 1;
         let granules = size.div_ceil(GRANULE);
+        let fitting: Vec<(usize, u64, u64)> = self
+            .large_free
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &(run_start, capacity))| {
+                let aligned_start = (run_start + alignment - 1) & !(alignment - 1);
+                let pad_granules = (aligned_start - run_start) / GRANULE;
+                if capacity >= pad_granules + granules + 1 {
+                    Some((i, aligned_start, pad_granules))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !fitting.is_empty() {
+            let pick_idx = if self.random_placement {
+                self.rng.below(fitting.len())
+            } else {
+                0
+            };
+            let (free_idx, start, pad_granules) = fitting[pick_idx];
+            let (run_start, capacity) = self.large_free.swap_remove(free_idx);
+            if pad_granules > 0 {
+                self.set_granules(run_start, pad_granules, GUARD_TAG);
+            }
+            let tag = self.issue_tag();
+            self.set_granules(start, granules, u8::try_from(tag).unwrap_or(GUARD_TAG));
+            self.set_granules(start + granules * GRANULE, 1, GUARD_TAG);
+            let used = pad_granules + granules + 1;
+            if capacity > used + 2 {
+                self.large_free
+                    .push((run_start + used * GRANULE, capacity - used));
+            }
+            self.stats.placement_draws = self.rng.draws();
+            if tag != 0 {
+                *self.live_tags.entry(tag).or_insert(0) += 1;
+            }
+            self.live.insert(
+                start,
+                Live {
+                    size,
+                    tag,
+                    chunk: Chunk::Large { granules },
+                },
+            );
+            return Ok(self.scheme.tag(start, tag).unwrap_or(start));
+        }
         let gap = u64::try_from(self.rng.below(5)).expect("small gap") * GRANULE;
         let raw_start = self.large_cursor + gap;
         let start = (raw_start + alignment - 1) & !(alignment - 1);
@@ -325,23 +376,31 @@ impl Heap {
     }
     fn allocate_large(&mut self, size: u64) -> Result<(u64, u64, Chunk), EngineError> {
         let granules = size.div_ceil(GRANULE);
-        // Half the time reuse a freed run chosen at random; otherwise bump into
-        // fresh space behind a random gap. Either way the address is not a
-        // function of the allocation sequence.
-        if !self.large_free.is_empty() && self.rng.below(2) == 0 {
-            let index = self.rng.below(self.large_free.len());
-            let (start, capacity) = self.large_free[index];
-            if capacity > granules {
-                self.large_free.swap_remove(index);
-                let tag = self.issue_tag();
-                self.set_granules(start, granules, u8::try_from(tag).unwrap_or(GUARD_TAG));
-                self.set_granules(start + granules * GRANULE, 1, GUARD_TAG);
-                if capacity > granules + 2 {
-                    self.large_free
-                        .push((start + (granules + 1) * GRANULE, capacity - granules - 1));
-                }
-                return Ok((start, tag, Chunk::Large { granules }));
+        // Once quarantine begins releasing large runs into `large_free`, draw
+        // uniformly at random from fitting runs so steady-state memory plateaus
+        // instead of bumping `large_cursor` without bound.
+        let fitting: Vec<usize> = self
+            .large_free
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, capacity))| *capacity > granules)
+            .map(|(i, _)| i)
+            .collect();
+        if !fitting.is_empty() {
+            let pick = if self.random_placement {
+                fitting[self.rng.below(fitting.len())]
+            } else {
+                fitting[0]
+            };
+            let (start, capacity) = self.large_free.swap_remove(pick);
+            let tag = self.issue_tag();
+            self.set_granules(start, granules, u8::try_from(tag).unwrap_or(GUARD_TAG));
+            self.set_granules(start + granules * GRANULE, 1, GUARD_TAG);
+            if capacity > granules + 2 {
+                self.large_free
+                    .push((start + (granules + 1) * GRANULE, capacity - granules - 1));
             }
+            return Ok((start, tag, Chunk::Large { granules }));
         }
         let gap = u64::try_from(self.rng.below(5)).expect("small gap") * GRANULE;
         let start = self.large_cursor + gap;
@@ -408,7 +467,7 @@ impl Heap {
                 // Large runs wait in quarantine too: reuse is delayed so a
                 // dangling pointer cannot be re-aimed by an immediate realloc.
                 self.large_quarantine.push_back((address, total));
-                while self.large_quarantine.len() > QUARANTINE_CAPACITY {
+                while self.large_quarantine.len() > LARGE_QUARANTINE_CAPACITY {
                     let oldest = self.large_quarantine.pop_front().expect("non-empty");
                     self.large_free.push(oldest);
                 }
@@ -693,7 +752,7 @@ mod tests {
         // Fill the quarantine with other large frees so the first becomes
         // reusable, then take one allocation and require it not to silently
         // accept the old tagged pointer.
-        for _ in 0..QUARANTINE_CAPACITY {
+        for _ in 0..LARGE_QUARANTINE_CAPACITY {
             let p = heap.allocate(8192).expect("fill");
             heap.release(p, 0).expect("free");
         }

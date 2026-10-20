@@ -19,7 +19,7 @@
     .mono-label {
       font-family: 'GT Pressura Mono', 'JetBrains Mono', ui-monospace, monospace;
       font-weight: 700;
-      letter-spacing: 0.13em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
     }
     .mono-num {
@@ -37,8 +37,7 @@
     }
     </style>
 
-    <!-- Atmospheric gradients from Slide 16:9 - 18 / 26 / 27 -->
-    <radialGradient id="emerald-burst" cx="50%" cy="82%" r="75%">
+    <radialGradient id="emerald-burst" cx="50%" cy="84%" r="75%">
       <stop offset="0%" stop-color="#04D87F" stop-opacity="0.55"/>
       <stop offset="42%" stop-color="#12543B" stop-opacity="0.38"/>
       <stop offset="78%" stop-color="#041A12" stop-opacity="0.92"/>
@@ -58,305 +57,436 @@
     </linearGradient>
 
     <clipPath id="strip-clip">
-      <rect x="520" y="54" width="156" height="656" rx="10"/>
+      <rect x="520" y="44" width="156" height="672" rx="10"/>
     </clipPath>
   </defs>
   <rect x="0" y="0" width="1440" height="748" fill="#020604"/>
   <rect x="0" y="748" width="1440" height="72" fill="#EFEDE2"/>
   <g id="circuit-traces" opacity="0.82">
-    <polyline points="0,636 58,636 112,690 520,690" stroke="#EFEDE2" stroke-width="1.6" fill="none"/>
-    <polyline points="0,644 54,644 108,698 520,698" stroke="#04D87F" stroke-width="1.2" fill="none"/>
-    <!-- 4 parallel diagonal hash ticks (exact detail from Slide 26/27) -->
-    <line x1="28" y1="654" x2="54" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
-    <circle cx="28" cy="654" r="2.2" fill="#EFEDE2"/>
-    <line x1="42" y1="654" x2="68" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
-    <circle cx="42" cy="654" r="2.2" fill="#EFEDE2"/>
-    <line x1="56" y1="654" x2="82" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
-    <circle cx="56" cy="654" r="2.2" fill="#EFEDE2"/>
-    <line x1="70" y1="654" x2="96" y2="684" stroke="#EFEDE2" stroke-width="1.6"/>
-    <circle cx="70" cy="654" r="2.2" fill="#EFEDE2"/>
+    <polyline points="0,646 58,646 112,700 520,700" stroke="#EFEDE2" stroke-width="1.6" fill="none"/>
+    <polyline points="0,654 54,654 108,708 520,708" stroke="#04D87F" stroke-width="1.2" fill="none"/>
+    <line x1="28" y1="664" x2="54" y2="694" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="28" cy="664" r="2.2" fill="#EFEDE2"/>
+    <line x1="42" y1="664" x2="68" y2="694" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="42" cy="664" r="2.2" fill="#EFEDE2"/>
+    <line x1="56" y1="664" x2="82" y2="694" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="56" cy="664" r="2.2" fill="#EFEDE2"/>
+    <line x1="70" y1="664" x2="96" y2="694" stroke="#EFEDE2" stroke-width="1.6"/>
+    <circle cx="70" cy="664" r="2.2" fill="#EFEDE2"/>
 
-    <!-- Bridge trace between vertical strip and right stacked windows -->
-    <line x1="676" y1="368" x2="700" y2="368" stroke="#EFEDE2" stroke-width="1.5"/>
-    <line x1="676" y1="396" x2="700" y2="396" stroke="#04D87F" stroke-width="1.5"/>
+    <line x1="676" y1="306" x2="700" y2="306" stroke="#EFEDE2" stroke-width="1.5"/>
+    <line x1="676" y1="572" x2="700" y2="572" stroke="#04D87F" stroke-width="1.5"/>
   </g>
   <g id="left-editorial">
-    <text x="54" y="64" fill="#04D87F" font-size="11" class="mono-label">▾▴▾ LOCKSTEP // LINUX X86-64 NGINX BENCHMARK</text>
+    <text x="50" y="54" fill="#04D87F" font-size="10.5" class="mono-label">▾▴▾ LOCKSTEP // LINUX X86-64 NGINX BENCHMARK</text>
 
-    <!-- Huge RP Triliad Serif Statement (Slide 15 / 20 / 222) -->
-    <text x="52" y="138" fill="#EFEDE2" font-size="68" class="serif-hero">The End of</text>
-    <text x="52" y="200" fill="#EFEDE2" font-size="68" class="serif-hero">Heap Exploitation.</text>
+    <!-- Huge RP Triliad Serif Statement -->
+    <text x="48" y="112" fill="#EFEDE2" font-size="60" class="serif-hero">The End of</text>
+    <text x="48" y="164" fill="#EFEDE2" font-size="60" class="serif-hero">Heap Exploitation.</text>
 
-    <text x="56" y="232" fill="#8FA398" font-size="11" class="mono-label">
-      REAL NGINX (GLIBC 2.39 &amp; MUSL 1.2.5) · 2 WORKERS × 4 THREADS
+    <!-- Annotation 1: Short, crisp plain-English description of what happens -->
+    <text x="50" y="200" fill="#CEF4E4" font-size="12.2" class="sans-reg">
+      Take any Linux binary as-is. LOCKSTEP breaks its machine code into basic blocks,
+    </text>
+    <text x="50" y="218" fill="#CEF4E4" font-size="12.2" class="sans-reg">
+      lifts them into Cranelift IR, and wraps every heap allocation in a 16-byte lock.
     </text>
 
-    <!-- Dotted Circular C-Emblem (Slide 16/25/222) + Radar Matrix (Slide 31) -->
-    <circle cx="104.9" cy="300.8" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="99.9" cy="305.6" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="93.7" cy="308.7" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="86.8" cy="310.0" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="79.9" cy="309.2" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="73.4" cy="306.5" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="68.1" cy="302.0" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="64.3" cy="296.2" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="62.3" cy="289.5" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="62.3" cy="282.5" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="64.3" cy="275.8" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="68.1" cy="270.0" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="73.4" cy="265.5" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="79.9" cy="262.8" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="86.8" cy="262.0" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="93.7" cy="263.3" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="99.9" cy="266.4" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="104.9" cy="271.2" r="1.90" fill="#04D87F" opacity="0.95"/>
-    <circle cx="100.4" cy="297.2" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="95.6" cy="301.5" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="89.6" cy="303.9" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="83.2" cy="304.0" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="77.1" cy="301.9" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="72.1" cy="297.9" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="68.9" cy="292.3" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="67.8" cy="286.0" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="68.9" cy="279.7" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="72.1" cy="274.1" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="77.1" cy="270.1" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="83.2" cy="268.0" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="89.6" cy="268.1" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="95.6" cy="270.5" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="100.4" cy="274.8" r="1.55" fill="#04D87F" opacity="0.73"/>
-    <circle cx="96.2" cy="294.0" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="91.7" cy="297.6" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="86.1" cy="299.0" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="80.4" cy="297.7" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="75.9" cy="294.1" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="73.4" cy="288.9" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="73.4" cy="283.1" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="75.9" cy="277.9" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="80.4" cy="274.3" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="86.1" cy="273.0" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="91.7" cy="274.4" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <circle cx="96.2" cy="278.0" r="1.20" fill="#04D87F" opacity="0.51"/>
-    <g transform="translate(140, 246)" opacity="0.55">
-    <rect x="0" y="0" width="48" height="84" stroke="#EFEDE2" stroke-width="0.9" fill="none"/>
-    <line x1="24" y1="0" x2="24" y2="84" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
-    <line x1="0" y1="21" x2="48" y2="21" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
-    <line x1="0" y1="42" x2="48" y2="42" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
-    <line x1="0" y1="63" x2="48" y2="63" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
-    <circle cx="8" cy="12" r="1.4" fill="#04D87F"/>
-    <circle cx="16" cy="18" r="1.4" fill="#04D87F"/>
-    <circle cx="34" cy="28" r="1.4" fill="#04D87F"/>
-    <circle cx="11" cy="46" r="1.4" fill="#04D87F"/>
-    <circle cx="19" cy="52" r="1.4" fill="#04D87F"/>
-    <circle cx="38" cy="66" r="1.4" fill="#04D87F"/>
-    <circle cx="14" cy="74" r="1.4" fill="#04D87F"/>
-    <circle cx="96" cy="42" r="36" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
-    <circle cx="96" cy="42" r="27" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
-    <circle cx="96" cy="42" r="18" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
-    <circle cx="96" cy="42" r="9" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
-    <line x1="96" y1="42" x2="132.0" y2="42.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="121.5" y2="67.5" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="96.0" y2="78.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="70.5" y2="67.5" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="60.0" y2="42.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="70.5" y2="16.5" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="96.0" y2="6.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <line x1="96" y1="42" x2="121.5" y2="16.5" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
-    <circle cx="96" cy="42" r="2.5" fill="#04D87F"/>
+    <!-- 4-Step Visual Pipeline Pills -->
+    <g transform="translate(50, 236)">
+      <rect x="0" y="0" width="98" height="24" rx="3" fill="#061A12" stroke="#04D87F" stroke-opacity="0.55" stroke-width="1"/>
+      <text x="49" y="15" text-anchor="middle" fill="#EFEDE2" font-size="8" class="mono-label">1. ELF BINARY</text>
+      <text x="105" y="15" text-anchor="middle" fill="#04D87F" font-size="10" class="mono-num">→</text>
+
+      <rect x="112" y="0" width="106" height="24" rx="3" fill="#061A12" stroke="#04D87F" stroke-opacity="0.55" stroke-width="1"/>
+      <text x="165" y="15" text-anchor="middle" fill="#EFEDE2" font-size="8" class="mono-label">2. BASIC BLOCKS</text>
+      <text x="225" y="15" text-anchor="middle" fill="#04D87F" font-size="10" class="mono-num">→</text>
+
+      <rect x="232" y="0" width="106" height="24" rx="3" fill="#061A12" stroke="#04D87F" stroke-opacity="0.55" stroke-width="1"/>
+      <text x="285" y="15" text-anchor="middle" fill="#EFEDE2" font-size="8" class="mono-label">3. CRANELIFT IR</text>
+      <text x="345" y="15" text-anchor="middle" fill="#04D87F" font-size="10" class="mono-num">→</text>
+
+      <rect x="352" y="0" width="96" height="24" rx="3" fill="#12543B" stroke="#04D87F" stroke-width="1"/>
+      <text x="400" y="15" text-anchor="middle" fill="#04D87F" font-size="8" class="mono-label">4. SAFE HEAP</text>
     </g>
+
+    <!-- Dotted Circular C-Emblem + Radar Matrix + Workload Meta -->
+    <circle cx="91.8" cy="316.3" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="87.6" cy="320.3" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="82.4" cy="323.0" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="76.7" cy="324.0" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="70.9" cy="323.3" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="65.5" cy="321.0" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="61.1" cy="317.3" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="57.9" cy="312.5" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="56.2" cy="306.9" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="56.2" cy="301.1" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="57.9" cy="295.5" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="61.1" cy="290.7" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="65.5" cy="287.0" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="70.9" cy="284.7" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="76.7" cy="284.0" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="82.4" cy="285.0" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="87.6" cy="287.7" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="91.8" cy="291.7" r="1.70" fill="#04D87F" opacity="0.95"/>
+    <circle cx="88.0" cy="313.4" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="84.0" cy="316.9" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="79.0" cy="318.9" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="73.7" cy="319.0" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="68.6" cy="317.3" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="64.5" cy="313.9" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="61.7" cy="309.3" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="60.8" cy="304.0" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="61.7" cy="298.7" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="64.5" cy="294.1" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="68.6" cy="290.7" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="73.7" cy="289.0" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="79.0" cy="289.1" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="84.0" cy="291.1" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="88.0" cy="294.6" r="1.40" fill="#04D87F" opacity="0.73"/>
+    <circle cx="84.5" cy="310.6" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="80.8" cy="313.7" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="76.1" cy="314.8" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="71.4" cy="313.8" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="67.6" cy="310.8" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="65.5" cy="306.4" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="65.5" cy="301.6" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="67.6" cy="297.2" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="71.4" cy="294.2" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="76.1" cy="293.2" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="80.8" cy="294.3" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <circle cx="84.5" cy="297.4" r="1.10" fill="#04D87F" opacity="0.51"/>
+    <g transform="translate(118, 274)" opacity="0.55">
+    <rect x="0" y="0" width="38" height="60" stroke="#EFEDE2" stroke-width="0.9" fill="none"/>
+    <line x1="19" y1="0" x2="19" y2="60" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
+    <line x1="0" y1="15" x2="38" y2="15" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
+    <line x1="0" y1="30" x2="38" y2="30" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
+    <line x1="0" y1="45" x2="38" y2="45" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.6"/>
+    <circle cx="6" cy="8" r="1.3" fill="#04D87F"/>
+    <circle cx="13" cy="12" r="1.3" fill="#04D87F"/>
+    <circle cx="27" cy="20" r="1.3" fill="#04D87F"/>
+    <circle cx="9" cy="34" r="1.3" fill="#04D87F"/>
+    <circle cx="15" cy="39" r="1.3" fill="#04D87F"/>
+    <circle cx="30" cy="48" r="1.3" fill="#04D87F"/>
+    <circle cx="11" cy="54" r="1.3" fill="#04D87F"/>
+    <circle cx="78" cy="30" r="28" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
+    <circle cx="78" cy="30" r="21" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
+    <circle cx="78" cy="30" r="14" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
+    <circle cx="78" cy="30" r="7" stroke="#EFEDE2" stroke-width="0.8" stroke-opacity="0.75" fill="none"/>
+    <line x1="78" y1="30" x2="106.0" y2="30.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="97.8" y2="49.8" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="78.0" y2="58.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="58.2" y2="49.8" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="50.0" y2="30.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="58.2" y2="10.2" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="78.0" y2="2.0" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <line x1="78" y1="30" x2="97.8" y2="10.2" stroke="#EFEDE2" stroke-width="0.6" stroke-opacity="0.5"/>
+    <circle cx="78" cy="30" r="2.2" fill="#04D87F"/>
+    </g>
+    <text x="246" y="294" fill="#8FA398" font-size="9" class="mono-label">WORKLOAD: NGINX 1.26.2</text>
+    <text x="246" y="310" fill="#8FA398" font-size="9" class="mono-label">2 WORKERS × 4 AIO THREADS</text>
+    <text x="246" y="326" fill="#04D87F" font-size="9" class="mono-label">256 KB SHA-256 PAYLOADS</text>
   </g>
-  <g id="config-legend" transform="translate(54, 362)">
-    <text x="0" y="0" fill="#6E8479" font-size="9.5" class="mono-label">NGINX CONFIGURATION</text>
-    <text x="318" y="0" text-anchor="end" fill="#6E8479" font-size="9.5" class="mono-label">REQ/S</text>
-    <text x="426" y="0" text-anchor="end" fill="#6E8479" font-size="9.5" class="mono-label">PEAK MEM</text>
-    <line x1="0" y1="10" x2="426" y2="10" stroke="#EFEDE2" stroke-opacity="0.18" stroke-width="1"/>
-    <line x1="0" y1="30" x2="22" y2="30" stroke="#04D87F" stroke-width="3"/>
-    <circle cx="11" cy="30" r="3.2" fill="#04D87F"/>
-    <text x="32" y="34" fill="#EFEDE2" font-size="12.5" class="sans-bold">LOCKSTEP Full · Nginx (glibc)</text>
-    <text x="32" y="48" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN 84.0 MS · RSS 366 MB</text>
-    <text x="318" y="37" text-anchor="end" fill="#04D87F" font-size="13" class="mono-num">71.1</text>
-    <text x="426" y="37" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+9.2 MB</text>
-    <line x1="0" y1="56" x2="426" y2="56" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <line x1="0" y1="70" x2="22" y2="70" stroke="#FF6B1A" stroke-width="3"/>
-    <circle cx="11" cy="70" r="3.2" fill="#FF6B1A"/>
-    <text x="32" y="74" fill="#EFEDE2" font-size="12.5" class="sans-bold">LOCKSTEP Full · Nginx (musl)</text>
-    <text x="32" y="88" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN 85.0 MS · RSS 255 MB</text>
-    <text x="318" y="77" text-anchor="end" fill="#FF6B1A" font-size="13" class="mono-num">72.8</text>
-    <text x="426" y="77" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+11.8 MB</text>
-    <line x1="0" y1="96" x2="426" y2="96" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <line x1="0" y1="110" x2="22" y2="110" stroke="#38BDF8" stroke-width="3"/>
-    <circle cx="11" cy="110" r="3.2" fill="#38BDF8"/>
-    <text x="32" y="114" fill="#EFEDE2" font-size="12.5" class="sans-bold">LOCKSTEP Tags + Quarantine</text>
-    <text x="32" y="128" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN 81.9 MS · RSS 362 MB</text>
-    <text x="318" y="117" text-anchor="end" fill="#38BDF8" font-size="13" class="mono-num">73.1</text>
-    <text x="426" y="117" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+12.3 MB</text>
-    <line x1="0" y1="136" x2="426" y2="136" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <line x1="0" y1="150" x2="22" y2="150" stroke="#C084FC" stroke-width="3" stroke-dasharray="5,3"/>
-    <circle cx="11" cy="150" r="3.2" fill="#C084FC"/>
-    <text x="32" y="154" fill="#EFEDE2" font-size="12.5" class="sans-bold">LOCKSTEP PAC + CFI</text>
-    <text x="32" y="168" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN 85.4 MS · RSS 355 MB</text>
-    <text x="318" y="157" text-anchor="end" fill="#C084FC" font-size="13" class="mono-num">65.1</text>
-    <text x="426" y="157" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+12.6 MB</text>
-    <line x1="0" y1="176" x2="426" y2="176" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <line x1="0" y1="190" x2="22" y2="190" stroke="#EFEDE2" stroke-width="3"/>
-    <circle cx="11" cy="190" r="3.2" fill="#EFEDE2"/>
-    <text x="32" y="194" fill="#EFEDE2" font-size="12.5" class="sans-bold">Native Nginx (glibc)</text>
-    <text x="32" y="208" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN 3.5 MS · RSS 6 MB</text>
-    <text x="318" y="197" text-anchor="end" fill="#EFEDE2" font-size="13" class="mono-num">2079.8</text>
-    <text x="426" y="197" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+0.3 MB</text>
-    <line x1="0" y1="216" x2="426" y2="216" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <line x1="0" y1="230" x2="22" y2="230" stroke="#94A39B" stroke-width="3" stroke-dasharray="3,3"/>
-    <circle cx="11" cy="230" r="3.2" fill="#94A39B"/>
-    <text x="32" y="234" fill="#EFEDE2" font-size="12.5" class="sans-bold">Native Nginx (musl)</text>
-    <text x="32" y="248" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN 3.7 MS · RSS 3 MB</text>
-    <text x="318" y="237" text-anchor="end" fill="#94A39B" font-size="13" class="mono-num">1944.3</text>
-    <text x="426" y="237" text-anchor="end" fill="#EFEDE2" font-size="12" class="mono-num">+0.1 MB</text>
-    <line x1="0" y1="256" x2="426" y2="256" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+  <g id="config-legend" transform="translate(50, 362)">
+    <text x="0" y="0" fill="#6E8479" font-size="9" class="mono-label">NGINX CONFIGURATION</text>
+    <text x="280" y="0" text-anchor="end" fill="#6E8479" font-size="9" class="mono-label">REQ/S</text>
+    <text x="364" y="0" text-anchor="end" fill="#6E8479" font-size="9" class="mono-label">VS NATIVE</text>
+    <text x="448" y="0" text-anchor="end" fill="#6E8479" font-size="9" class="mono-label">STEADY MEM</text>
+    <line x1="0" y1="10" x2="448" y2="10" stroke="#EFEDE2" stroke-opacity="0.18" stroke-width="1"/>
+    <line x1="0" y1="30" x2="20" y2="30" stroke="#04D87F" stroke-width="3"/>
+    <circle cx="10" cy="30" r="3.0" fill="#04D87F"/>
+    <text x="28" y="34" fill="#EFEDE2" font-size="12" class="sans-bold">LOCKSTEP Full · Nginx (glibc)</text>
+    <text x="28" y="48" fill="#6E8479" font-size="8.2" class="mono-label">MEDIAN 72.8 MS · TOTAL RSS 362 MB</text>
+    <text x="280" y="37" text-anchor="end" fill="#04D87F" font-size="12.5" class="mono-num">93.3</text>
+    <text x="364" y="37" text-anchor="end" fill="#FFAD66" font-size="10.5" class="mono-num">28.0× slower</text>
+    <text x="448" y="37" text-anchor="end" fill="#EFEDE2" font-size="11.5" class="mono-num">+5.8 MB</text>
+    <line x1="0" y1="56" x2="448" y2="56" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <line x1="0" y1="72" x2="20" y2="72" stroke="#FF6B1A" stroke-width="3"/>
+    <circle cx="10" cy="72" r="3.0" fill="#FF6B1A"/>
+    <text x="28" y="76" fill="#EFEDE2" font-size="12" class="sans-bold">LOCKSTEP Full · Nginx (musl)</text>
+    <text x="28" y="90" fill="#6E8479" font-size="8.2" class="mono-label">MEDIAN 77.2 MS · TOTAL RSS 253 MB</text>
+    <text x="280" y="79" text-anchor="end" fill="#FF6B1A" font-size="12.5" class="mono-num">86.2</text>
+    <text x="364" y="79" text-anchor="end" fill="#FFAD66" font-size="10.5" class="mono-num">29.8× slower</text>
+    <text x="448" y="79" text-anchor="end" fill="#EFEDE2" font-size="11.5" class="mono-num">+10.7 MB</text>
+    <line x1="0" y1="98" x2="448" y2="98" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <line x1="0" y1="114" x2="20" y2="114" stroke="#38BDF8" stroke-width="3"/>
+    <circle cx="10" cy="114" r="3.0" fill="#38BDF8"/>
+    <text x="28" y="118" fill="#EFEDE2" font-size="12" class="sans-bold">LOCKSTEP Tags + Quarantine</text>
+    <text x="28" y="132" fill="#6E8479" font-size="8.2" class="mono-label">MEDIAN 75.2 MS · TOTAL RSS 354 MB</text>
+    <text x="280" y="121" text-anchor="end" fill="#38BDF8" font-size="12.5" class="mono-num">88.6</text>
+    <text x="364" y="121" text-anchor="end" fill="#FFAD66" font-size="10.5" class="mono-num">29.5× slower</text>
+    <text x="448" y="121" text-anchor="end" fill="#EFEDE2" font-size="11.5" class="mono-num">+10.8 MB</text>
+    <line x1="0" y1="140" x2="448" y2="140" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <line x1="0" y1="156" x2="20" y2="156" stroke="#C084FC" stroke-width="3" stroke-dasharray="5,3"/>
+    <circle cx="10" cy="156" r="3.0" fill="#C084FC"/>
+    <text x="28" y="160" fill="#EFEDE2" font-size="12" class="sans-bold">LOCKSTEP PAC + CFI</text>
+    <text x="28" y="174" fill="#6E8479" font-size="8.2" class="mono-label">MEDIAN 75.9 MS · TOTAL RSS 352 MB</text>
+    <text x="280" y="163" text-anchor="end" fill="#C084FC" font-size="12.5" class="mono-num">90.8</text>
+    <text x="364" y="163" text-anchor="end" fill="#FFAD66" font-size="10.5" class="mono-num">28.8× slower</text>
+    <text x="448" y="163" text-anchor="end" fill="#EFEDE2" font-size="11.5" class="mono-num">+8.1 MB</text>
+    <line x1="0" y1="182" x2="448" y2="182" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <line x1="0" y1="198" x2="20" y2="198" stroke="#EFEDE2" stroke-width="3"/>
+    <circle cx="10" cy="198" r="3.0" fill="#EFEDE2"/>
+    <text x="28" y="202" fill="#EFEDE2" font-size="12" class="sans-bold">Native Nginx (glibc)</text>
+    <text x="28" y="216" fill="#6E8479" font-size="8.2" class="mono-label">MEDIAN 2.8 MS · TOTAL RSS 6 MB</text>
+    <text x="280" y="205" text-anchor="end" fill="#EFEDE2" font-size="12.5" class="mono-num">2612.0</text>
+    <text x="364" y="205" text-anchor="end" fill="#8FA398" font-size="10.5" class="mono-num">1.0× (REF)</text>
+    <text x="448" y="205" text-anchor="end" fill="#EFEDE2" font-size="11.5" class="mono-num">+0.5 MB</text>
+    <line x1="0" y1="224" x2="448" y2="224" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <line x1="0" y1="240" x2="20" y2="240" stroke="#94A39B" stroke-width="3" stroke-dasharray="3,3"/>
+    <circle cx="10" cy="240" r="3.0" fill="#94A39B"/>
+    <text x="28" y="244" fill="#EFEDE2" font-size="12" class="sans-bold">Native Nginx (musl)</text>
+    <text x="28" y="258" fill="#6E8479" font-size="8.2" class="mono-label">MEDIAN 2.9 MS · TOTAL RSS 3 MB</text>
+    <text x="280" y="247" text-anchor="end" fill="#94A39B" font-size="12.5" class="mono-num">2571.5</text>
+    <text x="364" y="247" text-anchor="end" fill="#8FA398" font-size="10.5" class="mono-num">1.0× (REF)</text>
+    <text x="448" y="247" text-anchor="end" fill="#EFEDE2" font-size="11.5" class="mono-num">+0.2 MB</text>
+    <line x1="0" y1="266" x2="448" y2="266" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
   </g>
   <g id="vertical-horizon-strip">
-    <rect x="520" y="54" width="156" height="656" rx="10" fill="url(#emerald-burst)" stroke="#EFEDE2" stroke-opacity="0.7" stroke-width="1.3"/>
+    <rect x="520" y="44" width="156" height="672" rx="10" fill="url(#emerald-burst)" stroke="#EFEDE2" stroke-opacity="0.7" stroke-width="1.3"/>
     <g clip-path="url(#strip-clip)">
-      <!-- Perspective starburst rays at bottom of vertical strip (Slide 21 / 26 / 27) -->
-      <circle cx="598.0" cy="600" r="42" fill="#04D87F" opacity="0.28"/>
-      <circle cx="598.0" cy="600" r="14" fill="#EFEDE2" opacity="0.75"/>
-      <line x1="598.0" y1="600.0" x2="838.0" y2="600.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="826.3" y2="674.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="792.2" y2="741.1" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="739.1" y2="794.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="672.2" y2="828.3" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="598.0" y2="840.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="523.8" y2="828.3" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="456.9" y2="794.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="403.8" y2="741.1" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="369.7" y2="674.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="358.0" y2="600.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="369.7" y2="525.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="403.8" y2="458.9" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="456.9" y2="405.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="523.8" y2="371.7" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="598.0" y2="360.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="672.2" y2="371.7" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="739.1" y2="405.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="792.2" y2="458.9" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="598.0" y1="600.0" x2="826.3" y2="525.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
-      <line x1="520" y1="600" x2="676" y2="600" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <line x1="520" y1="618" x2="676" y2="618" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <line x1="520" y1="636" x2="676" y2="636" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <line x1="520" y1="654" x2="676" y2="654" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <line x1="520" y1="672" x2="676" y2="672" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <line x1="520" y1="690" x2="676" y2="690" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <line x1="520" y1="708" x2="676" y2="708" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
-      <text x="536" y="82" fill="#04D87F" font-size="9.5" class="mono-label">THROUGHPUT</text>
-      <text x="536" y="96" fill="#8FA398" font-size="8.5" class="mono-label">REQ / SEC</text>
-      <rect x="534" y="142" width="128" height="74" fill="#030D09" fill-opacity="0.82" stroke="#04D87F" stroke-opacity="0.55" stroke-width="1"/>
-      <text x="544" y="162" fill="#8FA398" font-size="8" class="mono-label">Full (glibc)</text>
-      <text x="544" y="192" fill="#04D87F" font-size="22" class="druk-word">71.1</text>
-      <text x="544" y="206" fill="#EFEDE2" font-size="8" class="mono-label">REQ/S VERIFIED</text>
-      <rect x="534" y="238" width="128" height="74" fill="#030D09" fill-opacity="0.82" stroke="#FF6B1A" stroke-opacity="0.55" stroke-width="1"/>
-      <text x="544" y="258" fill="#8FA398" font-size="8" class="mono-label">Full (musl)</text>
-      <text x="544" y="288" fill="#FF6B1A" font-size="22" class="druk-word">72.8</text>
-      <text x="544" y="302" fill="#EFEDE2" font-size="8" class="mono-label">REQ/S VERIFIED</text>
-      <rect x="534" y="334" width="128" height="74" fill="#030D09" fill-opacity="0.82" stroke="#38BDF8" stroke-opacity="0.55" stroke-width="1"/>
-      <text x="544" y="354" fill="#8FA398" font-size="8" class="mono-label">Tags Only (glibc)</text>
-      <text x="544" y="384" fill="#38BDF8" font-size="22" class="druk-word">73.1</text>
-      <text x="544" y="398" fill="#EFEDE2" font-size="8" class="mono-label">REQ/S VERIFIED</text>
-      <rect x="534" y="430" width="128" height="74" fill="#030D09" fill-opacity="0.82" stroke="#C084FC" stroke-opacity="0.55" stroke-width="1"/>
-      <text x="544" y="450" fill="#8FA398" font-size="8" class="mono-label">PAC+CFI (glibc)</text>
-      <text x="544" y="480" fill="#C084FC" font-size="22" class="druk-word">65.1</text>
-      <text x="544" y="494" fill="#EFEDE2" font-size="8" class="mono-label">REQ/S VERIFIED</text>
+      <circle cx="598.0" cy="620" r="42" fill="#04D87F" opacity="0.28"/>
+      <circle cx="598.0" cy="620" r="14" fill="#EFEDE2" opacity="0.75"/>
+      <line x1="598.0" y1="620.0" x2="838.0" y2="620.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="826.3" y2="694.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="792.2" y2="761.1" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="739.1" y2="814.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="672.2" y2="848.3" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="598.0" y2="860.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="523.8" y2="848.3" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="456.9" y2="814.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="403.8" y2="761.1" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="369.7" y2="694.2" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="358.0" y2="620.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="369.7" y2="545.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="403.8" y2="478.9" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="456.9" y2="425.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="523.8" y2="391.7" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="598.0" y2="380.0" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="672.2" y2="391.7" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="739.1" y2="425.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="792.2" y2="478.9" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="598.0" y1="620.0" x2="826.3" y2="545.8" stroke="#04D87F" stroke-opacity="0.32" stroke-width="1.1"/>
+      <line x1="520" y1="620" x2="676" y2="620" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <line x1="520" y1="638" x2="676" y2="638" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <line x1="520" y1="656" x2="676" y2="656" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <line x1="520" y1="674" x2="676" y2="674" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <line x1="520" y1="692" x2="676" y2="692" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <line x1="520" y1="710" x2="676" y2="710" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <line x1="520" y1="728" x2="676" y2="728" stroke="#CEF4E4" stroke-opacity="0.28" stroke-width="0.9"/>
+      <text x="534" y="70" fill="#04D87F" font-size="9" class="mono-label">COST &amp; SHIELD</text>
+      <text x="534" y="84" fill="#8FA398" font-size="8" class="mono-label">TRADEOFF SUMMARY</text>
+
+      <!-- Card 1: Explicit Slowdown vs Native (~2000 -> ~70 req/s) -->
+      <rect x="532" y="100" width="132" height="106" fill="#030D09" fill-opacity="0.88" stroke="#FF6B1A" stroke-opacity="0.75" stroke-width="1.1"/>
+      <text x="540" y="118" fill="#FFAD66" font-size="8" class="mono-label">TRANSLATION COST</text>
+      <text x="540" y="150" fill="#EFEDE2" font-size="23" class="druk-word">28×</text>
+      <text x="540" y="168" fill="#04D87F" font-size="8.5" class="mono-num">~2612 → 93 REQ/S</text>
+      <text x="540" y="182" fill="#8FA398" font-size="7.5" class="mono-label">EVERY LOAD &amp; STORE</text>
+      <text x="540" y="194" fill="#8FA398" font-size="7.5" class="mono-label">CHECKED IN SOFTWARE</text>
+
+      <!-- Card 2: Heap Overflows Stopped -->
+      <rect x="532" y="218" width="132" height="96" fill="#030D09" fill-opacity="0.86" stroke="#04D87F" stroke-opacity="0.6" stroke-width="1"/>
+      <text x="540" y="236" fill="#8FA398" font-size="8" class="mono-label">HEAP OVERFLOWS</text>
+      <text x="540" y="266" fill="#04D87F" font-size="22" class="druk-word">16 B</text>
+      <text x="540" y="284" fill="#EFEDE2" font-size="8" class="mono-label">SHADOW GRANULES</text>
+      <text x="540" y="298" fill="#6E8479" font-size="7.5" class="mono-label">1-BYTE SPILL FAULTS</text>
+
+      <!-- Card 3: Use-After-Free Stopped -->
+      <rect x="532" y="326" width="132" height="96" fill="#030D09" fill-opacity="0.86" stroke="#38BDF8" stroke-opacity="0.6" stroke-width="1"/>
+      <text x="540" y="344" fill="#8FA398" font-size="8" class="mono-label">USE-AFTER-FREE</text>
+      <text x="540" y="374" fill="#38BDF8" font-size="22" class="druk-word">0xFF</text>
+      <text x="540" y="392" fill="#EFEDE2" font-size="8" class="mono-label">QUARANTINE RING</text>
+      <text x="540" y="406" fill="#6E8479" font-size="7.5" class="mono-label">DANGLING READ DIES</text>
+
+      <!-- Card 4: Function Pointer Swap Stopped -->
+      <rect x="532" y="434" width="132" height="96" fill="#030D09" fill-opacity="0.86" stroke="#C084FC" stroke-opacity="0.6" stroke-width="1"/>
+      <text x="540" y="452" fill="#8FA398" font-size="8" class="mono-label">POINTER HIJACK</text>
+      <text x="540" y="482" fill="#C084FC" font-size="20" class="druk-word">PAC</text>
+      <text x="540" y="500" fill="#EFEDE2" font-size="8" class="mono-label">SIPHASH-2-4 MAC</text>
+      <text x="540" y="514" fill="#6E8479" font-size="7.5" class="mono-label">FORGED TARGET DIES</text>
     </g>
   </g>
   <g id="chart-heap">
-    <rect x="700" y="54" width="686" height="318" rx="10" fill="url(#window-top-bg)" stroke="#EFEDE2" stroke-opacity="0.75" stroke-width="1.3"/>
-    <text x="724" y="82" fill="#04D87F" font-size="10" class="mono-label">▾▴▾ HEAP &amp; QUARANTINE ALLOCATION OVER TIME</text>
-    <text x="724" y="106" fill="#EFEDE2" font-size="20" class="sans-bold">Dynamic Memory Allocated Over Time (+MB)</text>
-    <text x="1362" y="82" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-label">SAMPLING: 50MS /PROC TELEMETRY</text>
-    <line x1="764" y1="330.0" x2="1358" y2="330.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="333.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">0 MB</text>
-    <line x1="764" y1="279.0" x2="1358" y2="279.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="282.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">4 MB</text>
-    <line x1="764" y1="228.0" x2="1358" y2="228.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="231.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">8 MB</text>
-    <line x1="764" y1="177.0" x2="1358" y2="177.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="180.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">11 MB</text>
-    <line x1="764" y1="126.0" x2="1358" y2="126.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="129.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">15 MB</text>
-    <line x1="764.0" y1="126" x2="764.0" y2="330" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="764.0" y="350" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">0.0s</text>
-    <line x1="912.5" y1="126" x2="912.5" y2="330" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="912.5" y="350" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">0.5s</text>
-    <line x1="1061.0" y1="126" x2="1061.0" y2="330" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="1061.0" y="350" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">1.0s</text>
-    <line x1="1209.5" y1="126" x2="1209.5" y2="330" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="1209.5" y="350" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">1.5s</text>
-    <line x1="1358.0" y1="126" x2="1358.0" y2="330" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="1358.0" y="350" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">2.0s</text>
-    <polyline points="764.0,330.0 779.1,329.3 888.7,328.4 1000.7,329.0 1102.3,329.6 1216.3,329.5 1356.8,329.6" fill="none" stroke="#94A39B" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,3"/>
-    <circle cx="1356.8" cy="329.6" r="3.2" fill="#94A39B" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,330.0 764.0,330.0 778.9,326.6 896.5,326.2 998.0,326.2 1103.5,326.2 1216.6,326.2 1308.4,326.2 1308.4,330.0" fill="#EFEDE2" fill-opacity="0.05"/>
-    <polyline points="764.0,330.0 778.9,326.6 896.5,326.2 998.0,326.2 1103.5,326.2 1216.6,326.2 1308.4,326.2" fill="none" stroke="#EFEDE2" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1308.4" cy="326.2" r="3.2" fill="#EFEDE2" stroke="#020604" stroke-width="1"/>
-    <polyline points="764.0,330.0 778.9,325.9 793.7,322.4 808.5,316.9 823.4,312.7 838.2,308.5 853.1,304.3 868.0,300.6 882.8,296.5 897.6,293.3 912.5,289.3 927.4,286.3 942.2,283.1 957.0,279.5 971.9,274.1 986.8,270.0 1001.6,266.8 1016.5,263.4 1031.3,243.6 1046.2,238.7 1061.0,229.6 1075.8,227.3 1090.7,223.9 1105.5,221.7 1120.4,217.9 1135.2,213.7 1150.1,210.6 1165.0,207.7 1179.8,205.3 1194.7,202.4 1209.5,188.2 1224.3,184.1 1239.2,181.6 1254.0,178.8 1268.9,175.5 1283.8,173.3 1298.6,169.7 1313.5,166.8 1328.3,163.8 1343.2,160.3 1358.0,158.5" fill="none" stroke="#C084FC" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5,3"/>
-    <circle cx="1358.0" cy="158.5" r="3.2" fill="#C084FC" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,330.0 764.0,330.0 778.9,324.6 793.7,321.6 808.5,317.9 823.4,314.9 838.2,310.7 853.1,308.1 868.0,303.1 882.8,299.5 897.6,295.7 912.5,291.1 927.4,287.8 942.2,284.6 957.0,282.7 971.9,278.9 986.8,276.3 1001.6,273.0 1016.5,267.0 1031.3,263.6 1046.2,260.6 1061.0,257.4 1075.8,254.9 1090.7,249.9 1105.5,247.3 1120.4,244.5 1135.2,239.8 1150.1,237.2 1165.0,234.8 1179.8,231.0 1194.7,214.3 1209.5,210.5 1224.3,206.9 1239.2,204.7 1254.0,195.0 1268.9,192.5 1283.8,190.1 1298.6,186.4 1313.5,183.9 1328.3,171.6 1343.2,164.9 1358.0,162.6 1358.0,330.0" fill="#38BDF8" fill-opacity="0.06"/>
-    <polyline points="764.0,330.0 778.9,324.6 793.7,321.6 808.5,317.9 823.4,314.9 838.2,310.7 853.1,308.1 868.0,303.1 882.8,299.5 897.6,295.7 912.5,291.1 927.4,287.8 942.2,284.6 957.0,282.7 971.9,278.9 986.8,276.3 1001.6,273.0 1016.5,267.0 1031.3,263.6 1046.2,260.6 1061.0,257.4 1075.8,254.9 1090.7,249.9 1105.5,247.3 1120.4,244.5 1135.2,239.8 1150.1,237.2 1165.0,234.8 1179.8,231.0 1194.7,214.3 1209.5,210.5 1224.3,206.9 1239.2,204.7 1254.0,195.0 1268.9,192.5 1283.8,190.1 1298.6,186.4 1313.5,183.9 1328.3,171.6 1343.2,164.9 1358.0,162.6" fill="none" stroke="#38BDF8" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1358.0" cy="162.6" r="3.2" fill="#38BDF8" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,330.0 764.0,330.0 778.9,320.1 793.7,312.3 808.5,305.5 823.4,297.1 838.2,296.5 853.1,290.2 868.0,288.0 882.8,281.2 897.6,286.3 912.5,275.1 927.4,268.0 942.2,265.4 957.0,261.5 971.9,257.0 986.8,256.8 1001.6,258.3 1016.5,249.4 1031.3,246.1 1046.2,241.6 1061.0,237.2 1075.8,234.0 1090.7,230.9 1105.5,228.5 1120.4,224.6 1135.2,216.3 1150.1,212.2 1165.0,209.2 1179.8,205.7 1194.7,202.2 1209.5,198.8 1224.3,196.2 1239.2,193.7 1254.0,190.9 1268.9,187.3 1283.8,185.0 1298.6,180.8 1313.5,178.0 1328.3,175.1 1343.2,171.8 1358.0,169.2 1358.0,330.0" fill="#FF6B1A" fill-opacity="0.12"/>
-    <polyline points="764.0,330.0 778.9,320.1 793.7,312.3 808.5,305.5 823.4,297.1 838.2,296.5 853.1,290.2 868.0,288.0 882.8,281.2 897.6,286.3 912.5,275.1 927.4,268.0 942.2,265.4 957.0,261.5 971.9,257.0 986.8,256.8 1001.6,258.3 1016.5,249.4 1031.3,246.1 1046.2,241.6 1061.0,237.2 1075.8,234.0 1090.7,230.9 1105.5,228.5 1120.4,224.6 1135.2,216.3 1150.1,212.2 1165.0,209.2 1179.8,205.7 1194.7,202.2 1209.5,198.8 1224.3,196.2 1239.2,193.7 1254.0,190.9 1268.9,187.3 1283.8,185.0 1298.6,180.8 1313.5,178.0 1328.3,175.1 1343.2,171.8 1358.0,169.2" fill="none" stroke="#FF6B1A" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1358.0" cy="169.2" r="3.2" fill="#FF6B1A" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,330.0 764.0,330.0 778.9,326.1 793.7,322.5 808.5,319.3 823.4,316.5 838.2,313.5 853.1,310.6 868.0,308.0 882.8,305.2 897.6,302.1 912.5,297.9 927.4,294.9 942.2,291.4 957.0,288.5 971.9,285.9 986.8,281.7 1001.6,279.7 1016.5,276.7 1031.3,274.0 1046.2,270.7 1061.0,267.2 1075.8,265.1 1090.7,263.2 1105.5,259.6 1120.4,255.9 1135.2,253.0 1150.1,250.3 1165.0,246.2 1179.8,243.4 1194.7,240.1 1209.5,237.0 1224.3,233.4 1239.2,230.4 1254.0,226.9 1268.9,223.6 1283.8,220.0 1298.6,217.3 1313.5,213.7 1328.3,210.9 1343.2,207.3 1358.0,204.9 1358.0,330.0" fill="#04D87F" fill-opacity="0.16"/>
-    <polyline points="764.0,330.0 778.9,326.1 793.7,322.5 808.5,319.3 823.4,316.5 838.2,313.5 853.1,310.6 868.0,308.0 882.8,305.2 897.6,302.1 912.5,297.9 927.4,294.9 942.2,291.4 957.0,288.5 971.9,285.9 986.8,281.7 1001.6,279.7 1016.5,276.7 1031.3,274.0 1046.2,270.7 1061.0,267.2 1075.8,265.1 1090.7,263.2 1105.5,259.6 1120.4,255.9 1135.2,253.0 1150.1,250.3 1165.0,246.2 1179.8,243.4 1194.7,240.1 1209.5,237.0 1224.3,233.4 1239.2,230.4 1254.0,226.9 1268.9,223.6 1283.8,220.0 1298.6,217.3 1313.5,213.7 1328.3,210.9 1343.2,207.3 1358.0,204.9" fill="none" stroke="#04D87F" stroke-width="3.0" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1358.0" cy="204.9" r="3.2" fill="#04D87F" stroke="#020604" stroke-width="1"/>
+    <rect x="700" y="44" width="690" height="252" rx="10" fill="url(#window-top-bg)" stroke="#EFEDE2" stroke-opacity="0.75" stroke-width="1.3"/>
+    <text x="722" y="68" fill="#04D87F" font-size="9.5" class="mono-label">▾▴▾ HEAP &amp; QUARANTINE MEMORY OVER TIME</text>
+    <text x="722" y="88" fill="#EFEDE2" font-size="16" class="sans-bold">Dynamic Memory Allocated (+MB)</text>
+    <g transform="translate(1046, 68)">
+    <rect x="-8" y="-12" width="332" height="36" rx="4" fill="#020806" fill-opacity="0.82" stroke="#EFEDE2" stroke-opacity="0.16" stroke-width="0.8"/>
+    <line x1="0" y1="-3" x2="14" y2="-3" stroke="#04D87F" stroke-width="2.4"/>
+    <circle cx="7" cy="-3" r="2.2" fill="#04D87F"/>
+    <text x="19" y="0" fill="#EFEDE2" font-size="8.2" class="mono-num">Full (glibc)</text>
+    <line x1="108" y1="-3" x2="122" y2="-3" stroke="#FF6B1A" stroke-width="2.4"/>
+    <circle cx="115" cy="-3" r="2.2" fill="#FF6B1A"/>
+    <text x="127" y="0" fill="#EFEDE2" font-size="8.2" class="mono-num">Full (musl)</text>
+    <line x1="216" y1="-3" x2="230" y2="-3" stroke="#38BDF8" stroke-width="2.4"/>
+    <circle cx="223" cy="-3" r="2.2" fill="#38BDF8"/>
+    <text x="235" y="0" fill="#EFEDE2" font-size="8.2" class="mono-num">Tags Only</text>
+    <line x1="0" y1="12" x2="14" y2="12" stroke="#C084FC" stroke-width="2.4" stroke-dasharray="4,2"/>
+    <circle cx="7" cy="12" r="2.2" fill="#C084FC"/>
+    <text x="19" y="15" fill="#EFEDE2" font-size="8.2" class="mono-num">PAC + CFI</text>
+    <line x1="108" y1="12" x2="122" y2="12" stroke="#EFEDE2" stroke-width="2.4"/>
+    <circle cx="115" cy="12" r="2.2" fill="#EFEDE2"/>
+    <text x="127" y="15" fill="#EFEDE2" font-size="8.2" class="mono-num">Native (glibc)</text>
+    <line x1="216" y1="12" x2="230" y2="12" stroke="#94A39B" stroke-width="2.4" stroke-dasharray="2,2"/>
+    <circle cx="223" cy="12" r="2.2" fill="#94A39B"/>
+    <text x="235" y="15" fill="#EFEDE2" font-size="8.2" class="mono-num">Native (musl)</text>
+    </g>
+    <line x1="762" y1="262.0" x2="1366" y2="262.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="265.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">0 MB</text>
+    <line x1="762" y1="223.0" x2="1366" y2="223.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="226.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">4 MB</text>
+    <line x1="762" y1="184.0" x2="1366" y2="184.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="187.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">7 MB</text>
+    <line x1="762" y1="145.0" x2="1366" y2="145.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="148.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">10 MB</text>
+    <line x1="762" y1="106.0" x2="1366" y2="106.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="109.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">14 MB</text>
+    <line x1="762.0" y1="106" x2="762.0" y2="262" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="762.0" y="280" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">0.0s</text>
+    <line x1="913.0" y1="106" x2="913.0" y2="262" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="913.0" y="280" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">1.0s</text>
+    <line x1="1064.0" y1="106" x2="1064.0" y2="262" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="1064.0" y="280" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">2.0s</text>
+    <line x1="1215.0" y1="106" x2="1215.0" y2="262" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="1215.0" y="280" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">3.0s</text>
+    <line x1="1366.0" y1="106" x2="1366.0" y2="262" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="1366.0" y="280" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">4.0s</text>
+    <line x1="931.1" y1="110" x2="931.1" y2="262" stroke="#04D87F" stroke-opacity="0.45" stroke-dasharray="3,3" stroke-width="1.1"/>
+    <rect x="939.1" y="110" width="388" height="18" rx="3" fill="#03120C" fill-opacity="0.88" stroke="#04D87F" stroke-opacity="0.45" stroke-width="0.8"/>
+    <text x="946.1" y="122" fill="#04D87F" font-size="8.2" class="mono-label">QUARANTINE RING FULL → CHUNKS RECYCLED IN STEADY STATE (NO MEMORY LEAK)</text>
+    <polyline points="762.0,262.0 769.5,260.2 838.9,260.7 904.2,260.7 981.0,261.6 1045.7,261.6 1115.0,261.1 1197.6,261.6 1259.7,261.4 1341.2,261.7" fill="none" stroke="#94A39B" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,3"/>
+    <circle cx="1341.2" cy="261.7" r="3.0" fill="#94A39B" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,262.0 762.0,262.0 769.7,258.4 840.1,257.4 911.8,257.0 978.7,257.0 1040.0,257.0 1109.1,257.0 1169.5,257.0 1231.9,257.0 1295.2,257.0 1362.2,257.0 1362.2,262.0" fill="#EFEDE2" fill-opacity="0.04"/>
+    <polyline points="762.0,262.0 769.7,258.4 840.1,257.4 911.8,257.0 978.7,257.0 1040.0,257.0 1109.1,257.0 1169.5,257.0 1231.9,257.0 1295.2,257.0 1362.2,257.0" fill="none" stroke="#EFEDE2" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1362.2" cy="257.0" r="3.0" fill="#EFEDE2" stroke="#020604" stroke-width="1"/>
+    <polyline points="762.0,262.0 769.5,257.3 777.1,255.0 784.6,252.2 792.2,247.6 799.8,244.3 807.3,241.7 814.9,236.7 822.4,229.9 830.0,225.5 837.5,223.9 845.0,222.3 852.6,221.1 860.1,219.5 867.7,218.0 875.2,215.2 882.8,214.5 890.4,211.9 897.9,211.3 905.5,210.5 913.0,208.5 920.5,207.7 928.1,207.0 935.6,206.1 943.2,205.5 950.8,205.2 958.3,205.1 965.9,205.1 973.4,202.9 981.0,202.8 988.5,202.8 996.0,202.5 1003.6,202.3 1011.1,202.2 1018.7,201.2 1026.2,189.6 1033.8,186.8 1041.3,186.2 1048.9,186.2 1056.5,186.2 1064.0,185.8 1071.5,185.1 1079.1,185.1 1086.7,185.0 1094.2,184.8 1101.8,184.8 1109.3,184.8 1116.8,184.8 1124.4,184.8 1132.0,183.4 1139.5,183.4 1147.0,183.4 1154.6,183.4 1162.2,178.2 1169.7,178.0 1177.2,178.0 1184.8,172.6 1192.3,172.6 1199.9,172.6 1207.5,172.3 1215.0,172.3 1222.5,172.3 1230.1,172.3 1237.7,172.3 1245.2,172.3 1252.8,172.3 1260.3,172.3 1267.8,172.3 1275.4,172.3 1283.0,172.3 1290.5,172.3 1298.0,172.3 1305.6,172.3 1313.2,172.3 1320.7,172.3 1328.2,172.3 1335.8,172.3 1343.3,172.3 1350.9,172.3 1358.5,172.2 1366.0,172.2" fill="none" stroke="#C084FC" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5,3"/>
+    <circle cx="1366.0" cy="172.2" r="3.0" fill="#C084FC" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,262.0 762.0,262.0 769.5,259.4 777.1,255.5 784.6,252.6 792.2,249.6 799.8,244.5 807.3,240.5 814.9,237.8 822.4,230.8 830.0,227.8 837.5,223.4 845.0,220.0 852.6,218.0 860.1,206.2 867.7,194.6 875.2,192.9 882.8,192.1 890.4,190.0 897.9,187.3 905.5,185.9 913.0,183.3 920.5,181.3 928.1,180.1 935.6,178.4 943.2,177.0 950.8,176.1 958.3,170.3 965.9,157.6 973.4,156.6 981.0,156.6 988.5,156.4 996.0,156.4 1003.6,155.9 1011.1,155.9 1018.7,155.6 1026.2,153.2 1033.8,150.5 1041.3,150.5 1048.9,150.0 1056.5,150.0 1064.0,150.0 1071.5,149.7 1079.1,149.7 1086.7,149.3 1094.2,149.3 1101.8,148.9 1109.3,148.9 1116.8,148.0 1124.4,148.0 1132.0,148.0 1139.5,147.9 1147.0,147.6 1154.6,147.3 1162.2,147.3 1169.7,147.0 1177.2,146.3 1184.8,146.0 1192.3,146.0 1199.9,145.6 1207.5,145.6 1215.0,144.7 1222.5,144.7 1230.1,144.7 1237.7,144.3 1245.2,143.7 1252.8,143.7 1260.3,143.2 1267.8,143.2 1275.4,142.5 1283.0,142.5 1290.5,142.5 1298.0,142.5 1305.6,142.4 1313.2,142.0 1320.7,142.0 1328.2,142.0 1335.8,142.0 1343.3,141.7 1350.9,141.7 1358.5,141.7 1366.0,141.2 1366.0,262.0" fill="#38BDF8" fill-opacity="0.05"/>
+    <polyline points="762.0,262.0 769.5,259.4 777.1,255.5 784.6,252.6 792.2,249.6 799.8,244.5 807.3,240.5 814.9,237.8 822.4,230.8 830.0,227.8 837.5,223.4 845.0,220.0 852.6,218.0 860.1,206.2 867.7,194.6 875.2,192.9 882.8,192.1 890.4,190.0 897.9,187.3 905.5,185.9 913.0,183.3 920.5,181.3 928.1,180.1 935.6,178.4 943.2,177.0 950.8,176.1 958.3,170.3 965.9,157.6 973.4,156.6 981.0,156.6 988.5,156.4 996.0,156.4 1003.6,155.9 1011.1,155.9 1018.7,155.6 1026.2,153.2 1033.8,150.5 1041.3,150.5 1048.9,150.0 1056.5,150.0 1064.0,150.0 1071.5,149.7 1079.1,149.7 1086.7,149.3 1094.2,149.3 1101.8,148.9 1109.3,148.9 1116.8,148.0 1124.4,148.0 1132.0,148.0 1139.5,147.9 1147.0,147.6 1154.6,147.3 1162.2,147.3 1169.7,147.0 1177.2,146.3 1184.8,146.0 1192.3,146.0 1199.9,145.6 1207.5,145.6 1215.0,144.7 1222.5,144.7 1230.1,144.7 1237.7,144.3 1245.2,143.7 1252.8,143.7 1260.3,143.2 1267.8,143.2 1275.4,142.5 1283.0,142.5 1290.5,142.5 1298.0,142.5 1305.6,142.4 1313.2,142.0 1320.7,142.0 1328.2,142.0 1335.8,142.0 1343.3,141.7 1350.9,141.7 1358.5,141.7 1366.0,141.2" fill="none" stroke="#38BDF8" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1366.0" cy="141.2" r="3.0" fill="#38BDF8" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,262.0 762.0,262.0 769.5,261.8 777.1,252.4 784.6,245.2 792.2,240.9 799.8,237.6 807.3,232.5 814.9,226.3 822.4,222.9 830.0,222.8 837.5,219.8 845.0,225.3 852.6,223.6 860.1,215.2 867.7,209.2 875.2,207.3 882.8,205.7 890.4,204.7 897.9,201.5 905.5,197.6 913.0,196.7 920.5,195.4 928.1,193.6 935.6,191.6 943.2,190.5 950.8,187.5 958.3,179.8 965.9,178.1 973.4,174.4 981.0,172.4 988.5,171.9 996.0,171.6 1003.6,171.5 1011.1,171.5 1018.7,170.6 1026.2,170.5 1033.8,169.4 1041.3,169.3 1048.9,169.1 1056.5,169.1 1064.0,168.7 1071.5,168.4 1079.1,168.1 1086.7,167.6 1094.2,167.5 1101.8,166.5 1109.3,165.7 1116.8,165.4 1124.4,165.4 1132.0,165.4 1139.5,164.9 1147.0,164.9 1154.6,164.9 1162.2,164.9 1169.7,164.6 1177.2,164.1 1184.8,163.4 1192.3,163.4 1199.9,163.4 1207.5,163.1 1215.0,162.7 1222.5,162.7 1230.1,162.7 1237.7,162.7 1245.2,162.7 1252.8,162.7 1260.3,162.4 1267.8,162.4 1275.4,162.0 1283.0,162.0 1290.5,145.2 1298.0,145.0 1305.6,144.8 1313.2,144.3 1320.7,144.0 1328.2,144.0 1335.8,144.0 1343.3,143.7 1350.9,143.3 1358.5,143.0 1366.0,143.0 1366.0,262.0" fill="#FF6B1A" fill-opacity="0.11"/>
+    <polyline points="762.0,262.0 769.5,261.8 777.1,252.4 784.6,245.2 792.2,240.9 799.8,237.6 807.3,232.5 814.9,226.3 822.4,222.9 830.0,222.8 837.5,219.8 845.0,225.3 852.6,223.6 860.1,215.2 867.7,209.2 875.2,207.3 882.8,205.7 890.4,204.7 897.9,201.5 905.5,197.6 913.0,196.7 920.5,195.4 928.1,193.6 935.6,191.6 943.2,190.5 950.8,187.5 958.3,179.8 965.9,178.1 973.4,174.4 981.0,172.4 988.5,171.9 996.0,171.6 1003.6,171.5 1011.1,171.5 1018.7,170.6 1026.2,170.5 1033.8,169.4 1041.3,169.3 1048.9,169.1 1056.5,169.1 1064.0,168.7 1071.5,168.4 1079.1,168.1 1086.7,167.6 1094.2,167.5 1101.8,166.5 1109.3,165.7 1116.8,165.4 1124.4,165.4 1132.0,165.4 1139.5,164.9 1147.0,164.9 1154.6,164.9 1162.2,164.9 1169.7,164.6 1177.2,164.1 1184.8,163.4 1192.3,163.4 1199.9,163.4 1207.5,163.1 1215.0,162.7 1222.5,162.7 1230.1,162.7 1237.7,162.7 1245.2,162.7 1252.8,162.7 1260.3,162.4 1267.8,162.4 1275.4,162.0 1283.0,162.0 1290.5,145.2 1298.0,145.0 1305.6,144.8 1313.2,144.3 1320.7,144.0 1328.2,144.0 1335.8,144.0 1343.3,143.7 1350.9,143.3 1358.5,143.0 1366.0,143.0" fill="none" stroke="#FF6B1A" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1366.0" cy="143.0" r="3.0" fill="#FF6B1A" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,262.0 762.0,262.0 769.5,259.2 777.1,257.1 784.6,254.1 792.2,251.6 799.8,248.9 807.3,246.3 814.9,244.5 822.4,242.4 830.0,240.8 837.5,239.0 845.0,237.6 852.6,235.0 860.1,233.5 867.7,231.9 875.2,230.6 882.8,229.2 890.4,228.0 897.9,226.1 905.5,225.5 913.0,224.3 920.5,224.2 928.1,223.2 935.6,223.1 943.2,222.8 950.8,222.7 958.3,222.6 965.9,222.6 973.4,221.8 981.0,220.4 988.5,219.7 996.0,219.5 1003.6,218.3 1011.1,217.9 1018.7,216.9 1026.2,216.2 1033.8,216.2 1041.3,216.2 1048.9,215.8 1056.5,215.4 1064.0,215.4 1071.5,215.4 1079.1,215.3 1086.7,214.3 1094.2,214.3 1101.8,213.2 1109.3,213.2 1116.8,212.9 1124.4,212.9 1132.0,212.9 1139.5,212.9 1147.0,212.9 1154.6,212.9 1162.2,212.9 1169.7,212.9 1177.2,212.9 1184.8,212.5 1192.3,212.5 1199.9,212.5 1207.5,212.5 1215.0,212.2 1222.5,212.2 1230.1,212.2 1237.7,212.2 1245.2,212.2 1252.8,212.2 1260.3,212.2 1267.8,211.9 1275.4,210.9 1283.0,199.0 1290.5,199.0 1298.0,199.0 1305.6,199.0 1313.2,198.7 1320.7,198.7 1328.2,198.7 1335.8,198.6 1343.3,198.3 1350.9,197.9 1358.5,197.9 1366.0,197.9 1366.0,262.0" fill="#04D87F" fill-opacity="0.15"/>
+    <polyline points="762.0,262.0 769.5,259.2 777.1,257.1 784.6,254.1 792.2,251.6 799.8,248.9 807.3,246.3 814.9,244.5 822.4,242.4 830.0,240.8 837.5,239.0 845.0,237.6 852.6,235.0 860.1,233.5 867.7,231.9 875.2,230.6 882.8,229.2 890.4,228.0 897.9,226.1 905.5,225.5 913.0,224.3 920.5,224.2 928.1,223.2 935.6,223.1 943.2,222.8 950.8,222.7 958.3,222.6 965.9,222.6 973.4,221.8 981.0,220.4 988.5,219.7 996.0,219.5 1003.6,218.3 1011.1,217.9 1018.7,216.9 1026.2,216.2 1033.8,216.2 1041.3,216.2 1048.9,215.8 1056.5,215.4 1064.0,215.4 1071.5,215.4 1079.1,215.3 1086.7,214.3 1094.2,214.3 1101.8,213.2 1109.3,213.2 1116.8,212.9 1124.4,212.9 1132.0,212.9 1139.5,212.9 1147.0,212.9 1154.6,212.9 1162.2,212.9 1169.7,212.9 1177.2,212.9 1184.8,212.5 1192.3,212.5 1199.9,212.5 1207.5,212.5 1215.0,212.2 1222.5,212.2 1230.1,212.2 1237.7,212.2 1245.2,212.2 1252.8,212.2 1260.3,212.2 1267.8,211.9 1275.4,210.9 1283.0,199.0 1290.5,199.0 1298.0,199.0 1305.6,199.0 1313.2,198.7 1320.7,198.7 1328.2,198.7 1335.8,198.6 1343.3,198.3 1350.9,197.9 1358.5,197.9 1366.0,197.9" fill="none" stroke="#04D87F" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1366.0" cy="197.9" r="3.0" fill="#04D87F" stroke="#020604" stroke-width="1"/>
   </g>
   <g id="chart-compute">
-    <rect x="700" y="392" width="686" height="318" rx="10" fill="url(#window-bot-bg)" stroke="#EFEDE2" stroke-opacity="0.75" stroke-width="1.3"/>
-    <text x="724" y="420" fill="#04D87F" font-size="10" class="mono-label">▾▴▾ COMPUTE TELEMETRY OVER TIME</text>
-    <text x="724" y="444" fill="#EFEDE2" font-size="20" class="sans-bold">Multi-Worker CPU Utilization Over Time (%)</text>
-    <text x="1362" y="420" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-label">SAMPLING: 50MS /PROC TELEMETRY</text>
-    <line x1="764" y1="668.0" x2="1358" y2="668.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="671.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">0%</text>
-    <line x1="764" y1="617.0" x2="1358" y2="617.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="620.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">88%</text>
-    <line x1="764" y1="566.0" x2="1358" y2="566.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="569.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">175%</text>
-    <line x1="764" y1="515.0" x2="1358" y2="515.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="518.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">262%</text>
-    <line x1="764" y1="464.0" x2="1358" y2="464.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
-    <text x="754" y="467.5" text-anchor="end" fill="#8FA398" font-size="9.5" class="mono-num">350%</text>
-    <line x1="764.0" y1="464" x2="764.0" y2="668" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="764.0" y="688" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">0.0s</text>
-    <line x1="912.5" y1="464" x2="912.5" y2="668" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="912.5" y="688" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">0.5s</text>
-    <line x1="1061.0" y1="464" x2="1061.0" y2="668" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="1061.0" y="688" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">1.0s</text>
-    <line x1="1209.5" y1="464" x2="1209.5" y2="668" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="1209.5" y="688" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">1.5s</text>
-    <line x1="1358.0" y1="464" x2="1358.0" y2="668" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
-    <text x="1358.0" y="688" text-anchor="middle" fill="#8FA398" font-size="9.5" class="mono-num">2.0s</text>
-    <polyline points="764.0,668.0 779.1,629.1 888.7,629.4 1000.7,627.1 1102.3,628.5 1216.3,633.4 1356.8,650.9" fill="none" stroke="#94A39B" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,3"/>
-    <circle cx="1356.8" cy="650.9" r="3.2" fill="#94A39B" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,668.0 764.0,668.0 778.9,634.0 896.5,630.5 998.0,631.9 1103.5,634.4 1216.6,630.3 1308.4,635.1 1308.4,668.0" fill="#EFEDE2" fill-opacity="0.05"/>
-    <polyline points="764.0,668.0 778.9,634.0 896.5,630.5 998.0,631.9 1103.5,634.4 1216.6,630.3 1308.4,635.1" fill="none" stroke="#EFEDE2" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1308.4" cy="635.1" r="3.2" fill="#EFEDE2" stroke="#020604" stroke-width="1"/>
-    <polyline points="764.0,668.0 778.9,562.3 793.7,538.5 808.5,540.9 823.4,540.5 838.2,557.9 853.1,549.0 868.0,543.5 882.8,518.7 897.6,533.7 912.5,539.7 927.4,541.1 942.2,543.0 957.0,526.2 971.9,548.8 986.8,536.1 1001.6,534.7 1016.5,544.3 1031.3,530.7 1046.2,536.7 1061.0,501.0 1075.8,540.7 1090.7,527.8 1105.5,523.6 1120.4,516.5 1135.2,521.0 1150.1,507.5 1165.0,529.0 1179.8,516.7 1194.7,514.8 1209.5,519.1 1224.3,520.7 1239.2,516.2 1254.0,502.5 1268.9,529.2 1283.8,506.0 1298.6,503.1 1313.5,532.4 1328.3,495.8 1343.2,510.6 1358.0,517.9" fill="none" stroke="#C084FC" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5,3"/>
-    <circle cx="1358.0" cy="517.9" r="3.2" fill="#C084FC" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,668.0 764.0,668.0 778.9,554.5 793.7,560.7 808.5,541.2 823.4,541.5 838.2,528.9 853.1,547.1 868.0,554.6 882.8,527.4 897.6,548.7 912.5,533.8 927.4,533.4 942.2,524.3 957.0,521.5 971.9,516.9 986.8,532.0 1001.6,524.9 1016.5,551.1 1031.3,507.7 1046.2,546.0 1061.0,518.1 1075.8,528.9 1090.7,519.9 1105.5,500.4 1120.4,519.0 1135.2,517.4 1150.1,497.2 1165.0,508.1 1179.8,531.2 1194.7,514.4 1209.5,517.1 1224.3,529.4 1239.2,506.4 1254.0,499.8 1268.9,535.8 1283.8,511.3 1298.6,525.4 1313.5,502.6 1328.3,513.7 1343.2,532.7 1358.0,512.7 1358.0,668.0" fill="#38BDF8" fill-opacity="0.06"/>
-    <polyline points="764.0,668.0 778.9,554.5 793.7,560.7 808.5,541.2 823.4,541.5 838.2,528.9 853.1,547.1 868.0,554.6 882.8,527.4 897.6,548.7 912.5,533.8 927.4,533.4 942.2,524.3 957.0,521.5 971.9,516.9 986.8,532.0 1001.6,524.9 1016.5,551.1 1031.3,507.7 1046.2,546.0 1061.0,518.1 1075.8,528.9 1090.7,519.9 1105.5,500.4 1120.4,519.0 1135.2,517.4 1150.1,497.2 1165.0,508.1 1179.8,531.2 1194.7,514.4 1209.5,517.1 1224.3,529.4 1239.2,506.4 1254.0,499.8 1268.9,535.8 1283.8,511.3 1298.6,525.4 1313.5,502.6 1328.3,513.7 1343.2,532.7 1358.0,512.7" fill="none" stroke="#38BDF8" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1358.0" cy="512.7" r="3.2" fill="#38BDF8" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,668.0 764.0,668.0 778.9,553.3 793.7,539.0 808.5,538.6 823.4,551.7 838.2,544.0 853.1,547.4 868.0,562.6 882.8,540.9 897.6,532.2 912.5,546.5 927.4,516.7 942.2,528.9 957.0,545.3 971.9,521.3 986.8,519.8 1001.6,532.7 1016.5,517.8 1031.3,536.1 1046.2,518.6 1061.0,526.8 1075.8,513.5 1090.7,529.9 1105.5,524.6 1120.4,500.3 1135.2,515.9 1150.1,521.6 1165.0,519.1 1179.8,509.2 1194.7,511.4 1209.5,529.9 1224.3,517.9 1239.2,514.5 1254.0,506.5 1268.9,523.3 1283.8,497.9 1298.6,542.0 1313.5,513.5 1328.3,512.7 1343.2,515.5 1358.0,504.2 1358.0,668.0" fill="#FF6B1A" fill-opacity="0.12"/>
-    <polyline points="764.0,668.0 778.9,553.3 793.7,539.0 808.5,538.6 823.4,551.7 838.2,544.0 853.1,547.4 868.0,562.6 882.8,540.9 897.6,532.2 912.5,546.5 927.4,516.7 942.2,528.9 957.0,545.3 971.9,521.3 986.8,519.8 1001.6,532.7 1016.5,517.8 1031.3,536.1 1046.2,518.6 1061.0,526.8 1075.8,513.5 1090.7,529.9 1105.5,524.6 1120.4,500.3 1135.2,515.9 1150.1,521.6 1165.0,519.1 1179.8,509.2 1194.7,511.4 1209.5,529.9 1224.3,517.9 1239.2,514.5 1254.0,506.5 1268.9,523.3 1283.8,497.9 1298.6,542.0 1313.5,513.5 1328.3,512.7 1343.2,515.5 1358.0,504.2" fill="none" stroke="#FF6B1A" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1358.0" cy="504.2" r="3.2" fill="#FF6B1A" stroke="#020604" stroke-width="1"/>
-    <polygon points="764.0,668.0 764.0,668.0 778.9,545.4 793.7,561.2 808.5,553.8 823.4,542.4 838.2,546.5 853.1,527.9 868.0,543.1 882.8,537.3 897.6,544.7 912.5,541.0 927.4,534.4 942.2,515.4 957.0,547.6 971.9,521.1 986.8,538.4 1001.6,528.4 1016.5,522.2 1031.3,521.5 1046.2,540.9 1061.0,524.4 1075.8,528.0 1090.7,528.8 1105.5,516.9 1120.4,507.8 1135.2,510.0 1150.1,512.2 1165.0,523.0 1179.8,503.8 1194.7,528.7 1209.5,492.7 1224.3,518.2 1239.2,529.2 1254.0,504.3 1268.9,518.1 1283.8,494.7 1298.6,520.1 1313.5,524.9 1328.3,505.6 1343.2,515.5 1358.0,525.3 1358.0,668.0" fill="#04D87F" fill-opacity="0.16"/>
-    <polyline points="764.0,668.0 778.9,545.4 793.7,561.2 808.5,553.8 823.4,542.4 838.2,546.5 853.1,527.9 868.0,543.1 882.8,537.3 897.6,544.7 912.5,541.0 927.4,534.4 942.2,515.4 957.0,547.6 971.9,521.1 986.8,538.4 1001.6,528.4 1016.5,522.2 1031.3,521.5 1046.2,540.9 1061.0,524.4 1075.8,528.0 1090.7,528.8 1105.5,516.9 1120.4,507.8 1135.2,510.0 1150.1,512.2 1165.0,523.0 1179.8,503.8 1194.7,528.7 1209.5,492.7 1224.3,518.2 1239.2,529.2 1254.0,504.3 1268.9,518.1 1283.8,494.7 1298.6,520.1 1313.5,524.9 1328.3,505.6 1343.2,515.5 1358.0,525.3" fill="none" stroke="#04D87F" stroke-width="3.0" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="1358.0" cy="525.3" r="3.2" fill="#04D87F" stroke="#020604" stroke-width="1"/>
+    <rect x="700" y="310" width="690" height="252" rx="10" fill="url(#window-bot-bg)" stroke="#EFEDE2" stroke-opacity="0.75" stroke-width="1.3"/>
+    <text x="722" y="334" fill="#04D87F" font-size="9.5" class="mono-label">▾▴▾ COMPUTE TELEMETRY OVER TIME</text>
+    <text x="722" y="354" fill="#EFEDE2" font-size="16" class="sans-bold">Multi-Worker CPU Utilization (%)</text>
+    <g transform="translate(1046, 334)">
+    <rect x="-8" y="-12" width="332" height="36" rx="4" fill="#020806" fill-opacity="0.82" stroke="#EFEDE2" stroke-opacity="0.16" stroke-width="0.8"/>
+    <line x1="0" y1="-3" x2="14" y2="-3" stroke="#04D87F" stroke-width="2.4"/>
+    <circle cx="7" cy="-3" r="2.2" fill="#04D87F"/>
+    <text x="19" y="0" fill="#EFEDE2" font-size="8.2" class="mono-num">Full (glibc)</text>
+    <line x1="108" y1="-3" x2="122" y2="-3" stroke="#FF6B1A" stroke-width="2.4"/>
+    <circle cx="115" cy="-3" r="2.2" fill="#FF6B1A"/>
+    <text x="127" y="0" fill="#EFEDE2" font-size="8.2" class="mono-num">Full (musl)</text>
+    <line x1="216" y1="-3" x2="230" y2="-3" stroke="#38BDF8" stroke-width="2.4"/>
+    <circle cx="223" cy="-3" r="2.2" fill="#38BDF8"/>
+    <text x="235" y="0" fill="#EFEDE2" font-size="8.2" class="mono-num">Tags Only</text>
+    <line x1="0" y1="12" x2="14" y2="12" stroke="#C084FC" stroke-width="2.4" stroke-dasharray="4,2"/>
+    <circle cx="7" cy="12" r="2.2" fill="#C084FC"/>
+    <text x="19" y="15" fill="#EFEDE2" font-size="8.2" class="mono-num">PAC + CFI</text>
+    <line x1="108" y1="12" x2="122" y2="12" stroke="#EFEDE2" stroke-width="2.4"/>
+    <circle cx="115" cy="12" r="2.2" fill="#EFEDE2"/>
+    <text x="127" y="15" fill="#EFEDE2" font-size="8.2" class="mono-num">Native (glibc)</text>
+    <line x1="216" y1="12" x2="230" y2="12" stroke="#94A39B" stroke-width="2.4" stroke-dasharray="2,2"/>
+    <circle cx="223" cy="12" r="2.2" fill="#94A39B"/>
+    <text x="235" y="15" fill="#EFEDE2" font-size="8.2" class="mono-num">Native (musl)</text>
+    </g>
+    <line x1="762" y1="528.0" x2="1366" y2="528.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="531.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">0%</text>
+    <line x1="762" y1="489.0" x2="1366" y2="489.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="492.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">88%</text>
+    <line x1="762" y1="450.0" x2="1366" y2="450.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="453.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">175%</text>
+    <line x1="762" y1="411.0" x2="1366" y2="411.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="414.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">262%</text>
+    <line x1="762" y1="372.0" x2="1366" y2="372.0" stroke="#EFEDE2" stroke-opacity="0.12" stroke-width="1"/>
+    <text x="754" y="375.5" text-anchor="end" fill="#8FA398" font-size="9" class="mono-num">350%</text>
+    <line x1="762.0" y1="372" x2="762.0" y2="528" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="762.0" y="546" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">0.0s</text>
+    <line x1="913.0" y1="372" x2="913.0" y2="528" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="913.0" y="546" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">1.0s</text>
+    <line x1="1064.0" y1="372" x2="1064.0" y2="528" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="1064.0" y="546" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">2.0s</text>
+    <line x1="1215.0" y1="372" x2="1215.0" y2="528" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="1215.0" y="546" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">3.0s</text>
+    <line x1="1366.0" y1="372" x2="1366.0" y2="528" stroke="#EFEDE2" stroke-opacity="0.08" stroke-width="1"/>
+    <text x="1366.0" y="546" text-anchor="middle" fill="#8FA398" font-size="9" class="mono-num">4.0s</text>
+    <polyline points="762.0,528.0 769.5,492.1 838.9,491.0 904.2,491.1 981.0,491.7 1045.7,490.1 1115.0,492.1 1197.6,489.0 1259.7,491.7 1341.2,495.1" fill="none" stroke="#94A39B" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,3"/>
+    <circle cx="1341.2" cy="495.1" r="3.0" fill="#94A39B" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,528.0 762.0,528.0 769.7,496.1 840.1,494.3 911.8,496.8 978.7,492.9 1040.0,497.9 1109.1,494.5 1169.5,493.4 1231.9,496.1 1295.2,495.9 1362.2,496.6 1362.2,528.0" fill="#EFEDE2" fill-opacity="0.04"/>
+    <polyline points="762.0,528.0 769.7,496.1 840.1,494.3 911.8,496.8 978.7,492.9 1040.0,497.9 1109.1,494.5 1169.5,493.4 1231.9,496.1 1295.2,495.9 1362.2,496.6" fill="none" stroke="#EFEDE2" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1362.2" cy="496.6" r="3.0" fill="#EFEDE2" stroke="#020604" stroke-width="1"/>
+    <polyline points="762.0,528.0 769.5,432.9 777.1,438.9 784.6,438.8 792.2,430.9 799.8,438.2 807.3,428.8 814.9,434.3 822.4,429.1 830.0,424.4 837.5,424.4 845.0,420.5 852.6,416.1 860.1,435.9 867.7,407.1 875.2,422.7 882.8,412.1 890.4,432.6 897.9,411.0 905.5,410.4 913.0,414.3 920.5,422.1 928.1,411.4 935.6,419.9 943.2,419.2 950.8,409.4 958.3,402.2 965.9,402.8 973.4,405.4 981.0,421.9 988.5,399.6 996.0,421.3 1003.6,401.0 1011.1,411.8 1018.7,418.3 1026.2,418.0 1033.8,418.5 1041.3,406.0 1048.9,409.9 1056.5,405.7 1064.0,420.9 1071.5,407.4 1079.1,405.7 1086.7,421.0 1094.2,406.8 1101.8,412.1 1109.3,395.4 1116.8,413.2 1124.4,402.2 1132.0,412.4 1139.5,406.2 1147.0,407.3 1154.6,415.9 1162.2,403.0 1169.7,410.4 1177.2,411.8 1184.8,393.8 1192.3,421.2 1199.9,410.0 1207.5,398.9 1215.0,395.2 1222.5,419.1 1230.1,411.0 1237.7,394.6 1245.2,425.7 1252.8,407.5 1260.3,397.3 1267.8,410.8 1275.4,406.4 1283.0,395.3 1290.5,427.0 1298.0,392.5 1305.6,406.9 1313.2,409.4 1320.7,405.9 1328.2,411.5 1335.8,401.4 1343.3,402.2 1350.9,413.9 1358.5,397.9 1366.0,418.9" fill="none" stroke="#C084FC" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5,3"/>
+    <circle cx="1366.0" cy="418.9" r="3.0" fill="#C084FC" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,528.0 762.0,528.0 769.5,447.8 777.1,437.4 784.6,439.9 792.2,424.2 799.8,431.5 807.3,427.0 814.9,446.2 822.4,430.3 830.0,428.9 837.5,422.0 845.0,437.7 852.6,415.5 860.1,425.0 867.7,423.3 875.2,411.9 882.8,423.9 890.4,405.0 897.9,436.4 905.5,406.7 913.0,429.7 920.5,403.0 928.1,415.1 935.6,427.5 943.2,407.1 950.8,416.0 958.3,397.5 965.9,443.4 973.4,399.1 981.0,421.7 988.5,403.3 996.0,407.3 1003.6,410.4 1011.1,406.0 1018.7,421.0 1026.2,428.8 1033.8,412.9 1041.3,414.2 1048.9,402.2 1056.5,396.2 1064.0,419.3 1071.5,404.2 1079.1,412.6 1086.7,403.0 1094.2,403.0 1101.8,413.4 1109.3,411.9 1116.8,402.3 1124.4,410.9 1132.0,403.7 1139.5,412.6 1147.0,401.0 1154.6,414.5 1162.2,402.7 1169.7,421.3 1177.2,401.6 1184.8,423.0 1192.3,397.7 1199.9,408.4 1207.5,394.9 1215.0,411.3 1222.5,412.3 1230.1,409.5 1237.7,395.6 1245.2,405.4 1252.8,413.0 1260.3,406.7 1267.8,407.5 1275.4,414.1 1283.0,403.5 1290.5,410.7 1298.0,394.8 1305.6,411.5 1313.2,420.1 1320.7,412.7 1328.2,403.8 1335.8,410.3 1343.3,420.6 1350.9,400.5 1358.5,409.8 1366.0,419.7 1366.0,528.0" fill="#38BDF8" fill-opacity="0.05"/>
+    <polyline points="762.0,528.0 769.5,447.8 777.1,437.4 784.6,439.9 792.2,424.2 799.8,431.5 807.3,427.0 814.9,446.2 822.4,430.3 830.0,428.9 837.5,422.0 845.0,437.7 852.6,415.5 860.1,425.0 867.7,423.3 875.2,411.9 882.8,423.9 890.4,405.0 897.9,436.4 905.5,406.7 913.0,429.7 920.5,403.0 928.1,415.1 935.6,427.5 943.2,407.1 950.8,416.0 958.3,397.5 965.9,443.4 973.4,399.1 981.0,421.7 988.5,403.3 996.0,407.3 1003.6,410.4 1011.1,406.0 1018.7,421.0 1026.2,428.8 1033.8,412.9 1041.3,414.2 1048.9,402.2 1056.5,396.2 1064.0,419.3 1071.5,404.2 1079.1,412.6 1086.7,403.0 1094.2,403.0 1101.8,413.4 1109.3,411.9 1116.8,402.3 1124.4,410.9 1132.0,403.7 1139.5,412.6 1147.0,401.0 1154.6,414.5 1162.2,402.7 1169.7,421.3 1177.2,401.6 1184.8,423.0 1192.3,397.7 1199.9,408.4 1207.5,394.9 1215.0,411.3 1222.5,412.3 1230.1,409.5 1237.7,395.6 1245.2,405.4 1252.8,413.0 1260.3,406.7 1267.8,407.5 1275.4,414.1 1283.0,403.5 1290.5,410.7 1298.0,394.8 1305.6,411.5 1313.2,420.1 1320.7,412.7 1328.2,403.8 1335.8,410.3 1343.3,420.6 1350.9,400.5 1358.5,409.8 1366.0,419.7" fill="none" stroke="#38BDF8" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1366.0" cy="419.7" r="3.0" fill="#38BDF8" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,528.0 762.0,528.0 769.5,439.4 777.1,447.6 784.6,422.9 792.2,430.9 799.8,438.2 807.3,428.2 814.9,442.2 822.4,434.4 830.0,410.7 837.5,428.2 845.0,427.3 852.6,423.6 860.1,428.7 867.7,416.8 875.2,432.0 882.8,433.5 890.4,430.9 897.9,423.4 905.5,427.0 913.0,422.0 920.5,426.3 928.1,411.4 935.6,426.9 943.2,399.8 950.8,437.1 958.3,420.9 965.9,404.5 973.4,415.8 981.0,424.1 988.5,413.0 996.0,414.6 1003.6,397.9 1011.1,409.4 1018.7,412.5 1026.2,390.5 1033.8,427.4 1041.3,404.4 1048.9,410.6 1056.5,413.4 1064.0,395.9 1071.5,421.3 1079.1,401.4 1086.7,421.3 1094.2,408.1 1101.8,409.5 1109.3,402.8 1116.8,399.8 1124.4,410.9 1132.0,412.6 1139.5,411.1 1147.0,404.5 1154.6,415.6 1162.2,409.0 1169.7,394.3 1177.2,416.3 1184.8,413.2 1192.3,411.1 1199.9,401.7 1207.5,409.5 1215.0,408.3 1222.5,418.8 1230.1,411.6 1237.7,395.9 1245.2,411.8 1252.8,410.8 1260.3,413.4 1267.8,407.9 1275.4,411.8 1283.0,400.5 1290.5,421.4 1298.0,420.0 1305.6,418.8 1313.2,402.0 1320.7,404.4 1328.2,404.6 1335.8,420.1 1343.3,409.3 1350.9,416.4 1358.5,401.9 1366.0,413.9 1366.0,528.0" fill="#FF6B1A" fill-opacity="0.11"/>
+    <polyline points="762.0,528.0 769.5,439.4 777.1,447.6 784.6,422.9 792.2,430.9 799.8,438.2 807.3,428.2 814.9,442.2 822.4,434.4 830.0,410.7 837.5,428.2 845.0,427.3 852.6,423.6 860.1,428.7 867.7,416.8 875.2,432.0 882.8,433.5 890.4,430.9 897.9,423.4 905.5,427.0 913.0,422.0 920.5,426.3 928.1,411.4 935.6,426.9 943.2,399.8 950.8,437.1 958.3,420.9 965.9,404.5 973.4,415.8 981.0,424.1 988.5,413.0 996.0,414.6 1003.6,397.9 1011.1,409.4 1018.7,412.5 1026.2,390.5 1033.8,427.4 1041.3,404.4 1048.9,410.6 1056.5,413.4 1064.0,395.9 1071.5,421.3 1079.1,401.4 1086.7,421.3 1094.2,408.1 1101.8,409.5 1109.3,402.8 1116.8,399.8 1124.4,410.9 1132.0,412.6 1139.5,411.1 1147.0,404.5 1154.6,415.6 1162.2,409.0 1169.7,394.3 1177.2,416.3 1184.8,413.2 1192.3,411.1 1199.9,401.7 1207.5,409.5 1215.0,408.3 1222.5,418.8 1230.1,411.6 1237.7,395.9 1245.2,411.8 1252.8,410.8 1260.3,413.4 1267.8,407.9 1275.4,411.8 1283.0,400.5 1290.5,421.4 1298.0,420.0 1305.6,418.8 1313.2,402.0 1320.7,404.4 1328.2,404.6 1335.8,420.1 1343.3,409.3 1350.9,416.4 1358.5,401.9 1366.0,413.9" fill="none" stroke="#FF6B1A" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1366.0" cy="413.9" r="3.0" fill="#FF6B1A" stroke="#020604" stroke-width="1"/>
+    <polygon points="762.0,528.0 762.0,528.0 769.5,439.3 777.1,449.6 784.6,431.5 792.2,437.9 799.8,429.1 807.3,439.1 814.9,422.0 822.4,419.6 830.0,426.8 837.5,424.6 845.0,430.0 852.6,437.9 860.1,424.8 867.7,406.3 875.2,441.5 882.8,413.7 890.4,427.9 897.9,423.3 905.5,404.8 913.0,427.7 920.5,398.8 928.1,406.6 935.6,410.7 943.2,419.2 950.8,402.7 958.3,403.4 965.9,402.7 973.4,427.6 981.0,414.1 988.5,391.7 996.0,421.0 1003.6,414.9 1011.1,404.8 1018.7,418.9 1026.2,404.5 1033.8,421.8 1041.3,385.1 1048.9,417.3 1056.5,400.3 1064.0,413.0 1071.5,417.1 1079.1,392.5 1086.7,418.9 1094.2,408.3 1101.8,401.0 1109.3,411.3 1116.8,404.9 1124.4,395.2 1132.0,418.3 1139.5,402.9 1147.0,396.0 1154.6,412.7 1162.2,410.3 1169.7,397.9 1177.2,409.9 1184.8,402.0 1192.3,405.1 1199.9,409.2 1207.5,397.3 1215.0,417.2 1222.5,404.1 1230.1,421.1 1237.7,384.1 1245.2,420.6 1252.8,414.3 1260.3,407.0 1267.8,396.4 1275.4,411.5 1283.0,411.1 1290.5,416.3 1298.0,402.1 1305.6,392.8 1313.2,413.4 1320.7,411.9 1328.2,411.4 1335.8,413.4 1343.3,402.3 1350.9,403.9 1358.5,421.6 1366.0,404.1 1366.0,528.0" fill="#04D87F" fill-opacity="0.15"/>
+    <polyline points="762.0,528.0 769.5,439.3 777.1,449.6 784.6,431.5 792.2,437.9 799.8,429.1 807.3,439.1 814.9,422.0 822.4,419.6 830.0,426.8 837.5,424.6 845.0,430.0 852.6,437.9 860.1,424.8 867.7,406.3 875.2,441.5 882.8,413.7 890.4,427.9 897.9,423.3 905.5,404.8 913.0,427.7 920.5,398.8 928.1,406.6 935.6,410.7 943.2,419.2 950.8,402.7 958.3,403.4 965.9,402.7 973.4,427.6 981.0,414.1 988.5,391.7 996.0,421.0 1003.6,414.9 1011.1,404.8 1018.7,418.9 1026.2,404.5 1033.8,421.8 1041.3,385.1 1048.9,417.3 1056.5,400.3 1064.0,413.0 1071.5,417.1 1079.1,392.5 1086.7,418.9 1094.2,408.3 1101.8,401.0 1109.3,411.3 1116.8,404.9 1124.4,395.2 1132.0,418.3 1139.5,402.9 1147.0,396.0 1154.6,412.7 1162.2,410.3 1169.7,397.9 1177.2,409.9 1184.8,402.0 1192.3,405.1 1199.9,409.2 1207.5,397.3 1215.0,417.2 1222.5,404.1 1230.1,421.1 1237.7,384.1 1245.2,420.6 1252.8,414.3 1260.3,407.0 1267.8,396.4 1275.4,411.5 1283.0,411.1 1290.5,416.3 1298.0,402.1 1305.6,392.8 1313.2,413.4 1320.7,411.9 1328.2,411.4 1335.8,413.4 1343.3,402.3 1350.9,403.9 1358.5,421.6 1366.0,404.1" fill="none" stroke="#04D87F" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="1366.0" cy="404.1" r="3.0" fill="#04D87F" stroke="#020604" stroke-width="1"/>
+  </g>
+  <g id="bottom-right-telemetry">
+    <rect x="700" y="576" width="690" height="140" rx="10" fill="#04120D" stroke="#EFEDE2" stroke-opacity="0.7" stroke-width="1.3"/>
+    <line x1="1050" y1="590" x2="1050" y2="702" stroke="#EFEDE2" stroke-opacity="0.16" stroke-width="1"/>
+
+    <!-- Left Half: Tail Latency Breakdown (p50 / p95 / p99) for 256 KiB Payloads -->
+    <text x="720" y="600" fill="#04D87F" font-size="9.5" class="mono-label">▾▴▾ TAIL LATENCY DISTRIBUTION (256 KB PAYLOAD)</text>
+    <text x="720" y="620" fill="#6E8479" font-size="8.5" class="mono-label">CONFIG</text>
+    <text x="898" y="620" text-anchor="end" fill="#6E8479" font-size="8.5" class="mono-label">MEDIAN</text>
+    <text x="966" y="620" text-anchor="end" fill="#6E8479" font-size="8.5" class="mono-label">P95</text>
+    <text x="1034" y="620" text-anchor="end" fill="#6E8479" font-size="8.5" class="mono-label">P99</text>
+    <circle cx="724" cy="634.5" r="2.5" fill="#04D87F"/>
+    <text x="732" y="638" fill="#EFEDE2" font-size="10" class="sans-bold">Full (glibc)</text>
+    <text x="898" y="638" text-anchor="end" fill="#04D87F" font-size="10" class="mono-num">72.8ms</text>
+    <text x="966" y="638" text-anchor="end" fill="#EFEDE2" font-size="10" class="mono-num">152.6ms</text>
+    <text x="1034" y="638" text-anchor="end" fill="#8FA398" font-size="10" class="mono-num">427.3ms</text>
+    <circle cx="724" cy="653.5" r="2.5" fill="#FF6B1A"/>
+    <text x="732" y="657" fill="#EFEDE2" font-size="10" class="sans-bold">Full (musl)</text>
+    <text x="898" y="657" text-anchor="end" fill="#FF6B1A" font-size="10" class="mono-num">77.2ms</text>
+    <text x="966" y="657" text-anchor="end" fill="#EFEDE2" font-size="10" class="mono-num">166.3ms</text>
+    <text x="1034" y="657" text-anchor="end" fill="#8FA398" font-size="10" class="mono-num">421.3ms</text>
+    <circle cx="724" cy="672.5" r="2.5" fill="#38BDF8"/>
+    <text x="732" y="676" fill="#EFEDE2" font-size="10" class="sans-bold">Tags Only</text>
+    <text x="898" y="676" text-anchor="end" fill="#38BDF8" font-size="10" class="mono-num">75.2ms</text>
+    <text x="966" y="676" text-anchor="end" fill="#EFEDE2" font-size="10" class="mono-num">178.4ms</text>
+    <text x="1034" y="676" text-anchor="end" fill="#8FA398" font-size="10" class="mono-num">427.3ms</text>
+    <circle cx="724" cy="691.5" r="2.5" fill="#C084FC"/>
+    <text x="732" y="695" fill="#EFEDE2" font-size="10" class="sans-bold">PAC + CFI</text>
+    <text x="898" y="695" text-anchor="end" fill="#C084FC" font-size="10" class="mono-num">75.9ms</text>
+    <text x="966" y="695" text-anchor="end" fill="#EFEDE2" font-size="10" class="mono-num">171.7ms</text>
+    <text x="1034" y="695" text-anchor="end" fill="#8FA398" font-size="10" class="mono-num">491.8ms</text>
+    <text x="1068" y="600" fill="#04D87F" font-size="9.5" class="mono-label">▾▴▾ EXPLOIT SUITE VERIFICATION (8/8 KILLED)</text>
+    <text x="1068" y="620" fill="#6E8479" font-size="8.5" class="mono-label">ATTACK PRIMITIVE / CVE SHAPE</text>
+    <text x="1370" y="620" text-anchor="end" fill="#6E8479" font-size="8.5" class="mono-label">LOCKSTEP VERDICT</text>
+
+    <text x="1068" y="639" fill="#EFEDE2" font-size="9.5" class="sans-bold">Nginx Map Overflow (CVE-2026-42533)</text>
+    <text x="1370" y="639" text-anchor="end" fill="#04D87F" font-size="9" class="mono-num">■ TAG FAULT</text>
+
+    <text x="1068" y="658" fill="#EFEDE2" font-size="9.5" class="sans-bold">HTTP/3 QPACK UAF (CVE-2026-42530)</text>
+    <text x="1370" y="658" text-anchor="end" fill="#38BDF8" font-size="9" class="mono-num">■ QUARANTINE FAULT</text>
+
+    <text x="1068" y="677" fill="#EFEDE2" font-size="9.5" class="sans-bold">Function Pointer Swap &amp; Gadget Entry</text>
+    <text x="1370" y="677" text-anchor="end" fill="#C084FC" font-size="9" class="mono-num">■ PAC + CFI FAULT</text>
+
+    <text x="1068" y="696" fill="#EFEDE2" font-size="9.5" class="sans-bold">Heap Feng Shui / Slab Grooming</text>
+    <text x="1370" y="696" text-anchor="end" fill="#FFAD66" font-size="9" class="mono-num">■ 0/16 ADJACENT</text>
   </g>
   <g id="bottom-wordmark-strip">
-    <text x="50" y="803" fill="#12543B" font-size="48" class="druk-word">LOCKSTEP</text>
-    <text x="1386" y="780" text-anchor="end" fill="#090909" font-size="10.5" class="mono-label">
-      16-BYTE SHADOW GRANULES · SIPHASH-2-4 PAC · 256-CHUNK QUARANTINE · RANDOMIZED SLABS · CFI
+    <text x="48" y="803" fill="#12543B" font-size="48" class="druk-word">LOCKSTEP</text>
+    <text x="1390" y="780" text-anchor="end" fill="#090909" font-size="10.5" class="mono-label">
+      16-BYTE SHADOW GRANULES · SIPHASH-2-4 PAC · BOUNDED QUARANTINE RING · RANDOMIZED SLABS · CFI
     </text>
-    <text x="1386" y="798" text-anchor="end" fill="#12543B" font-size="10.5" class="mono-label">
-      ▾▴▾ 8/8 EXPLOIT PRIMITIVES KILLED · VERIFIED ON MULTI-THREADED NGINX (GLIBC &amp; MUSL)
+    <text x="1390" y="798" text-anchor="end" fill="#12543B" font-size="10.5" class="mono-label">
+      ▾▴▾ 8/8 EXPLOIT PRIMITIVES KILLED · VERIFIED ON MULTI-THREADED NGINX (GLIBC 2.39 &amp; MUSL 1.2.5)
     </text>
   </g>
 </svg>

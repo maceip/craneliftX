@@ -272,20 +272,47 @@ http {{
 
         def client_worker() -> None:
             nonlocal completed_count, req_counter
+            conn: http.client.HTTPConnection | None = None
             while time.perf_counter() - start_t < duration_sec:
                 with lock:
                     req_counter += 1
                     idx = req_counter
                 try:
-                    lat_ms, w_id = one_request(idx)
+                    t0 = time.perf_counter()
+                    if conn is None:
+                        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                    conn.request("GET", f"/payload.bin?seq={idx}&pad={'x' * 128}")
+                    resp = conn.getresponse()
+                    body = resp.read()
+                    if resp.status != 200 or len(body) != len(payload):
+                        raise RuntimeError(f"bad status={resp.status} len={len(body)}")
+                    if hashlib.sha256(body).hexdigest() != expected_hash:
+                        raise RuntimeError("SHA-256 mismatch")
+                    w_id = resp.getheader("X-Worker") or "?"
+                    lat_ms = (time.perf_counter() - t0) * 1000.0
+                    # Reconnect periodically so Nginx exercises both connection & request pool allocation
+                    if idx % (16 if mode == "native" else 2) == 0:
+                        conn.close()
+                        conn = None
                     with lock:
                         if time.perf_counter() - start_t <= duration_sec + 0.25:
                             latencies.append(lat_ms)
                             workers_seen.add(w_id)
                             completed_count += 1
                 except Exception:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None
                     if time.perf_counter() - start_t >= duration_sec:
                         break
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = [pool.submit(client_worker) for _ in range(concurrency)]

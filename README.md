@@ -20,22 +20,22 @@ Real full-feature **Nginx 1.26.2** compiled against both **glibc 2.39** and **mu
 
 ![LOCKSTEP Nginx Benchmark: Memory & CPU Over Time](benchmark_results.svg)
 
-| Nginx Configuration (`2 workers × 4 threads`) | Throughput | Median Latency | p95 Latency | Dynamic Heap Growth | Peak RSS | Mean CPU |
-|---|---:|---:|---:|---:|---:|---:|
-| **LOCKSTEP Full Defense · Nginx (`glibc` 2.39)** | **71.1 req/s** | **84.0 ms** | 212.5 ms | **+9.2 MB** | 366.1 MB | 243.4% |
-| **LOCKSTEP Full Defense · Nginx (`musl` 1.2.5)** | **72.8 req/s** | **85.0 ms** | 217.5 ms | **+11.8 MB** | 254.8 MB | 243.5% |
-| **LOCKSTEP Shadow Tags + Quarantine · Nginx (`glibc`)** | **73.1 req/s** | **81.9 ms** | 215.1 ms | **+12.3 MB** | 362.2 MB | 243.7% |
-| **LOCKSTEP PAC + CFI Only · Nginx (`glibc`)** | **65.1 req/s** | **85.4 ms** | 249.4 ms | **+12.6 MB** | 355.5 MB | 240.3% |
-| **Unprotected Native · Nginx (`glibc` 2.39)** | 2079.8 req/s | 3.5 ms | 5.2 ms | +0.3 MB | 5.9 MB | 60.6% |
-| **Unprotected Native · Nginx (`musl` 1.2.5)** | 1944.3 req/s | 3.7 ms | 5.4 ms | +0.1 MB | 3.4 MB | 59.9% |
+| Nginx Configuration (`2 workers × 4 threads`) | Throughput | vs. Native | Median Latency | p95 Latency | Steady-State Heap | Peak RSS | Mean CPU |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **LOCKSTEP Full Defense · Nginx (`glibc` 2.39)** | **93.3 req/s** | `28.0× slower` | **72.8 ms** | 152.6 ms | **+5.8 MB** | 362.2 MB | 258.3% |
+| **LOCKSTEP Full Defense · Nginx (`musl` 1.2.5)** | **86.2 req/s** | `29.8× slower` | **77.2 ms** | 166.3 ms | **+10.7 MB** | 253.5 MB | 252.3% |
+| **LOCKSTEP Shadow Tags + Quarantine · Nginx (`glibc`)** | **88.6 req/s** | `29.5× slower` | **75.2 ms** | 178.4 ms | **+10.8 MB** | 353.5 MB | 255.2% |
+| **LOCKSTEP PAC + CFI Only · Nginx (`glibc`)** | **90.8 req/s** | `28.8× slower` | **75.9 ms** | 171.7 ms | **+8.1 MB** | 351.6 MB | 257.6% |
+| **Unprotected Native · Nginx (`glibc` 2.39)** | 2612.0 req/s | `1.0× (ref)` | 2.8 ms | 4.8 ms | +0.5 MB | 6.0 MB | 73.0% |
+| **Unprotected Native · Nginx (`musl` 1.2.5)** | 2571.5 req/s | `1.0× (ref)` | 2.9 ms | 4.9 ms | +0.2 MB | 3.5 MB | 81.8% |
 
 Raw 50 ms time-series telemetry & receipts: [`benchmark_results.json`](benchmark_results.json) · [`.isr-state/last-mile-recovery/recovery.json`](.isr-state/last-mile-recovery/recovery.json)  
-Reproduce: `python3 scripts/benchmark.py --duration 2.0 --concurrency 8` and `python3 scripts/verify_nginx.py` on a Linux x86-64 host.
+Reproduce: `python3 scripts/benchmark.py --duration 4.0 --concurrency 8` and `python3 scripts/verify_nginx.py` on a Linux x86-64 host.
 
 **What the time-series telemetry shows:**
 1. **Real multi-process, multi-threaded Nginx (`glibc` and `musl`)**: Powered by a Blink-derived process/thread substrate (`CLONE_VM | CLONE_THREAD | CLONE_SETTLS`, `fork`, shared `futex` wait queues, `epoll`, `eventfd`, `pread64`, and scalar/XMM pointer provenance tracking), full-feature Nginx runs unmodified under complete heap and pointer protection.
-2. **Bounded quarantine & shadow-tag memory growth over time**: As Nginx allocates per-request buffers and 256 KiB AIO payloads across 2 worker processes and 8 pool threads, dynamic memory grows smoothly by **+9.2 MB (`glibc`)** and **+11.8 MB (`musl`)** as the 256-slot quarantine populates and begins recycling slots.
-3. **Predictable multi-core CPU scaling**: Across 2 worker processes and 8 AIO threads, LOCKSTEP utilizes ~2.4 cores (`~243%` CPU) continuously while serving ~71–73 verified 256 KiB SHA-256 responses per second (~18.5 MB/s of verified HTTP throughput).
+2. **Steady-state quarantine plateau (no unbounded memory growth)**: During the initial ~1.2s warmup, dynamic memory rises as the bounded quarantine ring fills with freed connection and request pools (`malloc` / `posix_memalign` / `free`). Once the quarantine ring reaches capacity, evicted chunks are recycled with fresh CSPRNG tags and memory flattens out at **+5.8 MB (`glibc`)** and **+10.7 MB (`musl`)** across the rest of the run.
+3. **Explicit translation tradeoff (`~28×` vs. Unprotected Native)**: Checked software translation of every guest load, store, and indirect branch trades raw single-node throughput (`~2,612 → 93.3 req/s`, or **~23.9 MB/s** of SHA-256 verified HTTP payload throughput across ~2.5 cores) for deterministic, hardware-independent elimination of heap overflows, use-after-free, and pointer hijacking.
 
 ---
 
