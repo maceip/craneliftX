@@ -262,8 +262,9 @@ impl Pac {
             return 0;
         }
         let mut count = 0;
-        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
-            let word = u64::from_le_bytes(bytes[offset..offset + 8].try_into().expect("8 bytes"));
+        for (index, bytes) in bytes.chunks_exact(8).enumerate() {
+            let offset = index * 8;
+            let word = u64::from_le_bytes(bytes.try_into().expect("8 bytes"));
             if word & PAC_MASK == 0 && self.is_code_address(word) {
                 let address = base + offset as u64;
                 let signed = self.signed_word(word, address);
@@ -273,7 +274,7 @@ impl Pac {
                 count += 1;
             }
         }
-        self.stats.static_pointers = count;
+        self.stats.static_pointers += count;
         count
     }
 }
@@ -420,6 +421,34 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn image_pointer_rejects_the_first_unsigned_substitution() {
+        let mut pac = pac();
+        let mut image = [0u8; 16];
+        image[..8].copy_from_slice(&0x200100u64.to_le_bytes());
+        image[8..].copy_from_slice(&0x200200u64.to_le_bytes());
+        assert_eq!(pac.seed_image(0x30000, &image, &mut |_, _| {}), 2);
+        for address in [0x30000, 0x30008] {
+            // Static initialization is not authorization for a subsequent
+            // guest store, even when it resembles an IFUNC relocation.
+            assert!(pac.on_store(address, 0x200300, 8, false, 0x700).is_err());
+            assert!(pac.on_store(address, 0x200300, 8, false, 0x700).is_err());
+        }
+    }
+
+    #[test]
+    fn image_seeding_counts_all_segments_and_short_images() {
+        let mut pac = pac();
+        assert_eq!(pac.seed_image(0x30000, &[0; 7], &mut |_, _| {}), 0);
+        for address in [0x30000, 0x40000] {
+            assert_eq!(
+                pac.seed_image(address, &0x200100u64.to_le_bytes(), &mut |_, _| {}),
+                1
+            );
+        }
+        assert_eq!(pac.stats().static_pointers, 2);
     }
 
     #[test]

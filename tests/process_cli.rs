@@ -49,6 +49,33 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+
+#[test]
+fn simd_registers_survive_translation_boundaries_on_both_backends() {
+    // Fill both halves of XMM15, cross a basic-block boundary, then read
+    // its upper half back through the stack. The guest exits zero only if
+    // all 128 bits survive; zeroing XMM state at block entry fails this.
+    let code = [
+        0xb8, 0x11, 0x22, 0x33, 0x44, // mov eax,44332211h
+        0x66, 0x0f, 0x6e, 0xc0, // movd xmm0,eax
+        0x66, 0x44, 0x0f, 0x70, 0xf8, 0x00, // pshufd xmm15,xmm0,0
+        0xeb, 0x00, // jmp next block
+        0xf3, 0x44, 0x0f, 0x7f, 0x7c, 0x24, 0xf0, // movdqu [rsp-16],xmm15
+        0x48, 0x8b, 0x7c, 0x24, 0xf8, // mov rdi,[rsp-8]
+        0x48, 0xc1, 0xef, 0x20, // shr rdi,32
+        0x81, 0xef, 0x11, 0x22, 0x33, 0x44, // sub edi,44332211h
+        0xb8, 60, 0, 0, 0, 0x0f, 0x05, // exit(edi)
+    ];
+    for backend in ["rv64", "x86_64"] {
+        let fixture = Fixture::new();
+        let (result, _) = fixture.run(&elf(&code, false), &["--backend", backend]);
+        assert!(
+            result.status.success(),
+            "{backend}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}
 fn elf(code: &[u8], dynamic: bool) -> Vec<u8> {
     let mut image = vec![0u8; 0x100];
     image[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");

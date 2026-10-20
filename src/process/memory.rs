@@ -7,14 +7,14 @@ use object::{
 };
 use serde_json::{json, Value};
 
-pub const ADDRESS_LIMIT: u64 = 256 * 1024 * 1024;
+pub const ADDRESS_LIMIT: u64 = 1024 * 1024 * 1024;
 pub const GUEST_BIAS: u64 = 0x1_0000_0000;
 pub const CONTEXT_BASE: u64 = 0x2_0000_0000;
 pub const RV_STACK_BASE: u64 = 0x3_0000_0000;
 pub const STACK_TOP: u64 = 0x0700_0000;
 pub const STACK_BOTTOM: u64 = STACK_TOP - 1024 * 1024;
 pub const MMAP_BASE: u64 = 0x0800_0000;
-const MAX_MAPPED: u64 = 128 * 1024 * 1024;
+const MAX_MAPPED: u64 = 512 * 1024 * 1024;
 
 pub(super) fn error(message: impl ToString) -> EngineError {
     EngineError::Process(message.to_string())
@@ -51,16 +51,12 @@ impl GuestMemory {
         if elf.elf_program_headers().iter().any(|p| {
             matches!(
                 p.p_type(elf.endian()),
-                object::elf::PT_INTERP | object::elf::PT_DYNAMIC
+                object::elf::PT_INTERP
             )
         }) || file.section_by_name(".interp").is_some()
-            || file.section_by_name(".dynamic").is_some()
-            || file
-                .dynamic_relocations()
-                .is_some_and(|mut r| r.next().is_some())
         {
             return Err(error(
-                "dynamic linking and runtime relocations are not supported",
+                "dynamically linked binaries requiring PT_INTERP are not supported",
             ));
         }
         let elf_header = elf.elf_header();
@@ -280,7 +276,7 @@ impl GuestMemory {
 pub(super) struct ProcessBus<'a> {
     pub code: &'a [u8],
     pub memory: &'a mut GuestMemory,
-    pub state: &'a mut [u64; 19],
+    pub state: &'a mut [u64; super::CONTEXT_WORDS],
     pub stack: &'a mut [u8],
     /// Sub-granule shadow tags. Every load and store is checked against it.
     pub heap: &'a mut Heap,
@@ -378,7 +374,7 @@ impl MemoryAccess for ProcessBus<'_> {
             bytes[..size].copy_from_slice(&self.code[address as usize..end as usize]);
         } else if address >= GUEST_BIAS && end <= GUEST_BIAS + ADDRESS_LIMIT {
             bytes[..size].copy_from_slice(self.memory.read(address - GUEST_BIAS, size)?);
-        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + 152 {
+        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + (super::CONTEXT_WORDS * 8) as u64 {
             for (i, b) in bytes[..size].iter_mut().enumerate() {
                 let at = (address - CONTEXT_BASE) as usize + i;
                 *b = (self.state[at / 8] >> (at % 8 * 8)) as u8;
@@ -408,7 +404,7 @@ impl MemoryAccess for ProcessBus<'_> {
         let bytes = value.to_le_bytes();
         if address >= GUEST_BIAS && end <= GUEST_BIAS + ADDRESS_LIMIT {
             self.memory.write(address - GUEST_BIAS, &bytes[..size])?;
-        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + 152 {
+        } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + (super::CONTEXT_WORDS * 8) as u64 {
             for (i, b) in bytes[..size].iter().enumerate() {
                 let at = (address - CONTEXT_BASE) as usize + i;
                 let shift = at % 8 * 8;

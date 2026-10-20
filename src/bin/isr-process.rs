@@ -60,6 +60,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err(format!("unknown backend: {b}").into()),
                 };
             }
+            "--" => {
+                while let Some(arg) = args.next() {
+                    options.args.push(arg);
+                }
+                break;
+            }
             _ if !a.starts_with('-') && file.is_none() => file = Some(PathBuf::from(a)),
             _ => return Err(format!("unknown or duplicate input: {a}").into()),
         }

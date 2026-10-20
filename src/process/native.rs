@@ -7,29 +7,21 @@
 //! instructions: a guest `syscall` ends the block and the runtime serves it
 //! from the register file, so the guest never reaches the host kernel.
 //!
-//! Layout of [`NativeGuest`] (the `ctx` pointer passed to a compiled block):
-//!
-//! ```text
-//!  0 .. 144   guest registers rax..r15, rip, rflags  (18 × u64)
-//! 144         cookie: *mut Runtime
-//! 152         load_fn
-//! 160         store_fn
-//! 168         fault_pc
-//! 176         fault_kind   (0 = ok)
-//! ```
-//!
-//! Offsets 0..144 stay register-file compatible with the previous ABI so the
-//! lowerer's `ctx[i*8]` addressing is unchanged.
+//! The context begins with the complete supported CPU register state. Helper
+//! offsets are derived from the Rust ABI layout so extending the register file
+//! cannot silently overwrite a callback or reset SIMD state at block boundaries.
 
 use super::runtime::Runtime;
 use std::ffi::c_void;
 
 pub const NATIVE_FS_BASE_OFFSET: i32 = 144;
-pub const NATIVE_COOKIE_OFFSET: i32 = 152;
-pub const NATIVE_LOAD_FN_OFFSET: i32 = 160;
-pub const NATIVE_STORE_FN_OFFSET: i32 = 168;
-pub const NATIVE_FAULT_PC_OFFSET: i32 = 176;
-pub const NATIVE_FAULT_KIND_OFFSET: i32 = 184;
+pub const NATIVE_COOKIE_OFFSET: i32 = std::mem::offset_of!(NativeGuest, cookie) as i32;
+pub const NATIVE_LOAD_FN_OFFSET: i32 = std::mem::offset_of!(NativeGuest, load_fn) as i32;
+pub const NATIVE_STORE_FN_OFFSET: i32 = std::mem::offset_of!(NativeGuest, store_fn) as i32;
+pub const NATIVE_CPUID_FN_OFFSET: i32 = std::mem::offset_of!(NativeGuest, cpuid_fn) as i32;
+pub const NATIVE_CPUID_OUT_OFFSET: i32 = std::mem::offset_of!(NativeGuest, cpuid_out) as i32;
+pub const NATIVE_FAULT_PC_OFFSET: i32 = std::mem::offset_of!(NativeGuest, fault_pc) as i32;
+pub const NATIVE_FAULT_KIND_OFFSET: i32 = std::mem::offset_of!(NativeGuest, fault_kind) as i32;
 
 /// Fault kinds reported through [`NativeGuest::fault_kind`].
 pub const FAULT_NONE: u64 = 0;
@@ -38,27 +30,34 @@ pub const FAULT_STACK: u64 = 2;
 
 pub type NativeLoadFn = unsafe extern "C" fn(*mut c_void, u64, u64, u64) -> u64;
 pub type NativeStoreFn = unsafe extern "C" fn(*mut c_void, u64, u64, u64, u64, u64);
+pub type NativeCpuidFn = unsafe extern "C" fn(*mut c_void, u64, u64);
 
 /// Context block passed to every native-compiled guest block.
 #[repr(C)]
 pub struct NativeGuest {
-    pub regs: [u64; 19],
+    pub regs: [u64; super::CONTEXT_WORDS],
     pub cookie: *mut c_void,
     pub load_fn: NativeLoadFn,
     pub store_fn: NativeStoreFn,
+    pub cpuid_fn: NativeCpuidFn,
+    pub cpuid_out: [u64; 4],
     pub fault_pc: u64,
     pub fault_kind: u64,
+    runtime: *mut Runtime,
 }
 
 impl NativeGuest {
     pub fn new(runtime: *mut Runtime) -> Self {
         Self {
-            regs: [0; 19],
-            cookie: runtime as *mut c_void,
+            regs: [0; super::CONTEXT_WORDS],
+            cookie: std::ptr::null_mut(),
             load_fn: native_load,
             store_fn: native_store,
+            cpuid_fn: native_cpuid,
+            cpuid_out: [0; 4],
             fault_pc: 0,
             fault_kind: FAULT_NONE,
+            runtime,
         }
     }
 
@@ -83,10 +82,16 @@ pub unsafe extern "C" fn native_load(
     size: u64,
     pc: u64,
 ) -> u64 {
-    // SAFETY: cookie is a *mut Runtime installed by execute_x86_64 for the
-    // duration of the native block call and is not otherwise aliased.
-    let rt = unsafe { &mut *(cookie as *mut Runtime) };
-    rt.native_load(guest_ptr, size, pc)
+    // SAFETY: execute_x86_64 installs the address of its live NativeGuest
+    // after constructing it. That guest and its Runtime outlive this call.
+    let guest = unsafe { &mut *(cookie as *mut NativeGuest) };
+    let rt = unsafe { &mut *guest.runtime };
+    let value = rt.native_load(guest_ptr, size, pc);
+    if rt.native_fault.is_some() {
+        guest.fault_kind = FAULT_MEMORY;
+        guest.fault_pc = pc;
+    }
+    value
 }
 
 /// Checked guest store. `constant_provenance` is 1 when the value came from an
@@ -99,7 +104,68 @@ pub unsafe extern "C" fn native_store(
     constant_provenance: u64,
     pc: u64,
 ) {
-    // SAFETY: see native_load.
-    let rt = unsafe { &mut *(cookie as *mut Runtime) };
-    rt.native_store(guest_ptr, size, value, constant_provenance != 0, pc)
+    // SAFETY: same callback lifetime and ownership as native_load.
+    let guest = unsafe { &mut *(cookie as *mut NativeGuest) };
+    let rt = unsafe { &mut *guest.runtime };
+    rt.native_store(guest_ptr, size, value, constant_provenance != 0, pc);
+    if rt.native_fault.is_some() {
+        guest.fault_kind = FAULT_MEMORY;
+        guest.fault_pc = pc;
+    }
+}
+
+/// CPUID emulation modeled on Justine Tunney's Blink (vendor/blink/blink/cpuid.c).
+pub unsafe extern "C" fn native_cpuid(ctx: *mut c_void, leaf: u64, subleaf: u64) {
+    let guest = unsafe { &mut *(ctx as *mut NativeGuest) };
+    let intel = b"GenuineIntel";
+    let intel_ebx = u32::from_le_bytes(intel[0..4].try_into().unwrap());
+    let intel_edx = u32::from_le_bytes(intel[4..8].try_into().unwrap());
+    let intel_ecx = u32::from_le_bytes(intel[8..12].try_into().unwrap());
+    let (eax, ebx, ecx, edx) = match leaf as u32 {
+        0 => (7, intel_ebx, intel_ecx, intel_edx),
+        1 => {
+            let cx =
+                (1 << 0) | (1 << 1) | (1 << 9) | (1 << 13) | (1 << 23) | (1 << 30) | (1u32 << 31);
+            let dx = (1 << 0)
+                | (1 << 4)
+                | (1 << 6)
+                | (1 << 8)
+                | (1 << 15)
+                | (1 << 19)
+                | (1 << 23)
+                | (1 << 24)
+                | (1 << 25)
+                | (1 << 26);
+            (0x000806ea, 0x01080800, cx, dx)
+        }
+        2 => (0x76035a01, 0x00f0b0ff, 0x00000000, 0x00ca0000),
+        7 => {
+            if subleaf as u32 == 0 {
+                let bx = (1 << 0) | (1 << 9) | (1 << 18);
+                let cx = 1 << 22;
+                (0, bx, cx, 0)
+            } else {
+                (0, 0, 0, 0)
+            }
+        }
+        0x80000000 => (0x80000001u32, intel_ebx, intel_ecx, intel_edx),
+        0x80000001 => {
+            let cx = 1 << 0;
+            let dx = (1 << 0)
+                | (1 << 8)
+                | (1 << 11)
+                | (1 << 15)
+                | (1 << 20)
+                | (1 << 23)
+                | (1 << 24)
+                | (1 << 27)
+                | (1 << 29);
+            (0, 0, cx, dx)
+        }
+        _ => (0, 0, 0, 0),
+    };
+    guest.cpuid_out[0] = eax as u64;
+    guest.cpuid_out[1] = ebx as u64;
+    guest.cpuid_out[2] = ecx as u64;
+    guest.cpuid_out[3] = edx as u64;
 }

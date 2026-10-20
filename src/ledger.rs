@@ -120,7 +120,9 @@ impl RunLedger {
         line.push(b'\n');
         self.file.write_all(&line)?;
         self.file.flush()?;
-        self.file.sync_data()?;
+        if kind == "result" {
+            self.file.sync_data()?;
+        }
         // Live subscribers cannot observe a record until persistence succeeds.
         self.journal
             .committed_bytes

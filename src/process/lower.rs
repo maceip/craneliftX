@@ -103,6 +103,7 @@ struct Lower<'a> {
     /// Signatures for the native checked memory helpers.
     load_sig: Option<cranelift_codegen::ir::SigRef>,
     store_sig: Option<cranelift_codegen::ir::SigRef>,
+    cpuid_sig: Option<cranelift_codegen::ir::SigRef>,
 }
 
 impl Lower<'_> {
@@ -814,7 +815,7 @@ pub fn lower_block(
     };
 
     // Checked memory helper signatures for x86_64 (tags + PAC on every access).
-    let (load_sig, store_sig) = if backend == Backend::X86_64 {
+    let (load_sig, store_sig, cpuid_sig) = if backend == Backend::X86_64 {
         let mut load_sig = Signature::new(CallConv::SystemV);
         for _ in 0..4 {
             load_sig.params.push(AbiParam::new(types::I64));
@@ -826,9 +827,14 @@ pub fn lower_block(
             store_sig.params.push(AbiParam::new(types::I64));
         }
         let store_sig = b.import_signature(store_sig);
-        (Some(load_sig), Some(store_sig))
+        let mut cpuid_sig = Signature::new(CallConv::SystemV);
+        for _ in 0..3 {
+            cpuid_sig.params.push(AbiParam::new(types::I64));
+        }
+        let cpuid_sig = b.import_signature(cpuid_sig);
+        (Some(load_sig), Some(store_sig), Some(cpuid_sig))
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     // Declare variables 0..50 (0..15 GPR, 16 RIP, 17 RFLAGS, 18 FS_BASE, 19..34 XMM lo, 35..50 XMM hi).
@@ -847,16 +853,12 @@ pub fn lower_block(
         b.def_var(var, v);
     }
     // RIP (16), RFLAGS (17), and FS_BASE (18) are not diversified.
-    for i in 16..19 {
-        let var = Variable::from_u32(i);
+    for i in 16..super::CONTEXT_WORDS {
+        let var = Variable::from_u32(i as u32);
         let v = b
             .ins()
             .load(types::I64, MemFlags::new(), ctx, (i * 8) as i32);
         b.def_var(var, v);
-    }
-    let zero = b.ins().iconst(types::I64, 0);
-    for i in 19..51 {
-        b.def_var(Variable::from_u32(i), zero);
     }
 
     // Stack padding for diversification (x86_64 only): create a dummy stack
@@ -889,6 +891,7 @@ pub fn lower_block(
         cfi_check_sig,
         load_sig,
         store_sig,
+        cpuid_sig,
     };
 
     for i in trace {
@@ -935,6 +938,67 @@ pub fn lower_block(
                 }
                 let v = l.pop()?;
                 l.write(i, 0, v)?;
+            }
+            Leave => {
+                let rbp = l.reg(Register::RBP, i)?;
+                l.set(l.rsp_var as usize, rbp);
+                let v = l.pop()?;
+                l.put_reg(Register::RBP, v, i)?;
+            }
+            Cpuid => {
+                let leaf = l.reg(Register::RAX, i)?;
+                let subleaf = l.reg(Register::RCX, i)?;
+                if let Some(cpuid_sig) = l.cpuid_sig {
+                    let cpuid_fn = l.b.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        l.ctx,
+                        super::native::NATIVE_CPUID_FN_OFFSET,
+                    );
+                    l.b.ins().call_indirect(cpuid_sig, cpuid_fn, &[l.ctx, leaf, subleaf]);
+                    let eax = l.b.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        l.ctx,
+                        super::native::NATIVE_CPUID_OUT_OFFSET,
+                    );
+                    let ebx = l.b.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        l.ctx,
+                        super::native::NATIVE_CPUID_OUT_OFFSET + 8,
+                    );
+                    let ecx = l.b.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        l.ctx,
+                        super::native::NATIVE_CPUID_OUT_OFFSET + 16,
+                    );
+                    let edx = l.b.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        l.ctx,
+                        super::native::NATIVE_CPUID_OUT_OFFSET + 24,
+                    );
+                    l.put_reg(Register::RAX, eax, i)?;
+                    l.put_reg(Register::RBX, ebx, i)?;
+                    l.put_reg(Register::RCX, ecx, i)?;
+                    l.put_reg(Register::RDX, edx, i)?;
+                }
+            }
+            Rdtsc => {
+                let ts = l.c(1_000_000_000u64);
+                let eax = l.b.ins().band_imm(ts, 0xffff_ffff);
+                let edx = l.b.ins().ushr_imm(ts, 32);
+                let edx = l.b.ins().band_imm(edx, 0xffff_ffff);
+                l.put_reg(Register::RAX, eax, i)?;
+                l.put_reg(Register::RDX, edx, i)?;
+            }
+            Xgetbv => {
+                let eax = l.c(7);
+                let edx = l.c(0);
+                l.put_reg(Register::RAX, eax, i)?;
+                l.put_reg(Register::RDX, edx, i)?;
             }
             Call => {
                 let target = l.read(i, 0)?;
@@ -1102,8 +1166,48 @@ pub fn lower_block(
                 l.write(i, 0, v)?;
             }
             Imul => {
-                if i.op_count() < 2 {
-                    return Err(fail(i, "one-operand multiply unsupported"));
+                if i.op_count() == 1 {
+                    let w = l.width(i, 0)?;
+                    let b = l.read(i, 0)?;
+                    let rax_var = l.div.variable(0) as usize;
+                    let rdx_var = l.div.variable(3) as usize;
+                    let rax_val = l.var(rax_var);
+                    let a = l.sign(rax_val, w);
+                    let b = l.sign(b, w);
+                    if w == 64 {
+                        let lo = l.b.ins().imul(a, b);
+                        let hi = l.b.ins().smulhi(a, b);
+                        l.set(rax_var, lo);
+                        l.set(rdx_var, hi);
+                        let sign = l.b.ins().sshr_imm(lo, 63);
+                        let overflow = l.b.ins().icmp(IntCC::NotEqual, hi, sign);
+                        let c = l.bool64(overflow);
+                        let o = l.b.ins().ishl_imm(c, 11);
+                        let f = l.b.ins().bor(c, o);
+                        let old = l.var(17);
+                        let old = l.b.ins().band_imm(old, !0x801);
+                        let f = l.b.ins().bor(old, f);
+                        l.set(17, f);
+                    } else if w == 32 {
+                        let prod = l.b.ins().imul(a, b);
+                        let lo = l.mask(prod, 32);
+                        let hi = l.b.ins().ushr_imm(prod, 32);
+                        let hi = l.mask(hi, 32);
+                        l.set(rax_var, lo);
+                        l.set(rdx_var, hi);
+                        let signed_lo = l.sign(lo, 32);
+                        let overflow = l.b.ins().icmp(IntCC::NotEqual, prod, signed_lo);
+                        let c = l.bool64(overflow);
+                        let o = l.b.ins().ishl_imm(c, 11);
+                        let f = l.b.ins().bor(c, o);
+                        let old = l.var(17);
+                        let old = l.b.ins().band_imm(old, !0x801);
+                        let f = l.b.ins().bor(old, f);
+                        l.set(17, f);
+                    } else {
+                        return Err(fail(i, "unsupported operand width for 1-operand imul"));
+                    }
+                    continue;
                 }
                 let w = l.width(i, 0)?;
                 let a = l.read(i, if i.op_count() == 3 { 1 } else { 0 })?;
@@ -1205,6 +1309,54 @@ pub fn lower_block(
                     l.set(17, f);
                 } else {
                     return Err(fail(i, "unsupported operand width for mul"));
+                }
+            }
+            Div => {
+                let w = l.width(i, 0)?;
+                let divisor = l.read(i, 0)?;
+                let rax = l.reg(Register::RAX, i)?;
+                let rdx = l.reg(Register::RDX, i)?;
+                if w == 64 {
+                    let q = l.b.ins().udiv(rax, divisor);
+                    let r = l.b.ins().urem(rax, divisor);
+                    l.put_reg(Register::RAX, q, i)?;
+                    l.put_reg(Register::RDX, r, i)?;
+                } else if w == 32 {
+                    let eax = l.mask(rax, 32);
+                    let edx = l.mask(rdx, 32);
+                    let dividend = l.b.ins().ishl_imm(edx, 32);
+                    let dividend = l.b.ins().bor(dividend, eax);
+                    let divisor32 = l.mask(divisor, 32);
+                    let q = l.b.ins().udiv(dividend, divisor32);
+                    let r = l.b.ins().urem(dividend, divisor32);
+                    let q = l.mask(q, 32);
+                    let r = l.mask(r, 32);
+                    l.put_reg(Register::RAX, q, i)?;
+                    l.put_reg(Register::RDX, r, i)?;
+                } else {
+                    return Err(fail(i, "unsupported div width"));
+                }
+            }
+            Idiv => {
+                let w = l.width(i, 0)?;
+                let divisor = l.read(i, 0)?;
+                let rax = l.reg(Register::RAX, i)?;
+                if w == 64 {
+                    let q = l.b.ins().sdiv(rax, divisor);
+                    let r = l.b.ins().srem(rax, divisor);
+                    l.put_reg(Register::RAX, q, i)?;
+                    l.put_reg(Register::RDX, r, i)?;
+                } else if w == 32 {
+                    let eax = l.sign(rax, 32);
+                    let div32 = l.sign(divisor, 32);
+                    let q = l.b.ins().sdiv(eax, div32);
+                    let r = l.b.ins().srem(eax, div32);
+                    let q = l.mask(q, 32);
+                    let r = l.mask(r, 32);
+                    l.put_reg(Register::RAX, q, i)?;
+                    l.put_reg(Register::RDX, r, i)?;
+                } else {
+                    return Err(fail(i, "unsupported idiv width"));
                 }
             }
             Rol | Ror => {
@@ -1314,6 +1466,30 @@ pub fn lower_block(
                 let eax = l.mask(rax, 32);
                 let extended = l.sign(eax, 32);
                 l.set(rax_var, extended);
+            }
+            Cdq => {
+                let rax_var = l.div.variable(0) as usize;
+                let rdx_var = l.div.variable(3) as usize;
+                let rax = l.var(rax_var);
+                let eax = l.mask(rax, 32);
+                let extended = l.sign(eax, 32);
+                // high 32 bits of sign extension
+                let sign = l.b.ins().sshr_imm(extended, 32);
+                let edx = l.mask(sign, 32);
+                l.set(rdx_var, edx);
+            }
+            Cwd => {
+                let rax_var = l.div.variable(0) as usize;
+                let rdx_var = l.div.variable(3) as usize;
+                let rax = l.var(rax_var);
+                let ax = l.mask(rax, 16);
+                let extended = l.sign(ax, 16);
+                let sign = l.b.ins().sshr_imm(extended, 16);
+                let dx = l.mask(sign, 16);
+                let rdx = l.var(rdx_var);
+                let rdx_cleared = l.b.ins().band_imm(rdx, !0xffffi64);
+                let rdx_new = l.b.ins().bor(rdx_cleared, dx);
+                l.set(rdx_var, rdx_new);
             }
             Cqo => {
                 let rax_var = l.div.variable(0) as usize;
@@ -2127,7 +2303,7 @@ pub fn lower_block(
         let v = l.var(var_idx as usize);
         l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
     }
-    for i in 16..19 {
+    for i in 16..super::CONTEXT_WORDS {
         let v = l.var(i);
         l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
     }
@@ -2163,7 +2339,7 @@ pub fn lower_block(
             let v = l.var(var_idx as usize);
             l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
         }
-        for i in 16..19 {
+        for i in 16..super::CONTEXT_WORDS {
             let v = l.var(i);
             l.b.ins().store(MemFlags::new(), v, ctx, (i * 8) as i32);
         }

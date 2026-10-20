@@ -18,14 +18,14 @@ use std::{
 
 fn execute(
     code: &[u8],
-    state: &mut [u64; 19],
+    state: &mut [u64; super::CONTEXT_WORDS],
     memory: &mut GuestMemory,
 ) -> std::result::Result<u64, EngineError> {
     execute_hardened(code, state, memory, false)
 }
 fn execute_hardened(
     code: &[u8],
-    state: &mut [u64; 19],
+    state: &mut [u64; super::CONTEXT_WORDS],
     memory: &mut GuestMemory,
     tags: bool,
 ) -> std::result::Result<u64, EngineError> {
@@ -49,7 +49,59 @@ fn execute_hardened(
 }
 fn compile(bytes: &[u8], ip: u64) -> Vec<u8> {
     let (trace, _) = harvest_bytes(bytes, ip, 32).unwrap();
-    compile_to_riscv64(&lower::lower_block(&trace, lower::Backend::Rv64, &Diversification::identity(), None).unwrap()).unwrap()
+    compile_to_riscv64(
+        &lower::lower_block(
+            &trace,
+            lower::Backend::Rv64,
+            &Diversification::identity(),
+            None,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn native_pac_fault_stops_the_block_before_later_stores() {
+    let mut memory = GuestMemory::default();
+    memory.map(0x20000, 4096, false, true).unwrap();
+    // mov eax,20000h; mov [rdi],rax; mov qword [rsi],55h; syscall
+    let code = [
+        0xb8, 0, 0, 2, 0, 0x48, 0x89, 0x07, 0x48, 0xc7, 0x06, 0x55, 0, 0, 0, 0x0f, 0x05,
+    ];
+    memory.regions[0].data[..code.len()].copy_from_slice(&code);
+    memory.map(0x30000, 4096, true, false).unwrap();
+    memory.write(0x30000, &0x20000u64.to_le_bytes()).unwrap();
+    memory
+        .map(super::memory::STACK_BOTTOM, 1024 * 1024, true, false)
+        .unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "isr-pac-block-{}-{}",
+        std::process::id(),
+        crate::ledger::timestamp_ns()
+    ));
+    let mut ledger = RunLedger::create(&root).unwrap();
+    let options = Options::default();
+    let mut runtime = runtime::Runtime::initialize(memory, 0x20000, &options, &mut ledger).unwrap();
+    runtime.state[5] = 0x30000;
+    runtime.state[4] = 0x30008;
+    let mut cache = cache::BlockCache::with_backend(Backend::X86_64);
+    let mut report = Report::default();
+    let block = cache
+        .get_or_compile(&runtime.memory, 0x20000, &mut report, &mut ledger)
+        .unwrap();
+    let error = runtime
+        .execute(block, &mut report, &options, &mut ledger)
+        .unwrap_err();
+    assert!(error.to_string().contains("PointerAuth"));
+    assert_eq!(runtime.memory.read(0x30008, 8).unwrap(), &[0; 8]);
+    assert_eq!(runtime.state[16], 0x20008); // next RIP; the fault reports the store's PC
+    assert!(matches!(
+        error.downcast_ref::<EngineError>(),
+        Some(EngineError::Mitigation { pc: 0x20005, .. })
+    ));
+    drop(ledger);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -85,7 +137,7 @@ fn arithmetic_flags_match_integer_reference_at_all_operand_widths() {
                 0xa5a5a5a5a5a5a5a5 & mask,
             ] {
                 for b in [0, 1, sign - 1, sign, mask] {
-                    let mut state = [0u64; 19];
+                    let mut state = [0u64; super::CONTEXT_WORDS];
                     state[0] = a;
                     state[2] = b;
                     state[17] = 0x202;
@@ -149,7 +201,7 @@ fn calls_stack_loop_branch_and_indirect_return_execute_in_rv64() {
     memory
         .write(STACK_TOP - 16, &0x40000u64.to_le_bytes())
         .unwrap();
-    let mut state = [0u64; 19];
+    let mut state = [0u64; super::CONTEXT_WORDS];
     state[7] = STACK_TOP - 16;
     state[16] = 0x20000;
     state[17] = 2;
@@ -186,7 +238,7 @@ fn guest_access_cannot_escape_to_private_context_stack_or_code() {
             u64::MAX,
             ADDRESS_LIMIT,
         ] {
-            let mut state = [0u64; 19];
+            let mut state = [0u64; super::CONTEXT_WORDS];
             state[5] = address;
             assert!(
                 execute(&code, &mut state, &mut GuestMemory::default()).is_err(),
@@ -214,7 +266,7 @@ fn signed_multiply_flags_and_partial_registers_are_preserved() {
         (i64::MAX, 2),
         (i64::MIN, -1),
     ] {
-        let mut state = [0u64; 19];
+        let mut state = [0u64; super::CONTEXT_WORDS];
         state[0] = a as u64;
         state[2] = b as u64;
         state[17] = 0x202;
@@ -225,7 +277,7 @@ fn signed_multiply_flags_and_partial_registers_are_preserved() {
         assert_eq!(state[17] & 0x801, if overflow { 0x801 } else { 0 });
     }
     let code = compile(&[0x88, 0xcc, 0x66, 0xb8, 0x12, 0x34], 0x20000); // mov ah,cl; mov ax,3412h
-    let mut state = [0u64; 19];
+    let mut state = [0u64; super::CONTEXT_WORDS];
     state[0] = u64::MAX;
     state[2] = 0x77;
     execute(&code, &mut state, &mut GuestMemory::default()).unwrap();
@@ -260,7 +312,7 @@ fn every_integer_condition_uses_preserved_flags() {
                 14 => z || s != o,
                 _ => !z && s == o,
             };
-            let mut state = [0u64; 19];
+            let mut state = [0u64; super::CONTEXT_WORDS];
             state[17] = 2
                 | u64::from(c)
                 | (u64::from(p) << 2)
@@ -281,7 +333,7 @@ fn rotates_inc_dec_and_unsupported_stack_widths() {
         for count in [0, 1, 7, 8, 9, 31, 32] {
             let code = compile(&[0xc0, if left { 0xc0 } else { 0xc8 }, count], 0x20000);
             for value in [0u8, 1, 0x7f, 0x80, 0xff] {
-                let mut state = [0u64; 19];
+                let mut state = [0u64; super::CONTEXT_WORDS];
                 state[0] = 0xaabbcc00 | u64::from(value);
                 state[17] = 0xa03;
                 execute(&code, &mut state, &mut GuestMemory::default()).unwrap();
@@ -319,7 +371,7 @@ fn rotates_inc_dec_and_unsupported_stack_widths() {
     for bytes in [[0x48, 0xff, 0xc0], [0x48, 0xff, 0xc8]] {
         let code = compile(&bytes, 0x20000);
         for carry in [0, 1] {
-            let mut state = [0u64; 19];
+            let mut state = [0u64; super::CONTEXT_WORDS];
             state[0] = u64::MAX;
             state[17] = 2 | carry;
             execute(&code, &mut state, &mut GuestMemory::default()).unwrap();
@@ -333,18 +385,27 @@ fn rotates_inc_dec_and_unsupported_stack_widths() {
         &[0x0f, 0x0b][..],
     ] {
         let (trace, _) = harvest_bytes(bytes, 0x20000, 32).unwrap();
-        assert!(lower::lower_block(&trace, lower::Backend::Rv64, &Diversification::identity(), None).is_err(), "{bytes:x?}: {trace:?}");
+        assert!(
+            lower::lower_block(
+                &trace,
+                lower::Backend::Rv64,
+                &Diversification::identity(),
+                None
+            )
+            .is_err(),
+            "{bytes:x?}: {trace:?}"
+        );
     }
 }
 
 #[test]
 fn kernel_keeps_guest_descriptors_private_and_rejects_unsupported_services() {
-    let mut kernel = syscall::Kernel::new(Instant::now() + Duration::from_secs(1));
+    let mut kernel = syscall::Kernel::new(Instant::now() + Duration::from_secs(1), 0x40000);
     let mut memory = GuestMemory::default();
     memory.map(0x30000, 4096, true, false).unwrap();
-    let mut state = [0u64; 19];
+    let mut state = [0u64; super::CONTEXT_WORDS];
     let invoke = |kernel: &mut syscall::Kernel,
-                  state: &mut [u64; 19],
+                  state: &mut [u64; super::CONTEXT_WORDS],
                   memory: &mut GuestMemory,
                   n,
                   a,

@@ -259,6 +259,8 @@ fn run_guest(config: &Config, _shutdown: Arc<AtomicBool>) -> Result<(), Box<dyn 
             lam: config.hardening.lam,
         },
         backend,
+        args: Vec::new(),
+        env: Vec::new(),
     };
 
     let ledger_dir = &config.logging.ledger_dir;

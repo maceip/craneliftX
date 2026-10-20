@@ -15,7 +15,7 @@ use super::{
     jit::NativeBlockFn,
     lam::{self, LamStatus},
     lower::Backend,
-    memory::{self, GuestMemory, ProcessBus, CONTEXT_BASE, RV_STACK_BASE, STACK_TOP},
+    memory::{self, GuestMemory, ProcessBus, CONTEXT_BASE, RV_STACK_BASE, STACK_BOTTOM, STACK_TOP},
     mpk,
     observe::operation,
     pac::Pac,
@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 pub(super) struct Runtime {
     pub memory: GuestMemory,
-    pub state: [u64; 19],
+    pub state: [u64; super::CONTEXT_WORDS],
     pub kernel: Kernel,
     pub heap: Heap,
     pub pac: Pac,
@@ -63,17 +63,33 @@ impl Runtime {
                 rng.fill(&mut rand_bytes);
 
                 let at_random_addr = STACK_TOP - 64;
-                let argv0_addr = STACK_TOP - 32;
-
+                let mut string_cursor = STACK_TOP - 4096;
                 let mut memory = memory;
-                memory.write(argv0_addr, b"guest\0")?;
                 memory.write(at_random_addr, &rand_bytes)?;
 
-                let stack_words = [
-                    1u64,               // argc
-                    argv0_addr,         // argv[0]
-                    0u64,               // argv[1] (NULL)
-                    0u64,               // envp[0] (NULL)
+                let mut argv_addrs = Vec::new();
+                let program_name = "guest";
+                let prog_bytes = [program_name.as_bytes(), b"\0"].concat();
+                memory.write(string_cursor, &prog_bytes)?;
+                argv_addrs.push(string_cursor);
+                string_cursor += prog_bytes.len() as u64;
+
+                for arg in &options.args {
+                    let arg_bytes = [arg.as_bytes(), b"\0"].concat();
+                    memory.write(string_cursor, &arg_bytes)?;
+                    argv_addrs.push(string_cursor);
+                    string_cursor += arg_bytes.len() as u64;
+                }
+
+                let mut stack_words = Vec::new();
+                stack_words.push(argv_addrs.len() as u64); // argc
+                for addr in argv_addrs {
+                    stack_words.push(addr); // argv[i]
+                }
+                stack_words.push(0); // argv NULL
+                stack_words.push(0); // envp NULL
+
+                let auxv = [
                     // auxv
                     3, memory.phdr,     // AT_PHDR
                     4, memory.phent,    // AT_PHENT
@@ -91,12 +107,14 @@ impl Runtime {
                     25, at_random_addr, // AT_RANDOM
                     0, 0,               // AT_NULL
                 ];
-                let sp = (STACK_TOP - 128 - (stack_words.len() * 8) as u64) & !15;
+                stack_words.extend_from_slice(&auxv);
+
+                let sp = (STACK_TOP - 4096 - (stack_words.len() * 8) as u64) & !15;
                 for (i, word) in stack_words.iter().enumerate() {
                     memory.write(sp + (i * 8) as u64, &word.to_le_bytes())?;
                 }
 
-                let mut state = [0u64; 19];
+                let mut state = [0u64; super::CONTEXT_WORDS];
                 state[7] = sp;
                 state[16] = entry;
                 state[17] = 2;
@@ -138,10 +156,17 @@ impl Runtime {
                     options.hardening.tags,
                     options.hardening.random_placement,
                 );
+                let initial_brk = memory
+                    .regions
+                    .iter()
+                    .filter(|r| r.start < STACK_BOTTOM)
+                    .map(|r| ((r.start + r.data.len() as u64 + 4095) / 4096) * 4096)
+                    .max()
+                    .unwrap_or(0x100_0000);
                 Ok(Self {
                     memory,
                     state,
-                    kernel: Kernel::new(deadline),
+                    kernel: Kernel::new(deadline, initial_brk),
                     heap,
                     pac,
                     lam,
@@ -243,6 +268,7 @@ impl Runtime {
         // block is built around a NativeGuest rather than a bare register file.
         let cookie = self as *mut Runtime;
         let mut guest = super::native::NativeGuest::new(cookie);
+        guest.cookie = (&mut guest as *mut super::native::NativeGuest).cast();
         guest.regs.copy_from_slice(&self.state);
         self.native_fault = None;
 

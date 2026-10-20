@@ -7,6 +7,7 @@ mod compile;
 mod csprng;
 mod diversify;
 mod heap;
+mod futex;
 mod input;
 mod jit;
 mod lam;
@@ -24,6 +25,9 @@ use crate::ledger::RunLedger;
 use serde::Serialize;
 use serde_json::json;
 use std::path::Path;
+
+// GPRs, RIP, RFLAGS, FS base, then the low and high halves of all 16 XMM registers.
+pub(super) const CONTEXT_WORDS: usize = 51;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -62,6 +66,8 @@ pub struct Options {
     pub recompile_every_syscalls: u64,
     pub hardening: Hardening,
     pub backend: Backend,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -71,6 +77,8 @@ impl Default for Options {
             recompile_every_syscalls: 0,
             hardening: Hardening::default(),
             backend: Backend::X86_64,
+            args: Vec::new(),
+            env: Vec::new(),
         }
     }
 }

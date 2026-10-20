@@ -228,7 +228,7 @@ pub(super) fn inspect(
     )
 }
 
-pub(super) fn check_stack(state: &[u64; 19], block_id: u64, ledger: &mut RunLedger) -> Result<()> {
+pub(super) fn check_stack(state: &[u64; super::CONTEXT_WORDS], block_id: u64, ledger: &mut RunLedger) -> Result<()> {
     if (STACK_BOTTOM..=STACK_TOP).contains(&state[7]) {
         return Ok(());
     }
