@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f3ed" />
+    <title>The Heap Workshop — Skillet / craneliftX</title>
+    <meta
+      name="description"
+      content="Make memory tangible. Explore five heap-buffer-overflow scenarios in an interactive 3D workshop, then see where Skillet's runtime defenses fit."
+    />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="canonical" href="https://maceip.github.io/craneliftX/" />
+    <meta
+      property="og:title"
+      content="The Heap Workshop — Small overwrite. Big consequences."
+    />
+    <meta
+      property="og:description"
+      content="Five interactive 3D lessons that make heap memory, buffer overflows, and their consequences tangible."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://maceip.github.io/craneliftX/" />
+    <meta
+      property="og:image"
+      content="https://maceip.github.io/craneliftX/social.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <a class="skip-link" href="#workshop">Skip to the workshop</a>
+    <header class="site-header wrap">
+      <a class="brand" href="#" aria-label="Skillet home"
+        ><svg viewBox="0 0 40 40" aria-hidden="true">
+          <path d="M7 12h23v8a11.5 11.5 0 0 1-23 0z" />
+          <path d="M28 16h9M12 5v3M19 3v5M26 5v3" /></svg
+        ><span>skillet<span class="brand-sub"> / craneliftX</span></span></a
+      >
+      <nav aria-label="Main navigation">
+        <a href="#workshop">The workshop</a
+        ><a href="#under-the-hood">Under the hood</a
+        ><a class="repo-link" href="https://github.com/maceip/craneliftX"
+          >GitHub <span aria-hidden="true">↗</span></a
+        >
+      </nav>
+    </header>
+    <main>
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div>
+          <p class="eyebrow">
+            <span class="orange-dot"></span> THE HEAP WORKSHOP
+            <span class="edition">FIELD GUIDE / 001</span>
+          </p>
+          <h1 id="hero-title">
+            Small overwrite.<br /><span>Big consequences.</span>
+          </h1>
+        </div>
+        <div class="hero-aside">
+          <p>
+            Memory is easier to understand<br />when you can
+            <em>pick it apart.</em>
+          </p>
+          <p class="intro">
+            Explore five ways a heap buffer can overflow. Follow the bytes,
+            cross the boundary, and see what changes.
+          </p>
+          <a class="text-link" href="#workshop"
+            >Step into the workshop <span aria-hidden="true">↘</span></a
+          >
+        </div>
+      </section>
+
+      <section
+        id="workshop"
+        class="wrap workshop"
+        aria-labelledby="workshop-title"
+      >
+        <div class="section-heading">
+          <h2 id="workshop-title">
+            <span class="section-number">01</span> Learn by taking it apart
+          </h2>
+          <span class="section-note">5 SCENARIOS · YOUR PACE</span>
+        </div>
+        <div class="lab">
+          <aside class="lesson-sidebar">
+            <div class="sidebar-intro">
+              <span class="eyebrow">CHOOSE A SCENARIO</span>
+              <p>One shared workbench.<br />Five ways things go wrong.</p>
+            </div>
+            <nav id="lesson-nav" aria-label="Heap overflow scenarios"></nav>
+            <div class="sidebar-foot">
+              <span class="tiny-drawing" aria-hidden="true">[ ] → [ ]</span>
+              <p>A heap is shared space.<br />Each allocation has an owner.</p>
+              <span id="explored-count">0 / 5 explored</span>
+            </div>
+          </aside>
+          <div class="lab-main">
+            <div class="scene-header">
+              <div>
+                <p class="eyebrow" id="lesson-kicker">
+                  SCENARIO 01 / SORTING TRAYS
+                </p>
+                <h3 id="lesson-title">The spill next door</h3>
+                <p id="lesson-subtitle">
+                  A long delivery changes someone else’s order.
+                </p>
+              </div>
+              <span class="model-badge"><span></span> INTERACTIVE 3D</span>
+            </div>
+            <div class="scene-wrap" id="scene-wrap">
+              <div class="scene-caption">
+                <span id="scene-status">01 / ALLOCATE</span
+                ><span class="schematic-label">ILLUSTRATIVE MODEL</span>
+              </div>
+              <canvas
+                id="heap-canvas"
+                aria-label="3D heap workshop. Use the step controls below for a complete text explanation."
+                aria-describedby="step-text"
+              ></canvas>
+              <div id="scene-fallback" hidden>
+                <strong>The workshop, in words.</strong>
+                <p>
+                  Orange parcels are input bytes. The tray is their allocated
+                  buffer. Writing beyond its marked edge changes the object next
+                  door.
+                </p>
+                <span
+                  >The complete step-by-step guide below works without 3D.</span
+                >
+              </div>
+              <div class="scene-tools">
+                <span id="orbit-hint">↔ Drag to look around</span
+                ><button
+                  id="reset-view"
+                  class="icon-button"
+                  aria-label="Reset 3D camera view"
+                  title="Reset view"
+                >
+                  ↺
+                </button>
+              </div>
+              <div class="legend" aria-label="Scene legend">
+                <span><i class="key input"></i>Input bytes</span
+                ><span><i class="key neighbor"></i>Neighbor</span
+                ><span><i class="key boundary"></i>Boundary</span>
+              </div>
+            </div>
+            <div class="transport">
+              <button id="play" class="play-button" aria-label="Play scenario">
+                <span aria-hidden="true">▶</span> Play scenario
+              </button>
+              <div
+                class="step-buttons"
+                role="group"
+                aria-label="Scenario steps"
+              >
+                <button data-step="0" aria-pressed="true">
+                  <span>1</span> Allocate</button
+                ><button data-step="1" aria-pressed="false">
+                  <span>2</span> Fill</button
+                ><button data-step="2" aria-pressed="false">
+                  <span>3</span> Overflow</button
+                ><button data-step="3" aria-pressed="false">
+                  <span>4</span> Consequence
+                </button>
+              </div>
+              <span id="step-count" class="step-count">1 / 4</span>
+            </div>
+            <div class="explanation" aria-live="polite" aria-atomic="true">
+              <div class="step-marker" id="step-marker">01</div>
+              <div>
+                <h4 id="step-title">Every delivery has a tray.</h4>
+                <p id="step-text">
+                  The orange tray is a heap buffer with room for eight bytes.
+                  The teal tray belongs to another object.
+                </p>
+                <code id="step-action">allocate buffer: 8 bytes</code>
+              </div>
+            </div>
+            <div class="memory-strip">
+              <div class="memory-heading">
+                <span class="eyebrow">THE SAME STORY, IN MEMORY</span
+                ><span id="memory-scale">ONE CELL = ONE BYTE</span>
+              </div>
+              <div
+                id="memory-cells"
+                class="memory-cells"
+                role="img"
+                aria-label="Memory allocation diagram"
+              ></div>
+              <div class="memory-labels">
+                <span id="buffer-label">Buffer · 8 bytes</span
+                ><span id="target-label">Neighboring permission flag</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="lesson-details">
+          <div>
+            <span class="eyebrow">WHAT MAKES THIS EXPLOITABLE?</span>
+            <h3 id="impact-title">A data-only attack</h3>
+            <p id="impact-text"></p>
+          </div>
+          <div>
+            <span class="eyebrow">WHERE TO BREAK THE CHAIN</span>
+            <h3>Before the next bad write.</h3>
+            <p id="repair-text"></p>
+          </div>
+          <div class="model-note">
+            <span class="eyebrow">ABOUT THIS MODEL</span>
+            <p id="limit-text"></p>
+            <a
+              id="lesson-source"
+              href="https://cwe.mitre.org/data/definitions/122.html"
+              >Read the technical reference ↗</a
+            >
+          </div>
+        </div>
+        <noscript
+          ><div class="no-script">
+            <h3>Five ways to understand heap overflow</h3>
+            <p>
+              Enable JavaScript for the 3D workshop. The key idea: a write can
+              exceed a heap allocation and corrupt nearby memory.
+            </p>
+            <ol>
+              <li>
+                Adjacent data: extra input changes a neighboring flag that the
+                program later trusts.
+              </li>
+              <li>
+                Callback overwrite: an overflow corrupts a stored function
+                address; a later call may take the wrong route.
+              </li>
+              <li>
+                Allocator metadata: overwritten chunk records can mislead a
+                vulnerable allocator; consistency checks may stop it.
+              </li>
+              <li>
+                Off-by-one: a single extra string terminator writes zero just
+                outside the buffer.
+              </li>
+              <li>
+                Size arithmetic: a wrapped allocation size gives a copy less
+                memory than it expects.
+              </li>
+            </ol>
+          </div></noscript
+        >
+      </section>
+
+      <section class="heap-primer wrap" aria-labelledby="primer-title">
+        <div>
+          <span class="eyebrow">KEEP THE METAPHOR. LEARN THE MECHANISM.</span>
+          <h2 id="primer-title">It’s a boundary problem.</h2>
+          <p>
+            The heap is memory a program rents as it runs. An allocator hands
+            out regions; pointers locate them. A buffer’s end is a rule the
+            program must respect.
+          </p>
+        </div>
+        <div class="translation-list">
+          <div>
+            <span class="translation-icon" aria-hidden="true">▱</span
+            ><span>Storage tray</span><span>Allocated buffer</span>
+          </div>
+          <div>
+            <span class="translation-icon" aria-hidden="true">▧</span
+            ><span>Parcel</span><span>Bytes being written</span>
+          </div>
+          <div>
+            <span class="translation-icon" aria-hidden="true">⌁</span
+            ><span>Route / label</span><span>Pointer / metadata</span>
+          </div>
+          <div>
+            <span class="translation-icon" aria-hidden="true">┊</span
+            ><span>Marked edge</span><span>Allocation boundary</span>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="under-the-hood"
+        class="under-hood"
+        aria-labelledby="hood-title"
+      >
+        <div class="wrap">
+          <div class="hood-heading">
+            <div>
+              <p class="eyebrow">02 / FROM THE WORKBENCH TO THE RUNTIME</p>
+              <h2 id="hood-title">
+                Catch the bad write.<br />Question the next jump.
+              </h2>
+            </div>
+            <div>
+              <p>
+                Skillet explores heap exploit mitigation for x86-64 Linux
+                binaries through lifting and checked execution. These are the
+                defense layers being developed in craneliftX.
+              </p>
+              <a class="light-link" href="https://github.com/maceip/craneliftX"
+                >Explore the repository <span aria-hidden="true">↗</span></a
+              >
+            </div>
+          </div>
+          <div class="defense-grid">
+            <a
+              href="https://github.com/maceip/craneliftX/blob/main/src/process/memory.rs"
+              ><span class="defense-number">01 / MEMORY</span>
+              <h3>Check the access.</h3>
+              <p>
+                Shadow tags track memory ownership at granule boundaries. Access
+                checks can reject a tag mismatch before the write lands.
+              </p>
+              <span class="source-link">Checked memory helpers ↗</span></a
+            ><a
+              href="https://github.com/maceip/craneliftX/blob/main/src/process/pac.rs"
+              ><span class="defense-number">02 / POINTERS</span>
+              <h3>Verify the destination.</h3>
+              <p>
+                Pointer authentication and control-flow checks address what
+                happens when a stored address is used to redirect execution.
+              </p>
+              <span class="source-link">Pointer authentication ↗</span></a
+            ><a
+              href="https://github.com/maceip/craneliftX/blob/main/src/process/heap.rs"
+              ><span class="defense-number">03 / PLACEMENT</span>
+              <h3>Disrupt the setup.</h3>
+              <p>
+                Randomized placement makes reliable adjacency harder to arrange.
+                Quarantine delays reuse after an allocation is freed.
+              </p>
+              <span class="source-link">Heap implementation ↗</span></a
+            >
+          </div>
+          <p class="evidence-note">
+            <span>MODEL ≠ MEASUREMENT</span> The scenes are teaching models, not
+            executions of the engine. Granule tags are not exact per-byte bounds
+            checks; coverage depends on layout, tag collisions, and pointer
+            provenance. Compatibility and mitigation claims require runtime
+            evidence.
+            <a
+              href="https://github.com/maceip/craneliftX#2-test-bed--real-exploit-shapes-real-catches"
+              >Inspect the test methodology ↗</a
+            >
+          </p>
+        </div>
+      </section>
+    </main>
+    <footer class="wrap">
+      <a class="brand" href="#"
+        >skillet<span class="brand-sub"> / craneliftX</span></a
+      >
+      <p>A little less abstract. A lot more understandable.</p>
+      <a href="https://github.com/maceip/craneliftX">Built in the open ↗</a>
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
