@@ -25,4 +25,5 @@ if WebGL fails. With JavaScript disabled, a static five-scenario summary remains
 GitHub Actions builds, checks all lesson states and desktop/mobile accessibility,
 and deploys `dist/` to Pages on changes to `site/` on `main`. The `/craneliftX/`
 base in `vite.config.js` matches the repository Pages URL. Self-hosted fonts and
-their licenses are in `public/fonts`; Three.js retains its license in the bundle.
+their licenses are in `public/fonts`; the Three.js license is in
+`public/THREE-LICENSE.txt`.
