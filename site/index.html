@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f5f3ed" />
-    <title>The Heap Workshop — Skillet / craneliftX</title>
+    <title>The Heap Workshop — LOCKSTEP</title>
     <meta
       name="description"
-      content="Make memory tangible. Explore five heap-buffer-overflow scenarios in an interactive 3D workshop, then see where Skillet's runtime defenses fit."
+      content="Make memory tangible. Explore five heap-buffer-overflow scenarios in an interactive 3D workshop, then see how LOCKSTEP stops heap exploitation on Linux x86-64."
     />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="canonical" href="https://maceip.github.io/craneliftX/" />
@@ -30,11 +30,11 @@
   <body>
     <a class="skip-link" href="#workshop">Skip to the workshop</a>
     <header class="site-header wrap">
-      <a class="brand" href="#" aria-label="Skillet home"
+      <a class="brand" href="#" aria-label="LOCKSTEP home"
         ><svg viewBox="0 0 40 40" aria-hidden="true">
           <path d="M7 12h23v8a11.5 11.5 0 0 1-23 0z" />
           <path d="M28 16h9M12 5v3M19 3v5M26 5v3" /></svg
-        ><span>skillet<span class="brand-sub"> / craneliftX</span></span></a
+        ><span>LOCKSTEP<span class="brand-sub"> / craneliftX</span></span></a
       >
       <nav aria-label="Main navigation">
         <a href="#workshop">The workshop</a
@@ -294,15 +294,23 @@
             </div>
             <div>
               <p>
-                Skillet explores heap exploit mitigation for x86-64 Linux
-                binaries through lifting and checked execution. These are the
-                defense layers being developed in craneliftX.
+                LOCKSTEP stops heap exploitation for x86-64 Linux binaries
+                through binary lifting and checked execution across multi-worker
+                glibc and musl workloads like Nginx.
               </p>
               <a class="light-link" href="https://github.com/maceip/craneliftX"
                 >Explore the repository <span aria-hidden="true">↗</span></a
               >
             </div>
           </div>
+          <figure style="margin: 2rem 0; max-width: 100%; overflow: hidden;">
+            <img
+              src="./benchmark_results.svg"
+              alt="LOCKSTEP Linux x86-64 Nginx benchmark showing dynamic memory allocated over time and multi-worker CPU utilization over time across 6 configurations"
+              style="width: 100%; height: auto; display: block; border-radius: 6px;"
+              loading="lazy"
+            />
+          </figure>
           <div class="defense-grid">
             <a
               href="https://github.com/maceip/craneliftX/blob/main/src/process/memory.rs"
@@ -349,7 +357,7 @@
     </main>
     <footer class="wrap">
       <a class="brand" href="#"
-        >skillet<span class="brand-sub"> / craneliftX</span></a
+        >LOCKSTEP<span class="brand-sub"> / craneliftX</span></a
       >
       <p>A little less abstract. A lot more understandable.</p>
       <a href="https://github.com/maceip/craneliftX">Built in the open ↗</a>

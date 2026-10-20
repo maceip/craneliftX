@@ -494,6 +494,9 @@ def generate() -> None:
     svg.append("</svg>")
     out = "\n".join(svg)
     SVG_PATH.write_text(out)
+    site_svg = ROOT / "site" / "public" / "benchmark_results.svg"
+    if site_svg.parent.exists():
+        site_svg.write_text(out)
     print(f"Generated {SVG_PATH} ({len(out)} bytes)")
 
 
