@@ -1,7 +1,7 @@
 # LOCKSTEP
 **Checked execution for Linux x86-64 services.**
 
-**[Explore Lockstep →](https://maceip.github.io/craneliftX/)**
+**[Explore Lockstep →](https://maceip.github.io/lockstep/)**
 Follow an attacker or operator terminal alongside a changing 3D memory layout.
 Fourteen scroll-linked chapters explain five corruption patterns and the runtime
 defenses, with explicit coverage limits. [Site source and local setup](site/README.md).

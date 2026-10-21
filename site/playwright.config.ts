@@ -6,7 +6,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://127.0.0.1:4174/craneliftX/",
+    baseURL: "http://127.0.0.1:4174/lockstep/",
     viewport: { width: 1440, height: 1100 },
     launchOptions: {
       args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
@@ -15,7 +15,7 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run preview -- --port 4174",
-    url: "http://127.0.0.1:4174/craneliftX/",
+    url: "http://127.0.0.1:4174/lockstep/",
     reuseExistingServer: !process.env.CI,
   },
 });

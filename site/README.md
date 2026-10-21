@@ -1,6 +1,6 @@
 # Lockstep
 
-The public site is configured for https://maceip.github.io/craneliftX/.
+The public site is configured for https://maceip.github.io/lockstep/.
 
 A two-column, scroll-led field guide pairs an operator or attacker terminal with
 an abstract Three.js memory layout. Fourteen chapters cover a service, five
@@ -12,7 +12,7 @@ and evidence. On mobile the memory view stays above the scrolling narrative.
 cd site
 npm ci
 npm run dev
-# http://127.0.0.1:5173/craneliftX/
+# http://127.0.0.1:5173/lockstep/
 npm run build
 npx playwright install chromium
 npm test
@@ -38,4 +38,4 @@ The supplied Kesan Graffiti font is self-hosted with its original license in
 requires the font author's permission. No external asset API is needed.
 
 The existing GitHub Actions workflow builds, browser-tests and deploys `dist/`
-on main-branch site changes. The URL base remains `/craneliftX/`.
+on main-branch site changes. The URL base remains `/lockstep/`.

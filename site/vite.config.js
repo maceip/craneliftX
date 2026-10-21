@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: "/craneliftX/",
+  base: "/lockstep/",
   build: {
     rolldownOptions: {
       output: {

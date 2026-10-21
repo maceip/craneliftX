@@ -30,7 +30,7 @@ export type Chapter = {
   note: string;
   source: string;
 };
-const repo = "https://github.com/maceip/craneliftX/blob/main/";
+const repo = "https://github.com/maceip/lockstep/blob/main/";
 export const chapters: Chapter[] = [
   {
     id: "service",
