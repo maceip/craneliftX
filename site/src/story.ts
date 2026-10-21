@@ -302,7 +302,7 @@ export const chapters: Chapter[] = [
     part: "defense",
     actor: "operator",
     kicker: "11 / JIT DIVERSIFICATION",
-    title: "Same behavior. A different arrangement.",
+    title: "Killing heap memory exploits for good",
     description:
       "Each native compilation starts with a fresh register-variable permutation and randomized frame padding. A fixed view of the original binary is a poorer guide to the translated layout.",
     command: "compile(block) → compile(block)",
