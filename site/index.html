@@ -6,15 +6,15 @@
     <meta name="theme-color" content="#0b0f11" />
     <meta
       name="description"
-      content="Follow a heap exploit from the terminal to memory. See how Lockstep checks ownership, lifetime, pointers, and execution."
+      content="Lockstep runs static Linux x86-64 services with heap memory checks and function-pointer authentication. Explore the checks and their limits."
     />
     <meta
       property="og:title"
-      content="Lockstep — Follow the attack. Watch the memory."
+      content="Lockstep — Heap memory protection for Linux services"
     />
     <meta
       property="og:description"
-      content="An illustrated field guide to heap exploitation and Lockstep's defenses."
+      content="See how heap corruption works, how Lockstep checks memory access, and where those checks have limits."
     />
     <meta property="og:type" content="website" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
@@ -25,10 +25,10 @@
       type="font/otf"
       crossorigin
     />
-    <title>Lockstep — Follow the attack. Watch the memory.</title>
+    <title>Lockstep — Heap memory protection for Linux services</title>
   </head>
   <body>
-    <a class="skip-link" href="#story">Skip to the illustrated story</a>
+    <a class="skip-link" href="#story">Skip to the examples</a>
     <header class="site-header">
       <a class="wordmark" href="#service" aria-label="Lockstep home"
         >LOCKSTEP</a
@@ -43,10 +43,10 @@
     </header>
     <main id="story">
       <div class="page-intro">
-        <h1>A field guide to<br /><span>memory under attack.</span></h1>
+        <h1>How Lockstep checks<br /><span>heap memory access.</span></h1>
         <p>
-          Follow the terminal. Watch the memory.<br />Scroll to see what
-          changes—and what stops it.
+          Lockstep runs Linux services with memory and function-pointer checks.
+          Scroll to see how heap corruption works and which checks reject it.
         </p>
       </div>
       <div class="story-grid">
@@ -60,13 +60,13 @@
               ><span id="execution-mode">UNPROTECTED SERVICE</span>
             </div>
             <div class="caption-heading">
-              <h2 id="scene-title">Two allocations. Two owners.</h2>
+              <h2 id="scene-title">The callback has its own allocation.</h2>
               <span id="scene-count">00 / 13</span>
             </div>
           </div>
           <div class="diagram" id="diagram" data-scene="service">
             <div class="address-label">
-              SCHEMATIC ADDRESS SPACE <span aria-hidden="true">↗</span>
+              SIMPLIFIED MEMORY LAYOUT <span aria-hidden="true">↗</span>
             </div>
             <canvas id="memory-canvas" aria-hidden="true"></canvas>
             <div
@@ -113,8 +113,8 @@
               ><em>host-only</em>
             </div>
             <div class="host-region" id="host-region">
-              <span>HOST / NOT GUEST-ADDRESSABLE</span
-              ><strong>shadow · PAC · runtime</strong>
+              <span>HOST MEMORY ONLY</span
+              ><strong>tags · pointers · runtime</strong>
             </div>
             <span class="heap-name structure-name">HEAP</span>
             <div class="scene-verdict" id="scene-verdict">
@@ -127,7 +127,7 @@
           </div>
           <div class="stage-bottom">
             <div class="legend">
-              <span><i class="owned"></i>owned</span
+              <span><i class="owned"></i>buffer</span
               ><span><i class="neighbor"></i>neighbor</span
               ><span><i class="changed"></i>changed</span>
             </div>
@@ -145,39 +145,44 @@
           </div>
           <nav
             class="chapter-rail"
-            aria-label="Story chapters"
+            aria-label="Examples and defenses"
             id="chapter-rail"
           ></nav>
           <p class="model-note">
-            Illustrated model · each heap block is 8 bytes · not a live terminal
+            Each heap block represents 8 bytes. The terminal output is
+            simulated.
           </p>
         </aside>
         <div class="narrative" id="narrative"></div>
       </div>
       <noscript
         ><div class="no-script">
-          <h2>The story, without animation</h2>
+          <h2>How the checks work</h2>
           <p>
-            An unchecked heap write can corrupt a callback, a permission field,
-            allocator bookkeeping, or a single adjacent byte. A wrapped size can
-            create an undersized allocation. The effect happens when the program
-            later uses the changed value.
+            An unchecked heap write can overwrite a function pointer, a
+            permission field, or allocator records. A one-byte overflow can
+            change a flag. Integer overflow in a size calculation can cause a
+            program to allocate less memory than it needs. The damage depends on
+            how the program uses the changed values.
           </p>
           <p>
-            Lockstep combines shadow tags, quarantine, randomized placement,
-            pointer authentication, known-instruction-boundary checks, and
-            diversified native compilation. Mapping validation and mediated
-            execution keep its metadata outside guest reach. Enable JavaScript
-            for the synchronized terminal and memory scenes, or inspect the
-            source below.
+            Lockstep compares pointer tags with memory tags, delays reuse of
+            freed memory, randomizes allocation slots, and authenticates stored
+            function pointers. It rejects branches into known instruction
+            interiors and randomizes inputs to the compiler. Runtime metadata is
+            stored outside guest memory. These checks have limits: padding can
+            hide an overflow, tags can repeat, and a malicious branch can start
+            at a valid instruction. Enable JavaScript to view the examples and
+            their implementation notes. The source code is linked below.
           </p>
         </div></noscript
       >
       <footer>
         <a class="wordmark" href="#service">LOCKSTEP</a>
         <p>
-          Checked execution for static Linux x86-64 services.<br /><span
-            >Explicit checks. Visible limits. Inspectable evidence.</span
+          Lockstep runs static Linux x86-64 services.<br /><span
+            >It checks memory access and function pointers during
+            execution.</span
           >
         </p>
         <a href="https://github.com/maceip/lockstep">READ THE SOURCE ↗</a>

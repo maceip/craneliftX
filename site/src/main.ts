@@ -36,11 +36,9 @@ narrative.innerHTML = chapters
       c.actor +
       '"><div class="terminal-bar"><span class="terminal-role">' +
       c.actor.toUpperCase() +
-      '</span><span class="terminal-session">ILLUSTRATED SESSION</span><span class="terminal-window" aria-hidden="true"><i></i><i></i></span></div>' +
+      '</span><span class="terminal-session">SIMULATED SESSION</span><span class="terminal-window" aria-hidden="true"><i></i><i></i></span></div>' +
       '<div class="terminal-body"><div class="terminal-prompt">' +
-      (c.actor === "attacker"
-        ? "remote / crafted input"
-        : "local / service runtime") +
+      (c.actor === "attacker" ? "attacker input" : "service process") +
       '</div><div class="terminal-command"><span aria-hidden="true"><span class="prompt-symbol">~&gt;</span><span class="typed-text">' +
       escape(c.command) +
       '</span><i class="cursor"></i></span><span class="sr-only">Command: ' +
@@ -49,7 +47,7 @@ narrative.innerHTML = chapters
       escape(c.output.join("\n")) +
       "</pre></div>" +
       '<div class="terminal-footer"><span class="sr-only">' +
-      (c.part === "exploit" ? "UNPROTECTED MODEL" : "LOCKSTEP MODEL") +
+      (c.part === "exploit" ? "DEFENSES DISABLED" : "LOCKSTEP ENABLED") +
       '</span><span class="terminal-metric"><span>' +
       c.metric +
       "</span><strong>" +
@@ -60,13 +58,13 @@ narrative.innerHTML = chapters
       '<p class="chapter-description">' +
       c.description +
       "</p>" +
-      "<details><summary>Scope & implementation</summary><p>" +
+      "<details><summary>Implementation and limits</summary><p>" +
       c.note +
       '</p><a href="' +
       c.source +
-      '">INSPECT THE SOURCE ↗</a></details>' +
+      '">READ THE SOURCE CODE ↗</a></details>' +
       (i === 0
-        ? '<p class="scroll-cue">SCROLL TO FOLLOW THE ATTACK ↓</p>'
+        ? '<p class="scroll-cue">SCROLL THROUGH THE EXAMPLES ↓</p>'
         : "") +
       "</section>",
   )
@@ -109,12 +107,12 @@ const labels: Record<View, [string, string, string]> = {
   wrap: ["ALLOCATED / 32 B", "COPY / 288 B →", "corrupted neighbor"],
   tags: ["POINTER TAG A", "TAG B / UNCHANGED", "handle_request"],
   quarantine: ["FREED / OLD TAG A", "NEIGHBOR / LIVE", "stale access ✕"],
-  placement: ["BUFFER", "TARGET / NEW SLOT", "unpredictable adjacency"],
-  pac: ["ORIGINAL SLOT A", "RAW BYTES / SLOT B", "authentication ✕"],
+  placement: ["BUFFER", "TARGET / NEW SLOT", "random slot"],
+  pac: ["ORIGINAL SLOT A", "RAW BYTES / SLOT B", "check failed ✕"],
   cfi: ["INSTRUCTION START", "INTERIOR BYTE +2", "invalid destination ✕"],
-  diversify: ["GUEST BLOCK", "TRANSLATED BLOCKS", "fresh layout"],
-  isolation: ["GUEST HEAP", "GUEST ALLOCATION", "host / separate"],
-  receipt: ["INPUT / 32 B", "CALLBACK / INTACT", "expected fault ✓"],
+  diversify: ["GUEST BLOCK", "TRANSLATED BLOCKS", "randomized inputs"],
+  isolation: ["GUEST HEAP", "GUEST ALLOCATION", "host memory"],
+  receipt: ["INPUT / 32 B", "CALLBACK / INTACT", "expected error ✓"],
 };
 function annotate(p: Projection) {
   projection = p;
@@ -257,10 +255,10 @@ function activate(next: number, animate = true) {
     : "HEAP";
   document.querySelector(".model-note")!.textContent =
     c.id === "cfi"
-      ? "Illustrated code · each block is 1 byte · known instruction extents"
+      ? "Each code block represents 1 byte of a decoded instruction."
       : c.id === "diversify"
-        ? "Illustrated model · code blocks are schematic · not a live terminal"
-        : "Illustrated model · each heap block is 8 bytes · not a live terminal";
+        ? "The blocks represent compiled code. The terminal output is simulated."
+        : "Each heap block represents 8 bytes. The terminal output is simulated.";
   el("code-label").textContent =
     c.id === "diversify" ? "NATIVE COMPILATION" : "LATER USE";
   document.getElementById("use-route")!.style.stroke = dangerous
