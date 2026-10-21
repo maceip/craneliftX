@@ -175,6 +175,7 @@ http {{
         ]
 
     stderr_log = (work_dir / "stderr.log").open("wb")
+    startup_t = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=stderr_log, stderr=stderr_log, start_new_session=True)
 
     def one_request(req_idx: int) -> tuple[float, str]:
@@ -208,9 +209,12 @@ http {{
                     raise RuntimeError("Readiness timeout")
                 time.sleep(0.05)
 
+        startup_seconds = time.perf_counter() - startup_t
+        warmup_t = time.perf_counter()
         # Warm up both workers
-        for i in range(6):
+        for i in range(100):
             one_request(i + 1)
+        warmup_seconds = time.perf_counter() - warmup_t
 
         clk_tck = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
         base_rss_mb, prev_jiffies = sample_proc_tree(proc.pid)
@@ -220,6 +224,8 @@ http {{
         latencies: list[float] = []
         workers_seen: set[str] = set()
         completed_count = 0
+        failed_count = 0
+        failure_samples: list[str] = []
         lock = threading.Lock()
         stop_flag = threading.Event()
 
@@ -271,7 +277,7 @@ http {{
         req_counter = 100
 
         def client_worker() -> None:
-            nonlocal completed_count, req_counter
+            nonlocal completed_count, req_counter, failed_count
             conn: http.client.HTTPConnection | None = None
             while time.perf_counter() - start_t < duration_sec:
                 with lock:
@@ -291,7 +297,7 @@ http {{
                     w_id = resp.getheader("X-Worker") or "?"
                     lat_ms = (time.perf_counter() - t0) * 1000.0
                     # Reconnect periodically so Nginx exercises both connection & request pool allocation
-                    if idx % (16 if mode == "native" else 2) == 0:
+                    if idx % 16 == 0:
                         conn.close()
                         conn = None
                     with lock:
@@ -299,7 +305,11 @@ http {{
                             latencies.append(lat_ms)
                             workers_seen.add(w_id)
                             completed_count += 1
-                except Exception:
+                except Exception as error:
+                    with lock:
+                        failed_count += 1
+                        if len(failure_samples) < 8:
+                            failure_samples.append(f"{type(error).__name__}: {error}")
                     if conn is not None:
                         try:
                             conn.close()
@@ -324,6 +334,12 @@ http {{
 
         if not latencies:
             raise RuntimeError("No requests completed during benchmark window")
+        if failed_count:
+            raise RuntimeError(f"{failed_count} failed benchmark requests: {failure_samples}")
+        if len(workers_seen) != 2 or "?" in workers_seen:
+            raise RuntimeError(f"Benchmark did not exercise both workers: {sorted(workers_seen)}")
+        if proc.poll() is not None:
+            raise RuntimeError(f"Nginx exited during benchmark: {proc.returncode}")
 
         lat_sorted = sorted(latencies)
         peak_rss = max(pt["rss_mb"] for pt in timeseries) if timeseries else base_rss_mb
@@ -338,7 +354,12 @@ http {{
             "mode": mode,
             "hardening": " ".join(extra_flags) if extra_flags else ("none" if mode == "native" else "full"),
             "duration_seconds": round(elapsed, 3),
+            "startup_seconds": round(startup_seconds, 3),
+            "warmup_seconds": round(warmup_seconds, 3),
             "verified_responses": len(latencies),
+            "failed_responses": failed_count,
+            "warmup_requests": 100,
+            "reconnect_every": 16,
             "payload_bytes": len(payload),
             "workers_observed": sorted(workers_seen),
             "rps": len(latencies) / elapsed,

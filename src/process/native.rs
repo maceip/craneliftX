@@ -1,9 +1,9 @@
 //! Native x86-64 block ABI and checked memory helpers.
 //!
-//! Native blocks do not touch guest memory with raw loads and stores. Every
-//! access goes through the same `ProcessBus` path the interpreter uses, so
-//! heap shadow tags and pointer authentication apply on the native backend
-//! exactly as they do on RV64. Syscalls are not emitted as host `syscall`
+//! Native blocks inline mapping/tag checks for ordinary data. Pointer-sensitive
+//! accesses and all failed checks use the reference `ProcessBus` path. No host
+//! address is used without validation; metadata is host-only and the existing
+//! address-space lock pins it throughout each block. Syscalls are not emitted as host `syscall`
 //! instructions: a guest `syscall` ends the block and the runtime serves it
 //! from the register file, so the guest never reaches the host kernel.
 //!
@@ -27,6 +27,15 @@ pub const NATIVE_CPUID_FN_OFFSET: i32 = std::mem::offset_of!(NativeGuest, cpuid_
 pub const NATIVE_CPUID_OUT_OFFSET: i32 = std::mem::offset_of!(NativeGuest, cpuid_out) as i32;
 pub const NATIVE_FAULT_PC_OFFSET: i32 = std::mem::offset_of!(NativeGuest, fault_pc) as i32;
 pub const NATIVE_FAULT_KIND_OFFSET: i32 = std::mem::offset_of!(NativeGuest, fault_kind) as i32;
+pub const FAST_ENABLED: i32 = std::mem::offset_of!(NativeGuest, fast_enabled) as i32;
+pub const FAST_PAGES: i32 = std::mem::offset_of!(NativeGuest, fast_pages) as i32;
+pub const SHADOW: i32 = std::mem::offset_of!(NativeGuest, shadow) as i32;
+pub const PAC_PAGES: i32 = std::mem::offset_of!(NativeGuest, pac_pages) as i32;
+pub const TAG_MASK: i32 = std::mem::offset_of!(NativeGuest, tag_mask) as i32;
+pub const TAG_SHIFT: i32 = std::mem::offset_of!(NativeGuest, tag_shift) as i32;
+pub const TAGS_ENABLED: i32 = std::mem::offset_of!(NativeGuest, tags_enabled) as i32;
+pub const PAC_ENABLED: i32 = std::mem::offset_of!(NativeGuest, pac_enabled) as i32;
+pub const BULK_FN: i32 = std::mem::offset_of!(NativeGuest, bulk_fn) as i32;
 
 /// Fault kinds reported through [`NativeGuest::fault_kind`].
 pub const FAULT_NONE: u64 = 0;
@@ -36,6 +45,7 @@ pub const FAULT_STACK: u64 = 2;
 pub type NativeLoadFn = unsafe extern "C" fn(*mut c_void, u64, u64, u64) -> u64;
 pub type NativeStoreFn = unsafe extern "C" fn(*mut c_void, u64, u64, u64, u64, u64);
 pub type NativeCpuidFn = unsafe extern "C" fn(*mut c_void, u64, u64);
+pub type NativeBulkFn = unsafe extern "C" fn(*mut c_void, u64, u64, u64, u64, u64, u64) -> u64;
 
 /// Context block passed to every native-compiled guest block.
 #[repr(C)]
@@ -52,6 +62,15 @@ pub struct NativeGuest {
     pub cpuid_out: [u64; 4],
     pub fault_pc: u64,
     pub fault_kind: u64,
+    pub fast_enabled: u64,
+    pub fast_pages: *mut super::fast_memory::FastPage,
+    pub shadow: *const u8,
+    pub pac_pages: *const u8,
+    pub tag_mask: u64,
+    pub tag_shift: u64,
+    pub tags_enabled: u64,
+    pub pac_enabled: u64,
+    pub bulk_fn: NativeBulkFn,
     runtime: *mut Runtime,
 }
 
@@ -70,6 +89,15 @@ impl NativeGuest {
             cpuid_out: [0; 4],
             fault_pc: 0,
             fault_kind: FAULT_NONE,
+            fast_enabled: 1,
+            fast_pages: std::ptr::null_mut(),
+            shadow: std::ptr::null(),
+            pac_pages: std::ptr::null(),
+            tag_mask: 0,
+            tag_shift: 0,
+            tags_enabled: 0,
+            pac_enabled: 0,
+            bulk_fn: native_bulk,
             runtime,
         }
     }
@@ -100,6 +128,7 @@ pub unsafe extern "C" fn native_load(
     let guest = unsafe { &mut *(cookie as *mut NativeGuest) };
     let rt = unsafe { &mut *guest.runtime };
     let (value, prov) = rt.native_load(guest_ptr, size, pc);
+    rt.refresh_native_views(guest);
     guest.last_load_prov = u64::from(prov);
     if rt.native_fault.is_some() {
         guest.fault_kind = FAULT_MEMORY;
@@ -122,13 +151,29 @@ pub unsafe extern "C" fn native_store(
     let guest = unsafe { &mut *(cookie as *mut NativeGuest) };
     let rt = unsafe { &mut *guest.runtime };
     rt.native_store(guest_ptr, size, value, constant_provenance != 0, pc);
+    rt.refresh_native_views(guest);
     if rt.native_fault.is_some() {
         guest.fault_kind = FAULT_MEMORY;
         guest.fault_pc = pc;
     }
 }
 
-/// CPUID emulation modeled on Justine Tunney's Blink (vendor/blink/blink/cpuid.c).
+/// Checked REP helper. Returns completed elements so the JIT can retain the
+/// valid prefix and architectural counters before propagating a memory fault.
+pub unsafe extern "C" fn native_bulk(cookie: *mut c_void, copy: u64, dst: u64, src: u64, count: u64, size: u64, pc: u64) -> u64 {
+    // SAFETY: same pinned NativeGuest/Runtime lifetime as scalar callbacks.
+    let guest = unsafe { &mut *(cookie as *mut NativeGuest) };
+    let rt = unsafe { &mut *guest.runtime };
+    let done = rt.native_bulk(copy != 0, dst, src, count, size, pc);
+    rt.refresh_native_views(guest);
+    if rt.native_fault.is_some() {
+        guest.fault_kind = FAULT_MEMORY;
+        guest.fault_pc = pc;
+    }
+    done
+}
+
+/// CPUID emulation modeled on the vendored Blink implementation.
 pub unsafe extern "C" fn native_cpuid(ctx: *mut c_void, leaf: u64, subleaf: u64) {
     let guest = unsafe { &mut *(ctx as *mut NativeGuest) };
     let intel = b"GenuineIntel";

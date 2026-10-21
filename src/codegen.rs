@@ -42,7 +42,12 @@ fn make_isa(
         isa.set(flag, value).map_err(|e| fail(format!("{e}")))?;
     }
     let mut flags = settings::builder();
-    flags.set("opt_level", "none").map_err(|e| fail(format!("{e}")))?;
+    // The interpreter intentionally uses the small RV64 instruction profile.
+    // Native guest code should be optimized even when its host runner is a
+    // release build: Cargo's optimization level does not apply to JIT output.
+    flags
+        .set("opt_level", if target == TARGET_RV64 { "none" } else { "speed" })
+        .map_err(|e| fail(format!("{e}")))?;
     flags
         .set("enable_verifier", "true")
         .map_err(|e| fail(format!("{e}")))?;

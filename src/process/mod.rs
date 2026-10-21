@@ -7,6 +7,7 @@ mod compile;
 mod csprng;
 mod diversify;
 mod heap;
+mod fast_memory;
 mod futex;
 mod input;
 mod jit;
@@ -22,7 +23,7 @@ mod syscall;
 pub use lower::Backend;
 pub use diversify::Diversification;
 use crate::ledger::RunLedger;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
 
@@ -59,6 +60,18 @@ impl Default for Hardening {
         }
     }
 }
+/// Synchronization policy, independent of mitigation settings.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThreadSync {
+    /// Keep inline accesses while execution is uncontended; use per-access
+    /// guards when another native thread is runnable in the executor.
+    Adaptive,
+    /// Reference path: hold the memory lock for a whole translated block.
+    Block,
+    /// Concurrent native computation; checked memory accesses synchronize individually.
+    Access,
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Options {
     pub max_rv64_steps: u64,
@@ -66,6 +79,7 @@ pub struct Options {
     pub recompile_every_syscalls: u64,
     pub hardening: Hardening,
     pub backend: Backend,
+    pub thread_sync: ThreadSync,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
 }
@@ -77,6 +91,7 @@ impl Default for Options {
             recompile_every_syscalls: 0,
             hardening: Hardening::default(),
             backend: Backend::X86_64,
+            thread_sync: ThreadSync::Adaptive,
             args: Vec::new(),
             env: Vec::new(),
         }
@@ -98,6 +113,8 @@ pub struct Report {
     pub network_read_bytes: u64,
     pub network_written_bytes: u64,
     pub native_x86_instructions_executed: u64,
+    pub native_concurrent_blocks: u64,
+    pub native_serialized_blocks: u64,
     /// Calls served by the runtime's allocator, by interception or by syscall.
     pub heap_calls: u64,
     pub heap_allocations: u64,
@@ -154,28 +171,7 @@ pub fn run_file(path: &Path, options: &Options, ledger: &mut RunLedger) -> Resul
                     runtime.allocator_call(*function, &mut report, ledger)?;
                     continue;
                 }
-                let mut block = {
-                    let mut cs = runtime.process.compile_state.lock().unwrap();
-                    if options.hardening.cfi && !cs.cfi_map.allows(rip) {
-                        return Err(memory::error(format!(
-                            "CFI violation: transfer to 0x{rip:x} lands inside a known instruction"
-                        ))
-                        .into());
-                    }
-                    let space = runtime.process.address_space.lock().unwrap();
-                    let runtime::CompileState {
-                        ref mut cache,
-                        ref mut cfi_map,
-                        ref mut report,
-                    } = *cs;
-                    let cloned = {
-                        let cached = cache.get_or_compile(&space.memory, rip, report, ledger)?;
-                        cfi_map.record_block(&cached.compiled.source_instructions);
-                        cached.clone()
-                    };
-                    cache.mark_executed(rip);
-                    cloned
-                };
+                let mut block = runtime.dispatch(rip, ledger)?;
                 runtime.execute(&mut block, &mut report, options, ledger)?;
                 {
                     let mut cs = runtime.process.compile_state.lock().unwrap();

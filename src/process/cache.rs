@@ -15,11 +15,27 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub(super) struct CachedBlock {
-    pub compiled: CompiledBlock,
+    pub compiled: Arc<CompiledBlock>,
     pub executions: u64,
     pub rv64_steps: u64,
     /// JIT page for native x86-64 code (None for RV64 interpreted blocks).
     pub jit_page: Option<Arc<JitPage>>,
+    pub cfi_recorded: bool,
+    reached: bool,
+}
+impl CachedBlock {
+    /// Share immutable code, not owned code/decoder buffers. Execution-local
+    /// counters start at zero so aggregation never adds a previous total again.
+    pub fn execution_handle(&self) -> Self {
+        Self {
+            compiled: self.compiled.clone(),
+            jit_page: self.jit_page.clone(),
+            executions: 0,
+            rv64_steps: 0,
+            cfi_recorded: self.cfi_recorded,
+            reached: self.reached,
+        }
+    }
 }
 pub(super) struct BlockCache {
     entries: BTreeMap<u64, CachedBlock>,
@@ -104,17 +120,24 @@ impl BlockCache {
             self.entries.insert(
                 rip,
                 CachedBlock {
-                    compiled,
+                    compiled: Arc::new(compiled),
                     executions: 0,
                     rv64_steps: 0,
                     jit_page,
+                    cfi_recorded: false,
+                    reached: false,
                 },
             );
         }
         Ok(self.entries.get_mut(&rip).unwrap())
     }
     pub fn mark_executed(&mut self, rip: u64) {
-        self.executed.insert(rip);
+        if let Some(block) = self.entries.get_mut(&rip) {
+            if !block.reached {
+                block.reached = true;
+                self.executed.insert(rip);
+            }
+        }
     }
     pub fn get_mut(&mut self, rip: u64) -> Option<&mut CachedBlock> {
         self.entries.get_mut(&rip)

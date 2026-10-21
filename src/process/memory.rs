@@ -6,6 +6,7 @@ use object::{
     Architecture, BinaryFormat, Object, ObjectKind, ObjectSegment, SegmentFlags,
 };
 use serde_json::{json, Value};
+use std::cell::Cell;
 
 pub const ADDRESS_LIMIT: u64 = 1024 * 1024 * 1024;
 pub const GUEST_BIAS: u64 = 0x1_0000_0000;
@@ -27,14 +28,31 @@ pub(super) struct Region {
     pub writable: bool,
     pub executable: bool,
 }
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(super) struct GuestMemory {
     pub regions: Vec<Region>,
     pub phdr: u64,
     pub phent: u64,
     pub phnum: u64,
+    // A borrowed Rust slice may invalidate a previously exposed mutable raw
+    // pointer even when the allocation did not move. Invalidate on views too.
+    generation: Cell<u64>,
+}
+impl Clone for GuestMemory {
+    fn clone(&self) -> Self {
+        self.invalidate_native_views();
+        Self {
+            regions: self.regions.clone(),
+            phdr: self.phdr,
+            phent: self.phent,
+            phnum: self.phnum,
+            generation: Cell::new(0),
+        }
+    }
 }
 impl GuestMemory {
+    pub fn generation(&self) -> u64 { self.generation.get() }
+    pub(super) fn invalidate_native_views(&self) { self.generation.set(self.generation.get().wrapping_add(1)); }
     pub fn load_elf(bytes: &[u8]) -> Result<(Self, u64, Value), EngineError> {
         let file = object::File::parse(bytes).map_err(error)?;
         if file.format() != BinaryFormat::Elf
@@ -154,6 +172,7 @@ impl GuestMemory {
             writable,
             executable,
         });
+        self.invalidate_native_views();
         Ok(())
     }
     fn locate(
@@ -183,21 +202,53 @@ impl GuestMemory {
     }
     pub fn read(&self, address: u64, size: usize) -> Result<&[u8], EngineError> {
         let (i, o) = self.locate(address, size, false)?;
+        self.invalidate_native_views();
         Ok(&self.regions[i].data[o..o + size])
     }
     pub fn read_mut(&mut self, address: u64, size: usize) -> Result<&mut [u8], EngineError> {
         let (i, o) = self.locate(address, size, true)?;
+        self.invalidate_native_views();
         Ok(&mut self.regions[i].data[o..o + size])
+    }
+    /// Scalar bus accesses avoid materializing a reference to the backing Vec,
+    /// preserving the aliasing guarantee of Vec::as_ptr / Vec::as_mut_ptr.
+    pub fn read_into(&self, address: u64, bytes: &mut [u8]) -> Result<(), EngineError> {
+        let (i, o) = self.locate(address, bytes.len(), false)?;
+        // SAFETY: locate proves the entire source span is mapped. The output
+        // slice is valid by construction; copy also permits overlapping spans.
+        unsafe { std::ptr::copy(self.regions[i].data.as_ptr().add(o), bytes.as_mut_ptr(), bytes.len()); }
+        Ok(())
     }
     pub fn write(&mut self, address: u64, bytes: &[u8]) -> Result<(), EngineError> {
         let (i, o) = self.locate(address, bytes.len(), true)?;
-        self.regions[i].data[o..o + bytes.len()].copy_from_slice(bytes);
+        // SAFETY: locate proves the full destination is mapped and writable.
+        // No borrowed view of the backing Vec is created, and copy permits
+        // overlap. The address-space lock excludes concurrent guest accesses.
+        unsafe { std::ptr::copy(bytes.as_ptr(), self.regions[i].data.as_mut_ptr().add(o), bytes.len()); }
         Ok(())
     }
     pub fn writable(&self, address: u64, size: usize) -> Result<(), EngineError> {
         self.locate(address, size, true).map(|_| ())
     }
+    /// Copy validated guest bytes without creating overlapping Rust references.
+    /// The caller is responsible for tag/PAC semantics and guest overlap order.
+    pub fn copy_bytes(&mut self, source: u64, destination: u64, size: usize) -> Result<(), EngineError> {
+        let (src, from) = self.locate(source, size, false)?;
+        let (dst, to) = self.locate(destination, size, true)?;
+        self.invalidate_native_views();
+        if src == dst {
+            self.regions[src].data.copy_within(from..from + size, to);
+        } else if src < dst {
+            let (before, after) = self.regions.split_at_mut(dst);
+            after[0].data[to..to + size].copy_from_slice(&before[src].data[from..from + size]);
+        } else {
+            let (before, after) = self.regions.split_at_mut(src);
+            before[dst].data[to..to + size].copy_from_slice(&after[0].data[from..from + size]);
+        }
+        Ok(())
+    }
     pub fn unmap(&mut self, start: u64, len: u64) -> Result<(), EngineError> {
+        self.invalidate_native_views();
         let end = start.checked_add(len).ok_or_else(|| error("unmap overflow"))?;
         if len == 0 {
             return Ok(());
@@ -233,6 +284,7 @@ impl GuestMemory {
     }
 
     pub fn mprotect(&mut self, start: u64, len: u64, prot: i32) -> Result<(), EngineError> {
+        self.invalidate_native_views();
         let end = start.checked_add(len).ok_or_else(|| error("mprotect overflow"))?;
         let writable = prot & 2 != 0;
         let executable = prot & 4 != 0;
@@ -322,6 +374,7 @@ impl GuestMemory {
         if !self.regions[i].executable {
             return Err(error("execution outside executable guest mapping"));
         }
+        self.invalidate_native_views();
         Ok(&self.regions[i].data[o..])
     }
 
@@ -469,7 +522,7 @@ impl MemoryAccess for ProcessBus<'_> {
         if end <= self.code.len() as u64 {
             bytes[..size].copy_from_slice(&self.code[address as usize..end as usize]);
         } else if address >= GUEST_BIAS && end <= GUEST_BIAS + ADDRESS_LIMIT {
-            bytes[..size].copy_from_slice(self.memory.read(address - GUEST_BIAS, size)?);
+            self.memory.read_into(address - GUEST_BIAS, &mut bytes[..size])?;
         } else if address >= CONTEXT_BASE && end <= CONTEXT_BASE + (super::CONTEXT_WORDS * 8) as u64 {
             for (i, b) in bytes[..size].iter_mut().enumerate() {
                 let at = (address - CONTEXT_BASE) as usize + i;

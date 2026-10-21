@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet};
 /// Bits 48:55. Chosen because a 48-bit user address leaves them zero, and
 /// because LAM_U57 masks 57:62 rather than this field.
 const PAC_SHIFT: u32 = 48;
-const PAC_MASK: u64 = 0x00ff_0000_0000_0000;
+pub(super) const PAC_MASK: u64 = 0x00ff_0000_0000_0000;
 
 fn sip_round(v0: &mut u64, v1: &mut u64, v2: &mut u64, v3: &mut u64) {
     *v0 = v0.wrapping_add(*v1);
@@ -123,6 +123,10 @@ pub struct Pac {
     code: Vec<std::ops::Range<u64>>,
     enabled: bool,
     stats: PacStats,
+    /// Conservative, monotonic page classification for inline ordinary-data
+    /// accesses. Never cleared on free/unmark: stale classification can only
+    /// send an access to the authenticated helper, never bypass authentication.
+    slow_pages: Vec<u8>,
 }
 impl Pac {
     pub fn new(secret: [u8; 16], code: Vec<std::ops::Range<u64>>, enabled: bool) -> Self {
@@ -143,6 +147,7 @@ impl Pac {
             code,
             enabled,
             stats: PacStats::default(),
+            slow_pages: vec![0; (super::memory::ADDRESS_LIMIT >> super::fast_memory::PAGE_SHIFT) as usize],
         }
     }
     pub fn set_image_ranges(
@@ -150,6 +155,13 @@ impl Pac {
         writable: Vec<std::ops::Range<u64>>,
         readonly: Vec<std::ops::Range<u64>>,
     ) {
+        for range in &readonly {
+            if range.end > range.start {
+                for page in (range.start >> 12)..=((range.end - 1) >> 12) {
+                    if let Some(flag) = self.slow_pages.get_mut(page as usize) { *flag = 1; }
+                }
+            }
+        }
         self.image_ranges = writable;
         self.readonly_ranges = readonly;
     }
@@ -164,6 +176,13 @@ impl Pac {
     /// constant-provenance ELF image slot). Heap slots are never trusted.
     pub fn is_trusted_slot(&self, address: u64) -> bool {
         self.trusted_slots.contains(&address) || self.is_readonly_image(address)
+    }
+    pub fn slow_pages_ptr(&self) -> *const u8 { self.slow_pages.as_ptr() }
+    pub fn ordinary_page(&self, address: u64) -> bool {
+        self.slow_pages.get((address >> 12) as usize) == Some(&0)
+    }
+    fn mark_slow_page(&mut self, address: u64) {
+        if let Some(flag) = self.slow_pages.get_mut((address >> 12) as usize) { *flag = 1; }
     }
     pub fn set_stack_provenance(&mut self, address: u64, size: u64, constant: bool) {
         if size == 8 && constant {
@@ -255,6 +274,7 @@ impl Pac {
                 });
             }
             self.slots.insert(address, value);
+            self.mark_slow_page(address);
             self.pointer_history.insert(address);
             if constant_provenance && self.is_image_data(address) {
                 self.trusted_slots.insert(address);
@@ -345,6 +365,7 @@ impl Pac {
                 let address = base + offset as u64;
                 let signed = self.signed_word(word, address);
                 self.slots.insert(address, word);
+                self.mark_slow_page(address);
                 self.pointer_history.insert(address);
                 self.trusted_slots.insert(address);
                 self.seeded_slots.insert(address);

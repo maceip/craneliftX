@@ -1,7 +1,7 @@
 //! Static x86-64 ELF process -> Cranelift -> native or interpreted execution.
 use cranelift_isr::{
     ledger::RunLedger,
-    process::{self, Backend, Options},
+    process::{self, Backend, Options, ThreadSync},
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "--help" => {
-                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend x86_64|rv64] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi] [--no-lam]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no host-kernel fallback.\n--backend selects the compilation target (x86_64=host-native with checked loads/stores, tags, PAC, CFI, W^X; rv64=interpreted).\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection, --no-lam forces the software tag scheme; each is for A/B against the same binary.");
+                println!("isr-process FILE [--ledger-dir DIR] [--max-rv64-steps N] [--max-seconds N] [--recompile-every-syscalls N] [--events-bind 127.0.0.1:0] [--backend x86_64|rv64] [--thread-sync adaptive|access|block] [--no-tags] [--no-pac] [--no-random-placement] [--no-cfi] [--no-lam]\nisr-process --groups\nRuns a static Linux x86-64 ELF through Cranelift. Loopback TCP syscall profile; no host-kernel fallback.\n--backend selects the compilation target (x86_64=host-native with checked loads/stores, tags, PAC, CFI, W^X; rv64=interpreted).\n--thread-sync adaptive (default) keeps inline checks when execution is uncontended; access forces concurrent native computation with individually checked/locked memory accesses; block retains the reference whole-block lock. Atomic instructions remain indivisible in both modes; RV64 retains block locking.\n--no-tags disables heap shadow tagging, --no-pac pointer authentication, --no-random-placement deterministic slot reuse, --no-cfi mid-instruction transfer rejection, --no-lam forces the software tag scheme; each is for A/B against the same binary.");
                 return Ok(());
             }
             "--events-bind" => {
@@ -52,6 +52,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--no-random-placement" => options.hardening.random_placement = false,
             "--no-cfi" => options.hardening.cfi = false,
             "--no-lam" => options.hardening.lam = false,
+            "--thread-sync" => {
+                options.thread_sync = match args.next().ok_or("missing thread synchronization policy")?.as_str() {
+                    "adaptive" => ThreadSync::Adaptive,
+                    "access" => ThreadSync::Access,
+                    "block" => ThreadSync::Block,
+                    name => return Err(format!("unknown thread synchronization policy: {name}").into()),
+                };
+            }
             "--backend" => {
                 let b = args.next().ok_or("missing backend name")?;
                 options.backend = match b.as_str() {

@@ -14,7 +14,7 @@ use crate::{
     process::diversify::Diversification,
 };
 use cranelift_codegen::ir::Function;
-use iced_x86::{Formatter, Instruction, IntelFormatter, Mnemonic};
+use iced_x86::{Formatter, Instruction, IntelFormatter, Mnemonic, OpKind};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -27,6 +27,9 @@ pub(super) struct CompiledBlock {
     pub source_instructions: Vec<(u64, usize)>,
     pub x86_bytes: usize,
     pub backend: Backend,
+    /// A LOCK-prefixed operation or implicit memory XCHG must keep its
+    /// read/modify/write indivisible, including the tag/PAC checks.
+    pub atomic_memory: bool,
 }
 struct DecodedBlock {
     instructions: Vec<Instruction>,
@@ -173,6 +176,10 @@ pub(super) fn prepare(
                     .map(|i| (i.ip(), i.len()))
                     .collect(),
                 backend,
+                atomic_memory: decoded.instructions.iter().any(|i| {
+                    i.has_lock_prefix() || (i.mnemonic() == Mnemonic::Xchg
+                        && i.op_kinds().any(|kind| kind == OpKind::Memory))
+                }),
             })
         },
         |b| {

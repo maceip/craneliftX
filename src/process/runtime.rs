@@ -43,12 +43,23 @@ pub(super) struct AddressSpace {
     pub memory: GuestMemory,
     pub heap: Heap,
     pub pac: Pac,
+    native_owner: Option<u64>,
+}
+
+impl AddressSpace {
+    fn claim_native(&mut self, tid: u64) {
+        if self.native_owner != Some(tid) {
+            self.memory.invalidate_native_views();
+            self.native_owner = Some(tid);
+        }
+    }
 }
 
 impl SyscallSpace for &Mutex<AddressSpace> {
     fn with<R>(&mut self, f: impl FnOnce(&mut GuestMemory, &mut Heap) -> R) -> R {
         let mut guard = self.lock().unwrap();
         let space = &mut *guard;
+        space.native_owner = None;
         f(&mut space.memory, &mut space.heap)
     }
 }
@@ -69,11 +80,20 @@ pub(super) struct SharedProcess {
     pub lam: LamStatus,
     pub domain: mpk::Domain,
     pub next_tid: AtomicU64,
+    /// Includes the initial guest thread. Incremented before host spawn,
+    /// decremented by a drop guard on every child exit (including errors).
+    pub live_threads: AtomicU64,
+    /// Native entrants, including those waiting for a block's initial memory
+    /// guard. Increment before acquiring that guard so contention is visible.
+    pub native_threads: AtomicU64,
     pub aborted: AtomicBool,
     pub exit_code: Mutex<Option<i32>>,
     pub thread_error: Mutex<Option<String>>,
     pub child_handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
+
+#[path = "bulk_memory.rs"]
+mod bulk_memory;
 
 pub(super) struct Runtime {
     pub process: Arc<SharedProcess>,
@@ -91,13 +111,22 @@ pub(super) struct Runtime {
     last_progress: Instant,
     /// Set by the native helpers when a tag, PAC or mapping check fails.
     pub native_fault: Option<(u64, EngineError)>,
-    /// Non-null only while a native block is actively executing on this thread
-    /// with `process.address_space` locked.
+    /// Non-null only while a native block or checked helper owns
+    /// `process.address_space` on this thread.
     active_space: *mut AddressSpace,
+    fast_memory: super::fast_memory::FastMemory,
+    #[cfg(test)]
+    pub native_entry: Option<Arc<dyn Fn(&SharedProcess) + Send + Sync>>,
+    #[cfg(test)]
+    pub inline_memory: bool,
+    #[cfg(test)]
+    pub helper_calls: (u64, u64),
+    #[cfg(test)]
+    pub bulk_fast_bytes: u64,
 }
 
-// SAFETY: `active_space` is always null outside `execute_x86_64`, and all shared
-// state is behind `Arc<SharedProcess>`.
+// SAFETY: `active_space` is null outside native execution/checked helper
+// scopes, and all shared state is behind `Arc<SharedProcess>`.
 unsafe impl Send for Runtime {}
 
 impl Runtime {
@@ -270,7 +299,7 @@ impl Runtime {
                     .unwrap_or(0x100_0000);
                 let host_pid = unsafe { libc::getpid() as u64 };
                 let shared = Arc::new(SharedProcess {
-                    address_space: Mutex::new(AddressSpace { memory, heap, pac }),
+                    address_space: Mutex::new(AddressSpace { memory, heap, pac, native_owner: None }),
                     kernel: Kernel::new(deadline, initial_brk),
                     compile_state: Mutex::new(CompileState {
                         cache: BlockCache::with_backend(options.backend),
@@ -283,6 +312,8 @@ impl Runtime {
                     lam,
                     domain: mpk::acquire(),
                     next_tid: AtomicU64::new(host_pid.saturating_add(1000).max(2000)),
+                    live_threads: AtomicU64::new(1),
+                    native_threads: AtomicU64::new(0),
                     aborted: AtomicBool::new(false),
                     exit_code: Mutex::new(None),
                     thread_error: Mutex::new(None),
@@ -304,6 +335,15 @@ impl Runtime {
                     last_progress: Instant::now(),
                     native_fault: None,
                     active_space: std::ptr::null_mut(),
+                    fast_memory: Default::default(),
+                    #[cfg(test)]
+                    native_entry: None,
+                    #[cfg(test)]
+                    inline_memory: true,
+                    #[cfg(test)]
+                    helper_calls: (0, 0),
+                    #[cfg(test)]
+                    bulk_fast_bytes: 0,
                 })
             },
             |runtime| {
@@ -323,6 +363,27 @@ impl Runtime {
         f(&space.memory)
     }
 
+    pub fn dispatch(&self, rip: u64, ledger: &mut RunLedger) -> Result<CachedBlock> {
+        let mut cs = self.process.compile_state.lock().unwrap();
+        if self.process.options.hardening.cfi && !cs.cfi_map.allows(rip) {
+            return Err(memory::error(format!(
+                "CFI violation: transfer to 0x{rip:x} lands inside a known instruction"
+            )).into());
+        }
+        let CompileState { cache, cfi_map, report } = &mut *cs;
+        let handle = if let Some(cached) = cache.get_mut(rip) {
+            cached.execution_handle()
+        } else {
+            let space = self.process.address_space.lock().unwrap();
+            let cached = cache.get_or_compile(&space.memory, rip, report, ledger)?;
+            cfi_map.record_block(&cached.compiled.source_instructions);
+            cached.cfi_recorded = true;
+            cached.execution_handle()
+        };
+        cache.mark_executed(rip);
+        Ok(handle)
+    }
+
     pub fn check_budget(&self, report: &Report, options: &Options) -> Result<()> {
         if report.rv64_steps >= options.max_rv64_steps || Instant::now() >= self.deadline {
             return Err(memory::error("process execution budget exhausted").into());
@@ -337,23 +398,25 @@ impl Runtime {
         options: &Options,
         ledger: &mut RunLedger,
     ) -> Result<()> {
-        {
-            let space = self.process.address_space.lock().unwrap();
-            let (sb, st) = space.memory.stack_bounds_for_sp(self.state[7]);
-            self.stack_bottom = sb;
-            self.stack_top = st;
+        let process = self.process.clone();
+        struct NativeEntry<'a>(&'a AtomicU64);
+        impl Drop for NativeEntry<'_> {
+            fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Release); }
         }
-        audit::check_stack(
-            &self.state,
-            self.stack_bottom,
-            self.stack_top,
-            block.compiled.id,
-            ledger,
-        )?;
-
+        let _entry = if block.compiled.backend == Backend::X86_64 {
+            process.native_threads.fetch_add(1, Ordering::AcqRel);
+            Some(NativeEntry(&process.native_threads))
+        } else { None };
         match block.compiled.backend {
-            Backend::Rv64 => self.execute_rv64(block, report, options, ledger),
-            Backend::X86_64 => self.execute_x86_64(block, report, options, ledger),
+            Backend::Rv64 => {
+                {
+                    let space = process.address_space.lock().unwrap();
+                    (self.stack_bottom, self.stack_top) = space.memory.stack_bounds_for_sp(self.state[7]);
+                }
+                audit::check_stack(&self.state, self.stack_bottom, self.stack_top, block.compiled.id, ledger)?;
+                self.execute_rv64(block, report, options, ledger)
+            }
+            Backend::X86_64 => self.execute_x86_64(block, report, options, ledger, &process),
         }
     }
 
@@ -426,8 +489,9 @@ impl Runtime {
         &mut self,
         block: &mut CachedBlock,
         report: &mut Report,
-        _options: &Options,
+        options: &Options,
         ledger: &mut RunLedger,
+        process_arc: &Arc<SharedProcess>,
     ) -> Result<()> {
         let jit_page = block
             .jit_page
@@ -435,37 +499,72 @@ impl Runtime {
             .ok_or_else(|| memory::error("x86_64 block has no JIT page"))?
             .clone();
 
-        let process_arc = self.process.clone();
-        let (steps, fault) = {
-            let mut space_guard = process_arc.address_space.lock().unwrap();
-            let (sb, st) = space_guard.memory.stack_bounds_for_sp(self.state[7]);
-            self.stack_bottom = sb;
-            self.stack_top = st;
-            self.active_space = &mut *space_guard as *mut AddressSpace;
-
-            let cookie = self as *mut Runtime;
-            let mut guest = super::native::NativeGuest::new(cookie);
-            guest.cookie = (&mut guest as *mut super::native::NativeGuest).cast();
-            guest.regs.copy_from_slice(&self.state);
-            guest.provenance = self.state_prov;
-            guest.stack_bottom = self.stack_bottom;
-            guest.stack_top = self.stack_top;
-            self.native_fault = None;
-
-            // SAFETY: the JIT page contains valid x86-64 machine code compiled
-            // from audited/lowered Cranelift IR, the page is marked RX, and the
-            // helpers are ordinary C-ABI functions that only touch Runtime.
-            let f: NativeBlockFn = unsafe { std::mem::transmute(jit_page.ptr()) };
-            let steps = unsafe { f(&mut guest, std::ptr::null()) };
-
-            self.active_space = std::ptr::null_mut();
-            self.state.copy_from_slice(&guest.regs);
-            self.state_prov = guest.provenance;
-            let (sb2, st2) = space_guard.memory.stack_bounds_for_sp(self.state[7]);
-            self.stack_bottom = sb2;
-            self.stack_top = st2;
-            (steps, guest.take_fault())
+        let concurrent = !block.compiled.atomic_memory && match options.thread_sync {
+            super::ThreadSync::Block => false,
+            super::ThreadSync::Access => process_arc.live_threads.load(Ordering::Acquire) > 1,
+            super::ThreadSync::Adaptive => process_arc.native_threads.load(Ordering::Acquire) > 1,
         };
+        // Ordinary multi-threaded blocks carry no borrowed guest-memory views.
+        // Each helper checks and accesses under the same mutex. Atomic blocks
+        // and the single-threaded fast path retain the whole-block guard.
+        let mut space_guard = if concurrent {
+            None
+        } else {
+            Some(process_arc.address_space.lock().unwrap())
+        };
+        (self.stack_bottom, self.stack_top) = if let Some(space) = space_guard.as_ref() {
+            space.memory.stack_bounds_for_sp(self.state[7])
+        } else {
+            process_arc.address_space.lock().unwrap().memory.stack_bounds_for_sp(self.state[7])
+        };
+        audit::check_stack(&self.state, self.stack_bottom, self.stack_top, block.compiled.id, ledger)?;
+        let cookie = self as *mut Runtime;
+        let mut guest = super::native::NativeGuest::new(cookie);
+        guest.cookie = (&mut guest as *mut super::native::NativeGuest).cast();
+        guest.regs.copy_from_slice(&self.state);
+        guest.provenance = self.state_prov;
+        guest.stack_bottom = self.stack_bottom;
+        guest.stack_top = self.stack_top;
+        guest.fast_enabled = u64::from(!concurrent);
+        if let Some(space) = space_guard.as_mut() {
+            space.claim_native(self.tid);
+            self.active_space = &mut **space as *mut AddressSpace;
+            self.fast_memory.refresh(&space.memory);
+            guest.fast_pages = self.fast_memory.as_ptr();
+            guest.shadow = space.heap.shadow_ptr();
+            guest.pac_pages = space.pac.slow_pages_ptr();
+            guest.tag_mask = space.heap.scheme().mask();
+            guest.tag_shift = space.heap.scheme().shift as u64;
+            guest.tags_enabled = u64::from(space.heap.tags_enabled());
+            guest.pac_enabled = u64::from(space.pac.enabled());
+        }
+        #[cfg(test)]
+        { guest.fast_enabled &= u64::from(self.inline_memory); }
+        self.native_fault = None;
+
+        // SAFETY: RX code came from audited Cranelift IR. In concurrent mode
+        // FAST_ENABLED is zero, so no inline host pointer can be dereferenced.
+        // Scalar and bulk callbacks lock before checking or accessing memory.
+        // For LOCK/XCHG the guard spans the entire RMW, including fault paths.
+        let f: NativeBlockFn = unsafe { std::mem::transmute(jit_page.ptr()) };
+        #[cfg(test)]
+        if let Some(entry) = &self.native_entry { entry(&process_arc); }
+        let steps = unsafe { f(&mut guest, std::ptr::null()) };
+        self.active_space = std::ptr::null_mut();
+        self.state.copy_from_slice(&guest.regs);
+        self.state_prov = guest.provenance;
+        let fault = guest.take_fault();
+        (self.stack_bottom, self.stack_top) = if let Some(space) = space_guard.as_ref() {
+            space.memory.stack_bounds_for_sp(self.state[7])
+        } else {
+            process_arc.address_space.lock().unwrap().memory.stack_bounds_for_sp(self.state[7])
+        };
+        drop(space_guard);
+        if concurrent {
+            report.native_concurrent_blocks += 1;
+        } else {
+            report.native_serialized_blocks += 1;
+        }
 
         if let Some((kind, pc)) = fault {
             let err = self
@@ -506,9 +605,50 @@ impl Runtime {
         Ok(())
     }
 
+    /// Helpers may mutate the translation table and PAC classification, or
+    /// borrow a guest-memory slice. Re-expose pointers after those Rust borrows
+    /// end, before translated code can inspect any host metadata again.
+    pub(super) fn refresh_native_views(&mut self, guest: &mut super::native::NativeGuest) {
+        // Concurrent callbacks release their guard before returning; never
+        // publish dangling views into a NativeGuest running outside the lock.
+        if self.active_space.is_null() { return; }
+        // SAFETY: the serialized/atomic block still owns address_space.
+        let space = unsafe { &*self.active_space };
+        self.fast_memory.refresh(&space.memory);
+        guest.fast_pages = self.fast_memory.as_ptr();
+        guest.pac_pages = space.pac.slow_pages_ptr();
+        guest.shadow = space.heap.shadow_ptr();
+    }
+
+    /// Keep each check + access + metadata update indivisible with respect to
+    /// free, reuse, unmap, permissions and every other guest memory operation.
+    fn with_native_space<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        if !self.active_space.is_null() { return f(self); }
+        let process = self.process.clone();
+        let mut space = process.address_space.lock().unwrap();
+        space.claim_native(self.tid);
+        self.active_space = &mut *space;
+        struct Reset(*mut *mut AddressSpace);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                // SAFETY: the Runtime remains at this address for this scoped
+                // call. Reset drops before the mutex guard, including unwind.
+                unsafe { *self.0 = std::ptr::null_mut(); }
+            }
+        }
+        let _reset = Reset(&raw mut self.active_space);
+        f(self)
+    }
+
     /// Checked load for native-compiled blocks. Mirrors the interpreter's
     /// load path: tag screen, then PAC verify on code pointers.
     pub fn native_load(&mut self, guest_ptr: u64, size: u64, pc: u64) -> (u64, bool) {
+        self.with_native_space(|rt| rt.native_load_locked(guest_ptr, size, pc))
+    }
+
+    fn native_load_locked(&mut self, guest_ptr: u64, size: u64, pc: u64) -> (u64, bool) {
+        #[cfg(test)]
+        { self.helper_calls.0 += 1; }
         let biased = guest_ptr.wrapping_add(super::memory::GUEST_BIAS);
         assert!(
             !self.active_space.is_null(),
@@ -517,6 +657,7 @@ impl Runtime {
         // SAFETY: active_space points to the MutexGuard<AddressSpace> held by
         // execute_x86_64 on this thread.
         let space = unsafe { &mut *self.active_space };
+        self.fast_memory.fill(&mut space.memory, space.heap.scheme().strip(guest_ptr));
         let mut bus = ProcessBus {
             code: &[],
             memory: &mut space.memory,
@@ -546,7 +687,11 @@ impl Runtime {
 
     /// Checked store for native-compiled blocks. PAC signing runs first so an
     /// unsigned substitution is refused before any byte is written.
-    pub fn native_store(
+    pub fn native_store(&mut self, guest_ptr: u64, size: u64, value: u64, constant_provenance: bool, pc: u64) {
+        self.with_native_space(|rt| rt.native_store_locked(guest_ptr, size, value, constant_provenance, pc));
+    }
+
+    fn native_store_locked(
         &mut self,
         guest_ptr: u64,
         size: u64,
@@ -554,6 +699,8 @@ impl Runtime {
         constant_provenance: bool,
         pc: u64,
     ) {
+        #[cfg(test)]
+        { self.helper_calls.1 += 1; }
         let biased = guest_ptr.wrapping_add(super::memory::GUEST_BIAS);
         assert!(
             !self.active_space.is_null(),
@@ -562,6 +709,7 @@ impl Runtime {
         // SAFETY: active_space points to the MutexGuard<AddressSpace> held by
         // execute_x86_64 on this thread.
         let space = unsafe { &mut *self.active_space };
+        self.fast_memory.fill(&mut space.memory, space.heap.scheme().strip(guest_ptr));
         let mut bus = ProcessBus {
             code: &[],
             memory: &mut space.memory,
@@ -790,6 +938,9 @@ impl Runtime {
         };
         self.state_prov &= !(1u64 << 0);
         if outcome.forked_child {
+            // Host fork retains only its calling thread in the child process.
+            self.process.live_threads.store(1, Ordering::Release);
+            self.process.native_threads.store(0, Ordering::Release);
             self.is_forked_child = true;
             self.tid = unsafe { libc::getpid() as u64 };
             let child_ledger = ledger.fork_child()?;
@@ -859,11 +1010,32 @@ impl Runtime {
             last_progress: Instant::now(),
             native_fault: None,
             active_space: std::ptr::null_mut(),
+            fast_memory: Default::default(),
+            #[cfg(test)]
+            native_entry: None,
+            #[cfg(test)]
+            inline_memory: true,
+            #[cfg(test)]
+            helper_calls: (0, 0),
+            #[cfg(test)]
+            bulk_fast_bytes: 0,
         };
 
+        struct LiveThread(Arc<SharedProcess>);
+        impl Drop for LiveThread {
+            fn drop(&mut self) {
+                // Invalidate views before restoring the single-threaded fast
+                // path. No pointer exposed by the departing thread survives.
+                self.0.address_space.lock().unwrap().memory.invalidate_native_views();
+                self.0.live_threads.fetch_sub(1, Ordering::Release);
+            }
+        }
+        self.process.live_threads.fetch_add(1, Ordering::AcqRel);
+        let live = LiveThread(self.process.clone());
         let handle = std::thread::Builder::new()
             .name(format!("isr-tid-{}", spawn.child_tid))
             .spawn(move || {
+                let _live = live;
                 if let Err(err) = child_runtime.run_child_loop() {
                     let msg = err.to_string();
                     let mut slot = child_runtime.process.thread_error.lock().unwrap();
@@ -940,29 +1112,7 @@ impl Runtime {
                 self.allocator_call(*function, &mut local_report, &mut local_ledger)?;
                 continue;
             }
-            let mut block = {
-                let mut cs = self.process.compile_state.lock().unwrap();
-                if options.hardening.cfi && !cs.cfi_map.allows(rip) {
-                    return Err(memory::error(format!(
-                        "CFI violation: transfer to 0x{rip:x} lands inside a known instruction"
-                    ))
-                    .into());
-                }
-                let space = self.process.address_space.lock().unwrap();
-                let CompileState {
-                    ref mut cache,
-                    ref mut cfi_map,
-                    ref mut report,
-                } = *cs;
-                let cloned = {
-                    let cached =
-                        cache.get_or_compile(&space.memory, rip, report, &mut local_ledger)?;
-                    cfi_map.record_block(&cached.compiled.source_instructions);
-                    cached.clone()
-                };
-                cache.mark_executed(rip);
-                cloned
-            };
+            let mut block = self.dispatch(rip, &mut local_ledger)?;
             self.execute(&mut block, &mut local_report, &options, &mut local_ledger)?;
             if let Some(syscall_rip) = block.compiled.syscall {
                 let outcome =
@@ -976,6 +1126,7 @@ impl Runtime {
                 }
             }
         }
+        local_ledger.event("thread_execution_totals", json!({"tid": self.tid, "counters": local_report}))?;
         Ok(())
     }
 
@@ -1017,9 +1168,11 @@ impl Runtime {
                      "live_bytes": heap.live_bytes, "quarantined": heap.quarantined,
                      "placement_draws": heap.placement_draws},
             "mpk": {"available": self.process.domain.available(), "reason": self.process.domain.reason()},
+            "thread_sync": self.process.options.thread_sync,
+            "memory_order": "serialized checked accesses; LOCK and memory XCHG hold a block-wide guard",
             "mitigation_path": "process_bus",
-            "native_execution_path": true,
-            "native_note": "native blocks call checked load/store helpers (tags + PAC); syscalls are served by the runtime at block boundaries, never as host syscalls"
+            "native_execution_path": self.process.options.backend == Backend::X86_64,
+            "native_note": "single-threaded and atomic blocks can inline mapping/tag checks under a block guard; concurrent ordinary blocks use checked memory helpers under per-access guards; bulk spans, PAC/provenance and mediated syscalls retain their checks"
         })
     }
 }

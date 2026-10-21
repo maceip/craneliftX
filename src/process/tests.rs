@@ -15,6 +15,8 @@ use std::{
     collections::BTreeMap,
     time::{Duration, Instant},
 };
+#[path = "performance_tests.rs"]
+mod performance;
 
 fn execute(
     code: &[u8],

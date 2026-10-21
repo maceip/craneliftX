@@ -59,6 +59,9 @@ struct GuestConfig {
 struct ExecutionConfig {
     #[serde(default = "default_backend")]
     backend: String,
+    /// Native thread synchronization policy; omitted uses the runtime default.
+    #[serde(default)]
+    thread_sync: Option<process::ThreadSync>,
     #[serde(default = "default_max_seconds")]
     max_seconds: u64,
     #[serde(default = "default_max_rv64_steps")]
@@ -259,6 +262,7 @@ fn run_guest(config: &Config, _shutdown: Arc<AtomicBool>) -> Result<(), Box<dyn 
             lam: config.hardening.lam,
         },
         backend,
+        thread_sync: config.execution.thread_sync.unwrap_or(Options::default().thread_sync),
         args: Vec::new(),
         env: Vec::new(),
     };

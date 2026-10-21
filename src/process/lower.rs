@@ -21,6 +21,8 @@ use cranelift_codegen::{
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use iced_x86::{Code, Instruction, Mnemonic, OpKind, Register};
+#[path = "inline_memory.rs"]
+mod inline_memory;
 
 /// Which backend the lowered block will be compiled for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -666,8 +668,7 @@ impl Lower<'_> {
     }
 
     /// Load through the runtime's checked helper so tags and PAC apply.
-    fn native_load(&mut self, p: Value, w: u16) -> Result<Value, EngineError> {
-        self.bounds_check(p, w);
+    fn native_load_slow(&mut self, p: Value, w: u16) -> Result<Value, EngineError> {
         let load_sig = self.load_sig.expect("x86_64 load signature");
         let cookie = self.b.ins().load(
             types::I64,
@@ -702,8 +703,7 @@ impl Lower<'_> {
 
     /// Store through the runtime's checked helper so tags and PAC apply.
     /// `constant_v` marks immediate/lea/trusted-table provenance for PAC signing.
-    fn native_store(&mut self, p: Value, w: u16, v: Value, constant_v: Value) {
-        self.bounds_check(p, w);
+    fn native_store_slow(&mut self, p: Value, w: u16, v: Value, constant_v: Value) {
         let store_sig = self.store_sig.expect("x86_64 store signature");
         let cookie = self.b.ins().load(
             types::I64,
@@ -1135,7 +1135,10 @@ pub fn lower_block(
         l.set(16, next);
         if matches!(
             i.mnemonic(),
-            Nop | Endbr64 | Endbr32 | Rdsspq | Rdsspd | Incsspq | Incsspd
+            // Every guest memory operation is ordered by the address-space
+            // mutex (either per access or per atomic block). This is stronger
+            // than x86 TSO, so these fences need no additional host operation.
+            Nop | Endbr64 | Endbr32 | Rdsspq | Rdsspd | Incsspq | Incsspd | Mfence | Lfence | Sfence
         ) {
             continue;
         }
@@ -1798,6 +1801,10 @@ pub fn lower_block(
                 let val = l.mask(rax_val, w);
 
                 if i.has_rep_prefix() {
+                    if backend == Backend::X86_64 {
+                        l.native_rep(false, w, val);
+                        continue;
+                    }
                     let rcx_var = l.div.variable(2) as usize;
                     let header = l.b.create_block();
                     let body = l.b.create_block();
@@ -1878,6 +1885,11 @@ pub fn lower_block(
                 let rsi_var = l.div.variable(4) as usize;
 
                 if i.has_rep_prefix() {
+                    if backend == Backend::X86_64 {
+                        let source = l.var(rsi_var);
+                        l.native_rep(true, w, source);
+                        continue;
+                    }
                     let rcx_var = l.div.variable(2) as usize;
                     let header = l.b.create_block();
                     let body = l.b.create_block();

@@ -1,11 +1,11 @@
-name: Heap Workshop Pages
+name: Lockstep Pages
 
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "benchmark_results.json", ".github/workflows/pages.yml"]
   pull_request:
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "benchmark_results.json", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: workshop-browser-evidence
+          name: lockstep-browser-evidence
           path: |
             site/test-results
             site/playwright-report

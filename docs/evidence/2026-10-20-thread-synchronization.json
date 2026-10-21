@@ -1,0 +1,562 @@
+{
+  "host": {
+    "system": "Linux",
+    "node": "vectorheart",
+    "release": "6.8.0-142-generic",
+    "version": "#142-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:24:27 UTC 2026",
+    "machine": "x86_64",
+    "processor": "x86_64"
+  },
+  "duration_seconds": 20,
+  "concurrency": 8,
+  "warmup_requests": 100,
+  "reconnect_every": 16,
+  "payload_bytes": 262144,
+  "runners": {
+    "before": {
+      "path": "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process-before",
+      "sha256": "e063056ff7edabd7266c3e3b53a1b684c2d0a9416f532da4557a53c79353294b"
+    },
+    "adaptive": {
+      "path": "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+      "sha256": "66d4adba7454705a1d915c2fd66dfc0f86fe02bb2b89a86e3e30ecd563b6dc06"
+    },
+    "block": {
+      "path": "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+      "sha256": "66d4adba7454705a1d915c2fd66dfc0f86fe02bb2b89a86e3e30ecd563b6dc06"
+    }
+  },
+  "date": "2026-10-20",
+  "comparison": "Previous optimized runner versus adaptive synchronization; all mitigations enabled.",
+  "caveat": "Two 20-second trials per runner/libc, alternating order. Baseline glibc varied from 151 to 176 req/s. Descriptive results do not establish a statistically significant throughput gain or general multicore scaling.",
+  "validation": {
+    "linux_tests_passed": 120,
+    "local_tests_passed": 117,
+    "browser_tests_passed": 10,
+    "source_files_matched": 84,
+    "nginx_verified_measured_responses": 26714,
+    "nginx_failed_responses": 0
+  },
+  "summary": [
+    {
+      "libc": "glibc",
+      "before_rps": [
+        175.95737367017756,
+        151.05465678455894
+      ],
+      "adaptive_rps": [
+        171.3352473949111,
+        173.2836581707471
+      ],
+      "before_mean_rps": 163.50601522736827,
+      "adaptive_mean_rps": 172.3094527828291,
+      "before_mean_startup_seconds": 34.834,
+      "adaptive_mean_startup_seconds": 34.692499999999995,
+      "before_mean_peak_rss_mb": 418.92,
+      "adaptive_mean_peak_rss_mb": 417.67
+    },
+    {
+      "libc": "musl",
+      "before_rps": [
+        162.7893866198596,
+        165.64780439033896
+      ],
+      "adaptive_rps": [
+        165.10160676212013,
+        167.47960498621484
+      ],
+      "before_mean_rps": 164.2185955050993,
+      "adaptive_mean_rps": 166.29060587416748,
+      "before_mean_startup_seconds": 25.094,
+      "adaptive_mean_startup_seconds": 25.262,
+      "before_mean_peak_rss_mb": 299.15999999999997,
+      "adaptive_mean_peak_rss_mb": 300.78
+    }
+  ],
+  "results": [
+    {
+      "config": "00-glibc-before",
+      "short_label": "00-glibc-before",
+      "libc": "glibc",
+      "mode": "lockstep",
+      "hardening": "full",
+      "duration_seconds": 20.028,
+      "startup_seconds": 34.783,
+      "warmup_seconds": 1.756,
+      "verified_responses": 3524,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "390954",
+        "390957"
+      ],
+      "rps": 175.95737367017756,
+      "latency_ms": {
+        "mean": 45.42374069873554,
+        "median": 42.33841388486326,
+        "p95": 66.87925988808274,
+        "p99": 114.588662981987
+      },
+      "memory_mb": {
+        "base_rss": 410.62,
+        "peak_rss": 418.05,
+        "peak_growth": 7.43
+      },
+      "cpu_pct": {
+        "mean": 274.2,
+        "peak": 332.9
+      },
+      "variant": "before",
+      "binary_sha256": "b38e49e6db17e740c32d876f714c2e9abbeb4634e1672d733f86b2dd7eb84970",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 0
+    },
+    {
+      "config": "01-glibc-adaptive",
+      "short_label": "01-glibc-adaptive",
+      "libc": "glibc",
+      "mode": "lockstep",
+      "hardening": "--thread-sync adaptive",
+      "duration_seconds": 20.031,
+      "startup_seconds": 34.78,
+      "warmup_seconds": 1.663,
+      "verified_responses": 3432,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "392573",
+        "392575"
+      ],
+      "rps": 171.3352473949111,
+      "latency_ms": {
+        "mean": 46.64008268999101,
+        "median": 43.982467032037675,
+        "p95": 75.33646002411842,
+        "p99": 107.69624402746558
+      },
+      "memory_mb": {
+        "base_rss": 405.7,
+        "peak_rss": 417.85,
+        "peak_growth": 12.14
+      },
+      "cpu_pct": {
+        "mean": 270.8,
+        "peak": 330.1
+      },
+      "variant": "adaptive",
+      "binary_sha256": "b38e49e6db17e740c32d876f714c2e9abbeb4634e1672d733f86b2dd7eb84970",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 1345022
+    },
+    {
+      "config": "02-musl-adaptive",
+      "short_label": "02-musl-adaptive",
+      "libc": "musl",
+      "mode": "lockstep",
+      "hardening": "--thread-sync adaptive",
+      "duration_seconds": 20.03,
+      "startup_seconds": 25.036,
+      "warmup_seconds": 7.195,
+      "verified_responses": 3307,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "393725",
+        "393727"
+      ],
+      "rps": 165.10160676212013,
+      "latency_ms": {
+        "mean": 48.41200078958389,
+        "median": 46.407292829826474,
+        "p95": 81.6034129820764,
+        "p99": 121.01561506278813
+      },
+      "memory_mb": {
+        "base_rss": 289.85,
+        "peak_rss": 300.46,
+        "peak_growth": 10.61
+      },
+      "cpu_pct": {
+        "mean": 266.0,
+        "peak": 357.0
+      },
+      "variant": "adaptive",
+      "binary_sha256": "3735df83218f46e77edfa769b630ed8a66801eed81533dce9a4213e0c2bc54b9",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 1190938
+    },
+    {
+      "config": "03-musl-before",
+      "short_label": "03-musl-before",
+      "libc": "musl",
+      "mode": "lockstep",
+      "hardening": "full",
+      "duration_seconds": 20.032,
+      "startup_seconds": 24.921,
+      "warmup_seconds": 7.245,
+      "verified_responses": 3261,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "394956",
+        "394957"
+      ],
+      "rps": 162.7893866198596,
+      "latency_ms": {
+        "mean": 49.08716040195047,
+        "median": 47.04692307859659,
+        "p95": 79.57994798198342,
+        "p99": 122.46577185578644
+      },
+      "memory_mb": {
+        "base_rss": 288.72,
+        "peak_rss": 298.15,
+        "peak_growth": 9.43
+      },
+      "cpu_pct": {
+        "mean": 266.7,
+        "peak": 321.2
+      },
+      "variant": "before",
+      "binary_sha256": "3735df83218f46e77edfa769b630ed8a66801eed81533dce9a4213e0c2bc54b9",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 0
+    },
+    {
+      "config": "04-glibc-adaptive",
+      "short_label": "04-glibc-adaptive",
+      "libc": "glibc",
+      "mode": "lockstep",
+      "hardening": "--thread-sync adaptive",
+      "duration_seconds": 20.037,
+      "startup_seconds": 34.605,
+      "warmup_seconds": 1.749,
+      "verified_responses": 3472,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "396135",
+        "396143"
+      ],
+      "rps": 173.2836581707471,
+      "latency_ms": {
+        "mean": 46.11040484746285,
+        "median": 43.284885003231466,
+        "p95": 74.39568708650768,
+        "p99": 103.31029305234551
+      },
+      "memory_mb": {
+        "base_rss": 405.93,
+        "peak_rss": 417.49,
+        "peak_growth": 11.55
+      },
+      "cpu_pct": {
+        "mean": 272.1,
+        "peak": 321.6
+      },
+      "variant": "adaptive",
+      "binary_sha256": "b38e49e6db17e740c32d876f714c2e9abbeb4634e1672d733f86b2dd7eb84970",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 1358477
+    },
+    {
+      "config": "05-glibc-before",
+      "short_label": "05-glibc-before",
+      "libc": "glibc",
+      "mode": "lockstep",
+      "hardening": "full",
+      "duration_seconds": 20.165,
+      "startup_seconds": 34.885,
+      "warmup_seconds": 1.792,
+      "verified_responses": 3046,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "397487",
+        "397499"
+      ],
+      "rps": 151.05465678455894,
+      "latency_ms": {
+        "mean": 52.82915224715913,
+        "median": 45.99768458865583,
+        "p95": 98.13492209650576,
+        "p99": 192.34353699721396
+      },
+      "memory_mb": {
+        "base_rss": 410.49,
+        "peak_rss": 419.79,
+        "peak_growth": 9.3
+      },
+      "cpu_pct": {
+        "mean": 246.0,
+        "peak": 331.4
+      },
+      "variant": "before",
+      "binary_sha256": "b38e49e6db17e740c32d876f714c2e9abbeb4634e1672d733f86b2dd7eb84970",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 0
+    },
+    {
+      "config": "06-musl-before",
+      "short_label": "06-musl-before",
+      "libc": "musl",
+      "mode": "lockstep",
+      "hardening": "full",
+      "duration_seconds": 20.03,
+      "startup_seconds": 25.267,
+      "warmup_seconds": 7.257,
+      "verified_responses": 3318,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "398930",
+        "398931"
+      ],
+      "rps": 165.64780439033896,
+      "latency_ms": {
+        "mean": 48.25688557829281,
+        "median": 45.79678154550493,
+        "p95": 70.35061484202743,
+        "p99": 112.64364095404744
+      },
+      "memory_mb": {
+        "base_rss": 287.6,
+        "peak_rss": 300.17,
+        "peak_growth": 12.57
+      },
+      "cpu_pct": {
+        "mean": 267.9,
+        "peak": 330.3
+      },
+      "variant": "before",
+      "binary_sha256": "3735df83218f46e77edfa769b630ed8a66801eed81533dce9a4213e0c2bc54b9",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 0
+    },
+    {
+      "config": "07-musl-adaptive",
+      "short_label": "07-musl-adaptive",
+      "libc": "musl",
+      "mode": "lockstep",
+      "hardening": "--thread-sync adaptive",
+      "duration_seconds": 20.026,
+      "startup_seconds": 25.488,
+      "warmup_seconds": 7.22,
+      "verified_responses": 3354,
+      "failed_responses": 0,
+      "warmup_requests": 100,
+      "reconnect_every": 16,
+      "payload_bytes": 262144,
+      "workers_observed": [
+        "400144",
+        "400157"
+      ],
+      "rps": 167.47960498621484,
+      "latency_ms": {
+        "mean": 47.724998307002835,
+        "median": 44.736612937413156,
+        "p95": 78.56867997907102,
+        "p99": 111.09312996268272
+      },
+      "memory_mb": {
+        "base_rss": 289.68,
+        "peak_rss": 301.1,
+        "peak_growth": 11.42
+      },
+      "cpu_pct": {
+        "mean": 267.3,
+        "peak": 336.4
+      },
+      "variant": "adaptive",
+      "binary_sha256": "3735df83218f46e77edfa769b630ed8a66801eed81533dce9a4213e0c2bc54b9",
+      "guest_thread_starts": 8,
+      "observed_concurrent_blocks": 1299177
+    }
+  ],
+  "pthread": {
+    "runner_sha256": "66d4adba7454705a1d915c2fd66dfc0f86fe02bb2b89a86e3e30ecd563b6dc06",
+    "results": [
+      {
+        "compiler": "gcc",
+        "mode": "native",
+        "seconds": 0.0012649730779230595,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 0,
+        "concurrent_blocks": 0,
+        "passed": true,
+        "command": [
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc"
+        ],
+        "binary_sha256": "2063a06d5be49cd962c7443ed16e254443eeb301f56a8ac0437950468d3e2431"
+      },
+      {
+        "compiler": "gcc",
+        "mode": "block",
+        "seconds": 6.38293016818352,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 4,
+        "concurrent_blocks": 0,
+        "passed": true,
+        "command": [
+          "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc",
+          "--thread-sync",
+          "block",
+          "--max-seconds",
+          "180",
+          "--max-rv64-steps",
+          "2000000000",
+          "--ledger-dir",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc-block"
+        ],
+        "binary_sha256": "2063a06d5be49cd962c7443ed16e254443eeb301f56a8ac0437950468d3e2431"
+      },
+      {
+        "compiler": "gcc",
+        "mode": "access",
+        "seconds": 6.306066229939461,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 4,
+        "concurrent_blocks": 198816,
+        "passed": true,
+        "command": [
+          "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc",
+          "--thread-sync",
+          "access",
+          "--max-seconds",
+          "180",
+          "--max-rv64-steps",
+          "2000000000",
+          "--ledger-dir",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc-access"
+        ],
+        "binary_sha256": "2063a06d5be49cd962c7443ed16e254443eeb301f56a8ac0437950468d3e2431"
+      },
+      {
+        "compiler": "gcc",
+        "mode": "adaptive",
+        "seconds": 6.303052430972457,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 4,
+        "concurrent_blocks": 82468,
+        "passed": true,
+        "command": [
+          "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc",
+          "--thread-sync",
+          "adaptive",
+          "--max-seconds",
+          "180",
+          "--max-rv64-steps",
+          "2000000000",
+          "--ledger-dir",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/gcc-adaptive"
+        ],
+        "binary_sha256": "2063a06d5be49cd962c7443ed16e254443eeb301f56a8ac0437950468d3e2431"
+      },
+      {
+        "compiler": "musl-gcc",
+        "mode": "native",
+        "seconds": 0.026495940051972866,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 0,
+        "concurrent_blocks": 0,
+        "passed": true,
+        "command": [
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc"
+        ],
+        "binary_sha256": "f78afe971b006fbaede24ef5e8a375edbc9aa597280dd7e64a29f600e19cf91a"
+      },
+      {
+        "compiler": "musl-gcc",
+        "mode": "block",
+        "seconds": 2.430355003103614,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 4,
+        "concurrent_blocks": 0,
+        "passed": true,
+        "command": [
+          "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc",
+          "--thread-sync",
+          "block",
+          "--max-seconds",
+          "180",
+          "--max-rv64-steps",
+          "2000000000",
+          "--ledger-dir",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc-block"
+        ],
+        "binary_sha256": "f78afe971b006fbaede24ef5e8a375edbc9aa597280dd7e64a29f600e19cf91a"
+      },
+      {
+        "compiler": "musl-gcc",
+        "mode": "access",
+        "seconds": 2.418880143901333,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 4,
+        "concurrent_blocks": 250558,
+        "passed": true,
+        "command": [
+          "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc",
+          "--thread-sync",
+          "access",
+          "--max-seconds",
+          "180",
+          "--max-rv64-steps",
+          "2000000000",
+          "--ledger-dir",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc-access"
+        ],
+        "binary_sha256": "f78afe971b006fbaede24ef5e8a375edbc9aa597280dd7e64a29f600e19cf91a"
+      },
+      {
+        "compiler": "musl-gcc",
+        "mode": "adaptive",
+        "seconds": 2.3758568570483476,
+        "returncode": 0,
+        "stdout": "THREAD_SYNC_OK atomic=1600 cas=1600 mutex=4000 exchange=4000 tls=4 joins=4",
+        "thread_starts": 4,
+        "concurrent_blocks": 186745,
+        "passed": true,
+        "command": [
+          "/home/devuser/lockstep-sync-20261020.J6laEP/isr-process",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc",
+          "--thread-sync",
+          "adaptive",
+          "--max-seconds",
+          "180",
+          "--max-rv64-steps",
+          "2000000000",
+          "--ledger-dir",
+          "/dev/shm/lockstep-thread-sync-final2-J6laEP/musl-gcc-adaptive"
+        ],
+        "binary_sha256": "f78afe971b006fbaede24ef5e8a375edbc9aa597280dd7e64a29f600e19cf91a"
+      }
+    ]
+  },
+  "mitigation_regression_passed": true
+}

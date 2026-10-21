@@ -155,6 +155,21 @@ impl Heap {
     pub fn tags_enabled(&self) -> bool {
         self.tags_enabled
     }
+    /// Stable for the heap lifetime; native access is pinned by address_space.
+    pub fn shadow_ptr(&self) -> *const u8 { self.shadow.as_ptr() }
+    /// Side-effect-free proof for a bulk fast path. On failure the caller must
+    /// execute the scalar path, retaining the valid prefix and precise fault.
+    pub fn span_is_valid(&self, address: u64, size: u64) -> bool {
+        let base = self.scheme.strip(address);
+        let tag = self.scheme.tag_of(address);
+        if !self.tags_enabled { return true; }
+        if !self.contains(base) { return tag == 0; }
+        let Some(end) = base.checked_add(size) else { return false; };
+        if size == 0 || end > HEAP_BASE + HEAP_SIZE { return false; }
+        let first = ((base - HEAP_BASE) / GRANULE) as usize;
+        let last = ((end - 1 - HEAP_BASE) / GRANULE) as usize;
+        self.shadow[first..=last].iter().all(|&value| u64::from(value) == tag)
+    }
     /// Requested size of the chunk at a bare address, if it is live.
     pub fn live_size(&self, address: u64) -> Option<u64> {
         self.live.get(&address).map(|c| c.size)
