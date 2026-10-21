@@ -1,4 +1,4 @@
-<img src="docs/assets/lockstep-banner.png" alt="Lockstep logo with an abstract heap memory grid" width="420" height="102">
+<img src="docs/assets/lockstep-banner.png" alt="Lockstep logo with an abstract heap memory grid" width="802" height="174">
 
 # LOCKSTEP
 **Checked execution for Linux x86-64 services.**
