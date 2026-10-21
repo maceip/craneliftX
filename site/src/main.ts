@@ -21,16 +21,17 @@ narrative.innerHTML = chapters
       '" aria-labelledby="heading-' +
       c.id +
       '">' +
+      '<div class="chapter-heading"><div class="chapter-meta"><p class="chapter-kicker">' +
+      c.kicker +
+      "</p>" +
       (i === 6
         ? '<span class="chapter-part">PART TWO / THE DEFENSES</span>'
         : "") +
-      '<p class="chapter-kicker">' +
-      c.kicker +
-      '</p><h2 id="heading-' +
+      '</div><h2 id="heading-' +
       c.id +
       '">' +
       c.title +
-      "</h2>" +
+      "</h2></div>" +
       '<div class="terminal actor-' +
       c.actor +
       '"><div class="terminal-bar"><span class="terminal-role">' +
@@ -47,16 +48,16 @@ narrative.innerHTML = chapters
       '</span></div><pre class="terminal-output">' +
       escape(c.output.join("\n")) +
       "</pre></div>" +
-      '<div class="terminal-footer"><span>' +
+      '<div class="terminal-footer"><span class="sr-only">' +
       (c.part === "exploit" ? "UNPROTECTED MODEL" : "LOCKSTEP MODEL") +
-      "</span><span>" +
-      String(i).padStart(2, "0") +
-      " / 13</span></div></div>" +
-      '<div class="chapter-measure"><span>' +
+      '</span><span class="terminal-metric"><span>' +
       c.metric +
       "</span><strong>" +
       escape(c.value) +
-      '</strong></div><p class="chapter-description">' +
+      "</strong></span><span>" +
+      String(i).padStart(2, "0") +
+      " / 13</span></div></div>" +
+      '<p class="chapter-description">' +
       c.description +
       "</p>" +
       "<details><summary>Scope & implementation</summary><p>" +
@@ -118,22 +119,21 @@ const labels: Record<View, [string, string, string]> = {
 function annotate(p: Projection) {
   projection = p;
   const {
-      buffer: [x, y],
-      target: [tx, ty],
-      width: w,
-      height: h,
-    } = p;
+    buffer: [x, y],
+    target: [tx, ty],
+    width: w,
+    height: h,
+  } = p;
   const bufferLabel = el("buffer-label"),
     targetLabel = el("target-label");
   const labelX = (label: HTMLElement, desired: number) =>
     Math.max(4, Math.min(desired, w - label.offsetWidth - 4));
-  const bufferY = chapters[index]?.id === "diversify"
-    ? y + 18
-    : Math.max(4, y - bufferLabel.offsetHeight - 18);
-  bufferLabel.style.transform =
-    `translate(${labelX(bufferLabel, x - 14)}px,${bufferY}px)`;
-  targetLabel.style.transform =
-    `translate(${labelX(targetLabel, tx - 6)}px,${Math.min(ty + 24, h - targetLabel.offsetHeight - 40)}px)`;
+  const bufferY =
+    chapters[index]?.id === "diversify"
+      ? y + 18
+      : Math.max(4, y - bufferLabel.offsetHeight - 18);
+  bufferLabel.style.transform = `translate(${labelX(bufferLabel, x - 14)}px,${bufferY}px)`;
+  targetLabel.style.transform = `translate(${labelX(targetLabel, tx - 6)}px,${Math.min(ty + 24, h - targetLabel.offsetHeight - 40)}px)`;
   const diagramBox = diagram.getBoundingClientRect();
   const stackPointer = document
     .querySelector<HTMLElement>(".stack-pointer")!

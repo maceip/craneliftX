@@ -54,9 +54,15 @@
           class="memory-stage"
           aria-label="Synchronized memory illustration"
         >
-          <div class="stage-top">
-            <span><i class="signal"></i> MEMORY VIEW</span
-            ><span id="execution-mode">UNPROTECTED SERVICE</span>
+          <div class="memory-heading" aria-live="polite" aria-atomic="true">
+            <div class="stage-top">
+              <span><i class="signal"></i> MEMORY VIEW</span
+              ><span id="execution-mode">UNPROTECTED SERVICE</span>
+            </div>
+            <div class="caption-heading">
+              <h2 id="scene-title">Two allocations. Two owners.</h2>
+              <span id="scene-count">00 / 13</span>
+            </div>
           </div>
           <div class="diagram" id="diagram" data-scene="service">
             <div class="address-label">
@@ -117,10 +123,6 @@
             </div>
           </div>
           <div class="scene-caption" aria-live="polite" aria-atomic="true">
-            <div class="caption-heading">
-              <h2 id="scene-title">Two allocations. Two owners.</h2>
-              <span id="scene-count">00 / 13</span>
-            </div>
             <p id="scene-detail"></p>
           </div>
           <div class="stage-bottom">
