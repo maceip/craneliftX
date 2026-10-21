@@ -122,24 +122,32 @@ function annotate(p: Projection) {
       target: [tx, ty],
       width: w,
       height: h,
-    } = p,
-    mobile = innerWidth <= 760;
-  el("buffer-label").style.transform =
-    "translate(" + Math.max(50, x - 14) + "px," + (y - 6) + "px)";
-  el("target-label").style.transform =
-    "translate(" +
-    Math.min(tx - 6, w - (mobile ? 140 : 180)) +
-    "px," +
-    (ty + 9) +
-    "px)";
+    } = p;
+  const bufferLabel = el("buffer-label"),
+    targetLabel = el("target-label");
+  const labelX = (label: HTMLElement, desired: number) =>
+    Math.max(4, Math.min(desired, w - label.offsetWidth - 4));
+  const bufferY = chapters[index]?.id === "diversify"
+    ? y + 18
+    : Math.max(4, y - bufferLabel.offsetHeight - 18);
+  bufferLabel.style.transform =
+    `translate(${labelX(bufferLabel, x - 14)}px,${bufferY}px)`;
+  targetLabel.style.transform =
+    `translate(${labelX(targetLabel, tx - 6)}px,${Math.min(ty + 24, h - targetLabel.offsetHeight - 40)}px)`;
+  const diagramBox = diagram.getBoundingClientRect();
+  const stackPointer = document
+    .querySelector<HTMLElement>(".stack-pointer")!
+    .getBoundingClientRect();
+  const codeTarget = el("code-target").getBoundingClientRect();
+  const useY = Math.min(ty - 18, codeTarget.bottom - diagramBox.top + 12);
   document
     .getElementById("stack-route")!
     .setAttribute(
       "d",
       "M " +
-        (mobile ? 41 : 64) +
+        (stackPointer.right - diagramBox.left) +
         " " +
-        (h * (mobile ? 0.29 : 0.39) + (mobile ? 78 : 125)) +
+        (stackPointer.top + stackPointer.height / 2 - diagramBox.top) +
         " H " +
         (x - 26) +
         " V " +
@@ -156,15 +164,15 @@ function annotate(p: Projection) {
         " " +
         (ty - 7) +
         " V " +
-        h * 0.3 +
+        (useY + 12) +
         " Q " +
         tx +
         " " +
-        h * 0.27 +
+        useY +
         " " +
         (tx + 12) +
         " " +
-        h * 0.27 +
+        useY +
         " H " +
         w * 0.86,
     );
@@ -370,8 +378,8 @@ let observer: IntersectionObserver;
 function observeChapters() {
   observer?.disconnect();
   const mobile = innerWidth <= 760,
-    header = mobile ? 68 : 96,
-    stageHeight = mobile ? (innerHeight <= 740 ? 290 : 350) : 0;
+    header = document.querySelector<HTMLElement>(".site-header")!.offsetHeight,
+    stageHeight = mobile ? stage.offsetHeight : 0;
   const top = Math.min(
     innerHeight - 20,
     header + stageHeight + (mobile ? 50 : innerHeight * 0.23),

@@ -125,13 +125,13 @@ summary:focus-visible {
   right: 3.4vw;
 }
 .page-intro {
-  padding: 57px 5vw 40px;
+  padding: 57px 3vw 40px;
   display: grid;
-  grid-template-columns: 45% 55%;
+  grid-template-columns: 48% 52%;
   align-items: end;
 }
 .page-intro h1 {
-  font-size: clamp(22px, 2.2vw, 34px);
+  font-size: clamp(2rem, 2.8vw, 2.75rem);
   font-weight: 400;
   line-height: 1.22;
   letter-spacing: -0.045em;
@@ -141,22 +141,22 @@ summary:focus-visible {
   color: #99a4a4;
 }
 .page-intro p {
-  font: 12px/1.8 var(--mono);
+  font: 1rem/1.7 var(--mono);
   color: var(--muted);
   margin: 0;
-  padding-left: 5vw;
+  padding-left: 2.5vw;
 }
 .story-grid {
   display: grid;
-  grid-template-columns: 45% 55%;
-  padding: 0 5vw;
+  grid-template-columns: 48% 52%;
+  padding: 0 3vw;
   position: relative;
   gap: 0;
 }
 .narrative {
   grid-column: 1;
   grid-row: 1;
-  padding-right: 4vw;
+  padding-right: 2.5vw;
   min-width: 0;
 }
 .chapter {
@@ -174,30 +174,30 @@ summary:focus-visible {
   min-height: 90svh;
 }
 .chapter-kicker {
-  font: 11px var(--mono);
+  font: 0.875rem var(--mono);
   letter-spacing: 0.09em;
   color: var(--muted);
   margin: 0 0 16px;
 }
 .chapter h2 {
-  font-size: clamp(24px, 2.25vw, 34px);
+  font-size: clamp(2rem, 2.8vw, 2.75rem);
   font-weight: 400;
   letter-spacing: -0.045em;
   line-height: 1.15;
   margin: 0 0 20px;
-  max-width: 450px;
+  max-width: 600px;
 }
 .chapter-description {
-  font-size: 15px;
+  font-size: 1.25rem;
   line-height: 1.65;
   color: #abb4b5;
-  max-width: 430px;
+  max-width: 600px;
   margin: 24px 0 22px;
 }
 .chapter-part {
   display: inline-block;
   color: var(--green);
-  font: 10px var(--mono);
+  font: 0.8125rem var(--mono);
   letter-spacing: 0.1em;
   border-top: 1px solid #426052;
   padding-top: 15px;
@@ -212,13 +212,13 @@ summary:focus-visible {
   box-shadow: 0 20px 70px #00000018;
 }
 .terminal-bar {
-  height: 47px;
+  height: 56px;
   padding: 0 19px;
   display: flex;
   align-items: center;
   border-bottom: 1px solid #33383a;
   gap: 20px;
-  font: 10px var(--mono);
+  font: 0.8125rem var(--mono);
   letter-spacing: 0.08em;
   color: #abb2b3;
 }
@@ -233,7 +233,7 @@ summary:focus-visible {
   color: #ff8975;
 }
 .terminal-session {
-  font-size: 10px;
+  font-size: 0.75rem;
   color: #99a3a4;
 }
 .terminal-window {
@@ -251,15 +251,15 @@ summary:focus-visible {
   width: 42px;
 }
 .terminal-body {
-  padding: 30px 21px 25px;
-  min-height: 256px;
-  font: 13px/1.9 var(--mono);
+  padding: 32px 24px;
+  min-height: 340px;
+  font: clamp(1.125rem, 1.4vw, 1.5rem)/1.75 var(--mono);
   color: #b7c0bf;
   overflow-wrap: anywhere;
 }
 .terminal-prompt {
   color: #8e999a;
-  font-size: 11px;
+  font-size: 0.9375rem;
   margin-bottom: 12px;
 }
 .terminal-command {
@@ -279,8 +279,8 @@ summary:focus-visible {
 }
 .cursor {
   display: inline-block;
-  width: 7px;
-  height: 15px;
+  width: 0.5em;
+  height: 1.1em;
   vertical-align: -2px;
   background: #bdc7c4;
   margin-left: 4px;
@@ -301,29 +301,30 @@ summary:focus-visible {
   display: flex;
   justify-content: space-between;
   color: #95a0a0;
-  font: 9px var(--mono);
+  font: 0.75rem var(--mono);
   letter-spacing: 0.04em;
 }
 .chapter-measure {
   display: flex;
   gap: 12px;
   align-items: baseline;
-  font: 10px var(--mono);
+  flex-wrap: wrap;
+  font: 0.875rem var(--mono);
   color: #a0aaaa;
   margin-top: 20px;
 }
 .chapter-measure strong {
-  font: 12px var(--mono);
+  font: 1rem var(--mono);
   color: #d8e1dc;
 }
 .chapter details {
-  max-width: 430px;
-  font: 12px/1.7 var(--mono);
+  max-width: 600px;
+  font: 0.9375rem/1.7 var(--mono);
   color: #99a5a4;
 }
 .chapter summary {
   cursor: pointer;
-  font-size: 10px;
+  font-size: 0.875rem;
   color: #aab4b3;
   list-style: none;
   display: inline-block;
@@ -341,12 +342,12 @@ summary:focus-visible {
 .chapter details a {
   border-bottom: 1px solid #687774;
   padding-bottom: 3px;
-  font-size: 10px;
+  font-size: 0.8125rem;
   color: #c8d6cf;
 }
 .scroll-cue {
   margin-top: 36px;
-  font: 10px var(--mono);
+  font: 0.8125rem var(--mono);
   letter-spacing: 0.08em;
   color: #a5afaf;
 }
@@ -357,9 +358,9 @@ summary:focus-visible {
   position: sticky;
   top: calc(var(--header) + 24px);
   height: calc(100svh - var(--header) - 42px);
-  max-height: 860px;
+  max-height: 960px;
   min-height: 590px;
-  padding-left: 3vw;
+  padding-left: 2.5vw;
   display: flex;
   flex-direction: column;
   z-index: 3;
@@ -369,7 +370,7 @@ summary:focus-visible {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font: 9px var(--mono);
+  font: 0.8125rem var(--mono);
   letter-spacing: 0.09em;
   color: #b8c1c1;
   padding: 0 0 18px;
@@ -431,7 +432,7 @@ summary:focus-visible {
   position: absolute;
   top: 15px;
   right: 0;
-  font: 8px var(--mono);
+  font: 0.75rem var(--mono);
   letter-spacing: 0.08em;
   color: #a0afac;
 }
@@ -439,13 +440,13 @@ summary:focus-visible {
   margin-left: 20px;
 }
 .structure-name {
-  font: 10px var(--mono);
+  font: 1rem var(--mono);
   letter-spacing: 0.16em;
   color: #b9c6c0;
 }
 .heap-name {
   position: absolute;
-  right: 36%;
+  right: 4%;
   bottom: 10%;
   transform: rotate(-9deg);
 }
@@ -453,7 +454,7 @@ summary:focus-visible {
   position: absolute;
   left: 0;
   top: 39%;
-  width: 64px;
+  width: 100px;
   z-index: 1;
   transform: skewY(-8deg);
 }
@@ -470,17 +471,17 @@ summary:focus-visible {
   margin-bottom: 3px;
 }
 .stack .stack-pointer {
-  height: 21px;
+  height: 30px;
   background: #9ad6b8;
   display: flex;
   align-items: center;
   justify-content: space-around;
-  font: 8px var(--mono);
+  font: 0.8125rem var(--mono);
   color: #14251c;
   border-color: #9ad6b8;
 }
 .stack-pointer b {
-  font-size: 12px;
+  font-size: 1rem;
   font-weight: 400;
 }
 .connections {
@@ -515,10 +516,12 @@ summary:focus-visible {
   left: 0;
   top: 0;
   pointer-events: none;
-  font: 9px var(--mono);
+  font: 1rem/1.4 var(--mono);
   letter-spacing: 0.04em;
-  white-space: nowrap;
-  padding: 6px 8px;
+  max-width: 62%;
+  white-space: normal;
+  text-wrap: balance;
+  padding: 7px 10px;
   background: #0b0f11ec;
   border-left: 2px solid #91c7aa;
   color: #b6d2c2;
@@ -532,10 +535,10 @@ summary:focus-visible {
   color: #ff9c8a;
 }
 .buffer-label {
-  margin-top: -31px;
+  margin-top: 0;
 }
 .target-label {
-  margin-top: 16px;
+  margin-top: 0;
 }
 .code-target {
   position: absolute;
@@ -550,12 +553,12 @@ summary:focus-visible {
   max-width: 60%;
 }
 .code-target span {
-  font: 8px var(--mono);
+  font: 0.75rem var(--mono);
   letter-spacing: 0.08em;
   color: #9eaea5;
 }
 .code-target strong {
-  font: 12px var(--mono);
+  font: 1.125rem/1.4 var(--mono);
   color: #c5d9cd;
 }
 .code-target.danger {
@@ -572,16 +575,16 @@ summary:focus-visible {
 }
 .shadow-strip {
   position: absolute;
-  left: 24%;
-  bottom: 3%;
+  left: 20%;
+  bottom: 10%;
   display: none;
   align-items: center;
   gap: 6px;
-  font: 8px var(--mono);
+  font: 0.8125rem var(--mono);
   color: #9aafa4;
 }
 .shadow-strip b {
-  font-size: 10px;
+  font-size: 1rem;
   font-weight: 400;
   color: #a5e6c1;
   padding: 5px 7px;
@@ -601,8 +604,9 @@ summary:focus-visible {
 .host-region {
   position: absolute;
   left: 20%;
-  top: 18%;
+  top: 10%;
   padding: 15px 17px;
+  max-width: 80%;
   border: 1px dashed #8fba9d;
   display: none;
   flex-direction: column;
@@ -610,11 +614,11 @@ summary:focus-visible {
   background: #111b16;
 }
 .host-region span {
-  font: 8px var(--mono);
+  font: 0.8125rem/1.5 var(--mono);
   color: #a9c2b2;
 }
 .host-region strong {
-  font: 11px var(--mono);
+  font: 1rem/1.5 var(--mono);
   font-weight: 400;
   color: #c5e4cf;
 }
@@ -627,8 +631,8 @@ summary:focus-visible {
 .scene-verdict {
   position: absolute;
   left: 0;
-  bottom: 4%;
-  font: 9px var(--mono);
+  bottom: 1%;
+  font: 0.9375rem var(--mono);
   letter-spacing: 0.06em;
   color: #b2bebb;
   display: flex;
@@ -636,7 +640,7 @@ summary:focus-visible {
   align-items: center;
 }
 #verdict-mark {
-  font-size: 12px;
+  font-size: 1.125rem;
 }
 .scene-verdict.danger {
   color: #ff927e;
@@ -658,21 +662,21 @@ summary:focus-visible {
   gap: 20px;
 }
 .scene-caption h2 {
-  font-size: 18px;
+  font-size: clamp(1.5rem, 1.8vw, 1.875rem);
   line-height: 1.3;
   letter-spacing: -0.02em;
   font-weight: 400;
   margin: 0;
-  max-width: 410px;
+  max-width: 560px;
 }
 .scene-caption p {
-  font: 11px/1.7 var(--mono);
+  font: 1rem/1.6 var(--mono);
   color: #a0acaa;
   margin: 12px 0 0;
-  max-width: 510px;
+  max-width: 620px;
 }
 .caption-heading > span {
-  font: 9px var(--mono);
+  font: 0.75rem var(--mono);
   color: #98a7a1;
   white-space: nowrap;
 }
@@ -687,7 +691,7 @@ summary:focus-visible {
 .legend {
   display: flex;
   gap: 16px;
-  font: 9px var(--mono);
+  font: 0.8125rem var(--mono);
   color: #a4b0ab;
 }
 .legend > span {
@@ -755,7 +759,7 @@ summary:focus-visible {
   background: #d8e4db;
 }
 .model-note {
-  font: 8px/1.6 var(--mono);
+  font: 0.75rem/1.6 var(--mono);
   color: #97a49e;
   letter-spacing: 0.02em;
   margin: 7px 0 0;
@@ -849,10 +853,24 @@ body.motion-paused .cursor {
   animation: none;
   display: none;
 }
+
+h1,
+h2 {
+  text-wrap: balance;
+}
+.chapter-description,
+.scene-caption p {
+  text-wrap: pretty;
+}
+.terminal,
+.chapter-measure,
+#scene-count {
+  font-variant-numeric: tabular-nums;
+}
 @media (min-width: 1600px) {
   .page-intro,
   .story-grid {
-    max-width: 1680px;
+    max-width: 1840px;
     margin-inline: auto;
   }
   .site-header {
@@ -862,15 +880,15 @@ body.motion-paused .cursor {
     right: max(4vw, calc((100vw - 1540px) / 2));
   }
   .narrative {
-    padding-right: 70px;
+    padding-right: 40px;
   }
   .memory-stage {
-    padding-left: 60px;
+    padding-left: 40px;
   }
 }
 @media (max-width: 1050px) and (min-width: 761px) {
   .story-grid {
-    grid-template-columns: 46% 54%;
+    grid-template-columns: 48% 52%;
     padding-inline: 4vw;
   }
   .narrative {
@@ -888,34 +906,34 @@ body.motion-paused .cursor {
   }
   .terminal-body {
     padding: 24px 15px;
-    font-size: 11px;
+    font-size: 1.125rem;
   }
   .chapter h2 {
     font-size: 28px;
   }
   .scene-caption h2 {
-    font-size: 16px;
+    font-size: 1.5rem;
   }
   .scene-caption p {
-    font-size: 10px;
+    font-size: 1rem;
   }
   .stack {
-    width: 48px;
+    width: 80px;
   }
   .stack-pointer span {
-    font-size: 6px;
+    font-size: 0.6875rem;
   }
   .legend {
     gap: 10px;
   }
   .code-target strong {
-    font-size: 10px;
+    font-size: 1rem;
   }
 }
 @media (max-width: 760px) {
   :root {
     --header: 68px;
-    --mobile-stage: 350px;
+    --mobile-stage: 420px;
   }
   html {
     scroll-padding-top: 0;
@@ -958,7 +976,7 @@ body.motion-paused .cursor {
   .page-intro p {
     padding: 0;
     margin-top: 14px;
-    font-size: 10px;
+    font-size: 0.75rem;
     line-height: 1.6;
   }
   .story-grid {
@@ -976,25 +994,24 @@ body.motion-paused .cursor {
     box-shadow: 0 12px 20px #0b0f11e8;
   }
   .stage-top {
-    font-size: 8px;
+    font-size: 0.75rem;
     padding-bottom: 3px;
   }
   .diagram {
     min-height: 0;
-    height: 210px;
+    height: 230px;
     flex: none;
     background-size: 18px 18px;
   }
   .address-label {
-    top: 6px;
-    font-size: 7px;
+    display: none;
   }
   .stack {
-    width: 41px;
+    width: 82px;
     top: 29%;
   }
   .stack > .structure-name {
-    font-size: 8px;
+    font-size: 0.75rem;
     margin-bottom: 8px;
   }
   .stack i {
@@ -1002,40 +1019,40 @@ body.motion-paused .cursor {
     margin-bottom: 2px;
   }
   .stack .stack-pointer {
-    height: 16px;
-    font-size: 6px;
+    height: 23px;
+    font-size: 0.6875rem;
   }
   .stack-pointer b {
-    font-size: 8px;
+    font-size: 0.75rem;
   }
   .heap-name {
-    font-size: 8px;
+    font-size: 0.75rem;
     bottom: 13%;
   }
   .floating-label {
-    font-size: 7px;
+    font-size: 0.75rem;
     padding: 4px 5px;
   }
   .buffer-label {
-    margin-top: -24px;
+    margin-top: 0;
   }
   .target-label {
-    margin-top: 12px;
+    margin-top: 0;
   }
   .code-target {
-    top: 17%;
+    top: 0;
     right: 2%;
     gap: 5px;
     padding-top: 5px;
   }
   .code-target span {
-    font-size: 7px;
+    font-size: 0.75rem;
   }
   .code-target strong {
-    font-size: 9px;
+    font-size: 0.875rem;
   }
   .scene-verdict {
-    font-size: 7px;
+    font-size: 0.75rem;
     bottom: 2%;
   }
   .scene-caption {
@@ -1043,22 +1060,22 @@ body.motion-paused .cursor {
     min-height: 0;
   }
   .scene-caption h2 {
-    font-size: 13px;
+    font-size: 1.125rem;
     max-width: 280px;
   }
   .scene-caption p {
     display: none;
   }
   .caption-heading > span {
-    font-size: 8px;
+    font-size: 0.75rem;
   }
   .stage-bottom {
     padding: 3px 0 0;
     border: 0;
   }
   .legend {
-    font-size: 8px;
-    gap: 14px;
+    font-size: 0.75rem;
+    gap: 10px;
   }
   .scene-controls button {
     width: 32px;
@@ -1073,7 +1090,7 @@ body.motion-paused .cursor {
     padding-top: 9px;
   }
   .model-note {
-    font-size: 7px;
+    font-size: 0.625rem;
     margin-top: 0;
   }
   .narrative {
@@ -1099,34 +1116,35 @@ body.motion-paused .cursor {
     max-width: 340px;
   }
   .chapter-kicker {
-    font-size: 9px;
+    font-size: 0.75rem;
     margin-bottom: 12px;
   }
   .chapter-description {
-    font-size: 13px;
+    font-size: 1.125rem;
     line-height: 1.65;
     margin: 19px 0 17px;
   }
   .terminal-bar {
-    height: 38px;
+    height: 48px;
     padding-inline: 14px;
-    font-size: 9px;
+    font-size: 0.75rem;
     gap: 14px;
   }
   .terminal-session {
-    font-size: 8px;
+    font-size: 0.75rem;
+    margin-left: auto;
   }
-  .terminal-window i:first-child {
-    width: 24px;
+  .terminal-window {
+    display: none;
   }
   .terminal-body {
     padding: 20px 15px;
-    font-size: 10px;
-    line-height: 1.9;
-    min-height: 199px;
+    font-size: 1rem;
+    line-height: 1.75;
+    min-height: 280px;
   }
   .terminal-prompt {
-    font-size: 9px;
+    font-size: 0.75rem;
     margin-bottom: 8px;
   }
   .terminal-command {
@@ -1134,52 +1152,56 @@ body.motion-paused .cursor {
   }
   .terminal-footer {
     padding: 8px 14px;
-    font-size: 8px;
+    font-size: 0.75rem;
   }
   .chapter-measure {
-    font-size: 9px;
+    font-size: 0.75rem;
     margin-top: 15px;
   }
   .chapter-measure strong {
-    font-size: 10px;
+    font-size: 0.75rem;
   }
   .chapter details {
-    font-size: 10px;
+    font-size: 0.75rem;
   }
   .chapter summary {
-    font-size: 9px;
+    font-size: 0.75rem;
   }
   .chapter-part {
     margin-bottom: 25px;
-    font-size: 9px;
+    font-size: 0.75rem;
   }
   .scroll-cue {
-    font-size: 9px;
+    font-size: 0.75rem;
     margin-top: 25px;
   }
   .shadow-strip {
-    left: 20%;
-    bottom: 14%;
+    left: auto;
+    right: 0;
+    bottom: 12%;
     gap: 4px;
   }
   .shadow-strip span,
   .shadow-strip em {
-    font-size: 6px;
+    font-size: 0.75rem;
   }
   .shadow-strip b {
-    font-size: 8px;
+    font-size: 0.75rem;
     padding: 3px 5px;
   }
   .host-region {
-    padding: 10px;
-    top: 17%;
-    left: 19%;
+    padding: 6px;
+    top: 0;
+    left: 28%;
+    gap: 4px;
   }
   .host-region span {
-    font-size: 6px;
+    font-size: 0.6875rem;
+    line-height: 1.3;
   }
   .host-region strong {
-    font-size: 9px;
+    font-size: 0.75rem;
+    line-height: 1.3;
   }
   .flat-memory {
     gap: 3px;
@@ -1195,24 +1217,21 @@ body.motion-paused .cursor {
     font-size: 39px;
   }
   footer p {
-    font-size: 9px;
+    font-size: 0.75rem;
     order: 3;
     width: 100%;
     margin: 0;
   }
   footer > a:last-child {
-    font-size: 9px;
+    font-size: 0.75rem;
   }
 }
 @media (max-width: 760px) and (max-height: 740px) {
   :root {
-    --mobile-stage: 290px;
-  }
-  .diagram {
-    height: 156px;
+    --mobile-stage: 370px;
   }
   .scene-caption h2 {
-    font-size: 12px;
+    font-size: 1.125rem;
   }
   .model-note {
     display: none;
@@ -1221,7 +1240,7 @@ body.motion-paused .cursor {
     top: 23%;
   }
   .code-target {
-    top: 12%;
+    top: 0;
   }
   .chapter h2 {
     font-size: 25px;
@@ -1260,7 +1279,7 @@ body.motion-paused .cursor {
     font-size: 26px;
   }
   .shadow-strip {
-    bottom: 8%;
+    bottom: 12%;
   }
   .diagram[data-scene="tags"] .heap-name {
     display: none;
@@ -1282,6 +1301,26 @@ body.motion-paused .cursor {
   .diagram {
     min-height: 140px;
   }
+  .address-label {
+    display: none;
+  }
+  .code-target {
+    top: 0;
+  }
+  .stack {
+    top: 29%;
+  }
+  .host-region {
+    top: 0;
+    padding: 8px;
+    gap: 4px;
+  }
+  .host-region span {
+    font-size: 0.75rem;
+  }
+  .host-region strong {
+    font-size: 0.875rem;
+  }
   .stage-top {
     padding-bottom: 5px;
   }
@@ -1290,7 +1329,7 @@ body.motion-paused .cursor {
     padding-top: 7px;
   }
   .scene-caption h2 {
-    font-size: 14px;
+    font-size: 1.375rem;
   }
   .scene-caption p {
     display: none;

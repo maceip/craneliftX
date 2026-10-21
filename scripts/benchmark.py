@@ -489,7 +489,11 @@ def main() -> int:
 
     args.json.write_text(json.dumps(results, indent=2) + "\n")
     print(f"Wrote {args.json}")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "generate_graphic.py")], check=False)
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "generate_graphic.py"),
+         "--json", str(args.json), "--svg", str(args.svg)],
+        check=True,
+    )
     return 0
 
 
